@@ -1,0 +1,37 @@
+@inject PTScheduler.Web.Services.AttentionService Attention
+@inject AuthenticationStateProvider AuthState
+
+@* „Wymaga uwagi”: cztery listy jako zakładki jednej strony — mogą odejść, zaległości, wolne okienka, kończące się pakiety.
+   Liczba przy zakładce mówi, gdzie coś czeka. *@
+<nav class="att-tabs" aria-label="Wymaga uwagi">
+    @foreach (var t in Tabs())
+    {
+        <a class="@(t.Key == Current ? "on" : "")" href="@t.Href" aria-current="@(t.Key == Current ? "page" : null)">
+            <i class="bi @t.Icon"></i><span>@t.Label</span>@if (t.Count > 0) { <b>@t.Count</b> }
+        </a>
+    }
+</nav>
+
+@code {
+    [Parameter, EditorRequired] public string Current { get; set; } = "";
+
+    private PTScheduler.Web.Services.AttentionService.Counts? _counts;
+    private bool _owner;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        var isAdmin = user.IsInRole(PTScheduler.Domain.Constants.Roles.Admin);
+        _owner = isAdmin || user.IsInRole(PTScheduler.Domain.Constants.Roles.Trainer);
+        try { _counts = await Attention.CountsAsync(userId, isAdmin, _owner); } catch { _counts = null; }
+    }
+
+    private IEnumerable<(string Key, string Href, string Icon, string Label, int Count)> Tabs()
+    {
+        if (_owner) yield return ("risks", "/trainer/retencja", "bi-heart-pulse", "Mogą odejść", _counts?.Risks ?? 0);
+        yield return ("debts", "/zaleglosci", "bi-wallet2", "Zaległości", _counts?.Debts ?? 0);
+        if (_owner) yield return ("slots", "/okienka", "bi-calendar2-plus", "Wolne okienka", _counts?.Slots ?? 0);
+        if (_owner) yield return ("packages", "/pakiety-koncza", "bi-box-seam", "Kończą się pakiety", _counts?.Packages ?? 0);
+    }
+}

@@ -1,0 +1,653 @@
+@page "/panel/plans"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject PTScheduler.Portal.Services.TenantService TenantService
+@inject PTScheduler.Portal.Services.StripeService StripeSvc
+@inject SiteSettingsService Settings
+@inject AuthenticationStateProvider AuthState
+@rendermode InteractiveServer
+
+@* Plany jako macierz: wiersze to funkcje z katalogu (PlanFeatureCatalog), kolumny to plany. Zmiany zbierają się
+   lokalnie i po podsumowaniu idą do bazy i do studiów. Zmiana ceny nie dotyczy obecnych klientów — przed zapisem
+   blokujemy im dotychczasową cenę. *@
+
+<PageTitle>Plany cenowe — Hantly Portal</PageTitle>
+
+<PanelHeader BackHref="/panel/setup" BackLabel="Konfiguracja platformy" Title="Plany cenowe" Icon="bi-tags" Subtitle="Co dostaje każdy plan. Kliknij komórkę, żeby włączyć funkcję albo zmienić limit — zmiany trafiają do studiów po zapisaniu.">
+    <Actions>
+        <button class="btn btn-outline-primary btn-sm" @onclick="NewPlan"><i class="bi bi-plus-lg me-1"></i>Nowy plan</button>
+    </Actions>
+</PanelHeader>
+
+@if (_message is not null)
+{
+    <div class="alert @(_msgError ? "alert-danger" : "alert-success") alert-dismissible py-2 small">
+        @_message
+        <button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null"></button>
+    </div>
+}
+
+<div class="pm-notes">
+    <span><i class="bi bi-lock"></i>Zmiana ceny dotyczy tylko nowych klientów — obecni zostają przy swojej cenie.</span>
+    <span><i class="bi bi-shield-check"></i>Studia sprzed zmiany pakietów zachowują to, co miały (nie dostaną mniej).</span>
+    <label class="pm-trial">
+        <i class="bi bi-gift"></i>Nowe konta na darmowym planie na start dostają
+        <select class="form-select form-select-sm" value="@_trialPlanId" @onchange="SetTrialPlan">
+            <option value="">bez okresu próbnego</option>
+            @foreach (var tp in _plans.Where(x => x.MonthlyPrice > 0).OrderBy(x => x.SortOrder))
+            {
+                <option value="@tp.Id">@tp.Name na @tp.TrialDays dni</option>
+            }
+        </select>
+    </label>
+</div>
+
+@if (_details is not null)
+{
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+            <h6 class="fw-bold mb-3"><i class="bi bi-sliders me-2"></i>@(_detailsNew ? "Nowy plan" : $"Szczegóły planu {_details.Name}")</h6>
+            <div class="row g-3">
+                <div class="col-md-2">
+                    <label class="form-label small fw-semibold">ID (slug)</label>
+                    <input class="form-control form-control-sm font-monospace" @bind="_details.Id" disabled="@(!_detailsNew)" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">Nazwa</label>
+                    <input class="form-control form-control-sm" @bind="_details.Name" />
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label small fw-semibold">Opis (pod nazwą w cenniku)</label>
+                    <input class="form-control form-control-sm" @bind="_details.Description" />
+                </div>
+                <div class="col-md-1">
+                    <label class="form-label small fw-semibold">Kolejność</label>
+                    <input type="number" class="form-control form-control-sm" @bind="_details.SortOrder" />
+                </div>
+                <div class="col-md-1">
+                    <label class="form-label small fw-semibold">Dni próbne</label>
+                    <input type="number" min="0" max="90" class="form-control form-control-sm" @bind="_details.TrialDays" />
+                </div>
+                @if (_detailsNew)
+                {
+                    <div class="col-md-4">
+                        <label class="form-label small fw-semibold">Funkcje skopiuj z planu</label>
+                        <select class="form-select form-select-sm" @bind="_copyFrom">
+                            @foreach (var cp in _plans.OrderBy(x => x.SortOrder))
+                            {
+                                <option value="@cp.Id">@cp.Name</option>
+                            }
+                        </select>
+                    </div>
+                }
+                else
+                {
+                    <div class="col-md-4">
+                        <label class="form-label small fw-semibold">Stripe — cena miesięczna / roczna</label>
+                        <div class="input-group input-group-sm">
+                            <input class="form-control font-monospace" @bind="_details.StripeMonthlyPriceId" placeholder="price_…" />
+                            <input class="form-control font-monospace" @bind="_details.StripeYearlyPriceId" placeholder="price_…" />
+                        </div>
+                        <div class="form-text">Puste — Portal założy ceny w Stripe sam przy zapisie.</div>
+                    </div>
+                }
+            </div>
+            <div class="mt-3 d-flex gap-2 flex-wrap">
+                <button class="btn btn-primary btn-sm" @onclick="SaveDetailsAsync"><i class="bi bi-check-lg me-1"></i>@(_detailsNew ? "Dodaj plan" : "Zapisz szczegóły")</button>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="() => _details = null">Anuluj</button>
+                @if (!_detailsNew && _tenantCount.GetValueOrDefault(_details.Id) == 0)
+                {
+                    <button class="btn btn-outline-danger btn-sm ms-auto" @onclick="() => DeleteAsync(_details.Id)"><i class="bi bi-trash me-1"></i>Usuń plan</button>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+<div class="pm-layout">
+    <div class="pm-matrix card border-0 shadow-sm">
+        <div class="pm-scroll">
+            <table class="pm-table">
+                <thead>
+                    <tr>
+                        <th class="pm-feat-col">Funkcja</th>
+                        @foreach (var p in _plans)
+                        {
+                            <th class="pm-plan-col @(p.IsFeatured ? "pm-featured" : "") @(p.IsActive ? "" : "pm-inactive")">
+                                <div class="pm-plan-name">
+                                    @p.Name
+                                    @if (p.IsFeatured) { <span class="pm-star" title="Wyróżniony w cenniku">★</span> }
+                                    <button class="btn btn-link btn-sm p-0 ms-1" title="Szczegóły planu" @onclick="() => EditDetails(p)"><i class="bi bi-sliders"></i></button>
+                                </div>
+                                <div class="pm-price">
+                                    <input type="number" min="0" class="form-control form-control-sm" value="@Money(p.MonthlyPrice)" @onchange='e => SetPrice(p, e, false)' aria-label="@($"Cena miesięczna {p.Name}")" />
+                                    <span>zł/mies.</span>
+                                </div>
+                                <div class="pm-price">
+                                    <input type="number" min="0" class="form-control form-control-sm" value="@Money(p.YearlyPrice)" @onchange='e => SetPrice(p, e, true)' aria-label="@($"Cena roczna {p.Name}")" placeholder="—" />
+                                    <span>zł/rok</span>
+                                </div>
+                                <div class="pm-plan-meta">
+                                    <label><input type="checkbox" checked="@p.IsActive" @onchange='e => { p.IsActive = e.Value is true; Recompute(); }' /> w cenniku</label>
+                                    <label><input type="checkbox" checked="@p.IsFeatured" @onchange='e => { p.IsFeatured = e.Value is true; Recompute(); }' /> wyróżniony</label>
+                                </div>
+                                <div class="pm-plan-count">@StudioCount(p.Id)</div>
+                            </th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var group in PlanFeatureCatalog.Groups)
+                    {
+                        <tr class="pm-group"><td colspan="@(_plans.Count + 1)">@group</td></tr>
+                        @foreach (var f in PlanFeatureCatalog.All.Where(x => x.Group == group))
+                        {
+                            <tr class="@(IsDirtyRow(f) ? "pm-dirty" : "")">
+                                <td class="pm-feat-col">
+                                    <div class="pm-feat-name">@f.Name</div>
+                                    <div class="pm-feat-benefit">@f.Benefit</div>
+                                    @if (f.Kind == PlanFeatureKind.Flag)
+                                    {
+                                        <button type="button" class="pm-vis @(_hidden.Contains(f.Key) ? "hide" : "")" @onclick="() => ToggleHidden(f.Key)"
+                                                title="Co widzi trener w planie bez tej funkcji">
+                                            <i class="bi @(_hidden.Contains(f.Key) ? "bi-eye-slash" : "bi-stars")"></i>@(_hidden.Contains(f.Key) ? "bez planu: ukryte" : "bez planu: zajawka")
+                                        </button>
+                                    }
+                                </td>
+                                @foreach (var p in _plans)
+                                {
+                                    <td class="pm-cell @(Changed(p, f) ? "pm-changed" : "")">
+                                        @Cell(p, f)
+                                    </td>
+                                }
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <aside class="pm-side">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <span class="small fw-semibold text-muted">Podgląd w cenniku</span>
+                    <select class="form-select form-select-sm w-auto" @bind="_previewId">
+                        @foreach (var pp in _plans)
+                        {
+                            <option value="@pp.Id">@pp.Name</option>
+                        }
+                    </select>
+                </div>
+                @if (_plans.FirstOrDefault(x => x.Id == _previewId) is { } prev)
+                {
+                    var lower = _plans.Where(x => x.IsActive && x.SortOrder < prev.SortOrder && x.MonthlyPrice > 0).OrderByDescending(x => x.SortOrder).FirstOrDefault();
+                    var (lead, points) = PTScheduler.Portal.Components.Home.HomeShared.Highlights(prev, lower, 6, _garmin, _sms);
+                    <div class="pm-card @(prev.IsFeatured ? "featured" : "")">
+                        @if (prev.IsFeatured) { <span class="pm-card-badge">Najczęściej wybierany</span> }
+                        <div class="pm-card-name">@prev.Name</div>
+                        <div class="pm-card-desc">@prev.Description</div>
+                        <div class="pm-card-price">@(prev.MonthlyPrice <= 0 ? "0 zł" : $"{prev.MonthlyPrice:0} zł")<small>@(prev.MonthlyPrice > 0 ? " / mies." : "")</small></div>
+                        @if (prev.YearlyPrice is > 0 && prev.MonthlyPrice > 0)
+                        {
+                            <div class="pm-card-year">albo @prev.YearlyPrice.Value.ToString("0") zł rocznie (@Math.Round(12 - prev.YearlyPrice.Value / prev.MonthlyPrice, 1) mies. gratis)</div>
+                        }
+                        @if (lead is not null) { <div class="pm-card-lead">@lead</div> }
+                        <ul>
+                            @foreach (var pt in points)
+                            {
+                                <li><i class="bi bi-check2"></i>@pt</li>
+                            }
+                        </ul>
+                    </div>
+                }
+            </div>
+        </div>
+    </aside>
+</div>
+
+<details class="pm-history card border-0 shadow-sm">
+    <summary><i class="bi bi-clock-history me-1"></i>Historia zmian <span class="text-muted">(@_history.Count)</span></summary>
+    @if (_history.Count == 0)
+    {
+        <p class="text-muted small mb-0 px-3 pb-3">Jeszcze nic nie zmieniano w tym panelu.</p>
+    }
+    else
+    {
+        <ol class="pm-history-list">
+            @foreach (var h in _history)
+            {
+                <li>
+                    <div class="pm-history-head">
+                        <b>@(h.PlanId is null ? "Ustawienia wspólne" : _plans.FirstOrDefault(x => x.Id == h.PlanId)?.Name ?? h.PlanId)</b>
+                        <span>@h.ChangedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")@(h.ChangedBy is null ? "" : $" · {h.ChangedBy}")</span>
+                        @if (h.BeforeJson is not null && _plans.Any(x => x.Id == h.PlanId))
+                        {
+                            <button type="button" class="btn btn-link btn-sm p-0 ms-auto" title="Wczytuje plan sprzed tej zmiany do macierzy — zapisujesz dopiero po przejrzeniu"
+                                    @onclick="() => LoadVersion(h)">Wczytaj wersję sprzed zmiany</button>
+                        }
+                    </div>
+                    <ul>
+                        @foreach (var line in h.Summary.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                        {
+                            <li>@line</li>
+                        }
+                    </ul>
+                </li>
+            }
+        </ol>
+    }
+</details>
+
+@if (_changes.Count > 0 || HiddenChanged)
+{
+    <div class="pm-savebar">
+        <span><b>@(_changes.Count + (HiddenChanged ? 1 : 0))</b> @Plural(_changes.Count + (HiddenChanged ? 1 : 0)) do zapisania</span>
+        <button class="btn btn-outline-secondary btn-sm" @onclick="DiscardAsync">Odrzuć</button>
+        <button class="btn btn-primary btn-sm" @onclick="() => _confirm = true"><i class="bi bi-send me-1"></i>Zapisz i wyślij do studiów</button>
+    </div>
+}
+
+@if (_confirm)
+{
+    <div class="pm-modal-backdrop" @onclick="() => _confirm = false"></div>
+    <div class="pm-modal" role="dialog" aria-label="Podsumowanie zmian">
+        <h6 class="fw-bold mb-2">Podsumowanie zmian</h6>
+        @foreach (var byPlan in _changes.GroupBy(c => c.PlanId))
+        {
+            var plan = _plans.First(x => x.Id == byPlan.Key);
+            var studios = _tenantCount.GetValueOrDefault(plan.Id) + _trialCount.GetValueOrDefault(plan.Id);
+            <div class="pm-sum">
+                <div class="pm-sum-head">@plan.Name <span>· dotyczy @studios @(studios == 1 ? "studia" : "studiów")</span></div>
+                <ul>
+                    @foreach (var c in byPlan)
+                    {
+                        <li class="@(c.Loss ? "loss" : "")">@c.Text</li>
+                    }
+                </ul>
+                @if (byPlan.Any(c => c.Loss) && studios > 0)
+                {
+                    <div class="pm-warn"><i class="bi bi-exclamation-triangle"></i>Studia na tym planie stracą te funkcje — poza tymi sprzed zmiany pakietów, które zachowują swoje.</div>
+                }
+                @if (byPlan.Any(c => c.Price) && _tenantCount.GetValueOrDefault(plan.Id) > 0)
+                {
+                    <div class="pm-ok"><i class="bi bi-lock"></i>Obecni klienci tego planu zostają przy dotychczasowej cenie.</div>
+                }
+            </div>
+        }
+        @if (HiddenChanged)
+        {
+            <div class="pm-sum"><div class="pm-sum-head">Widoczność funkcji bez planu</div><div class="small text-muted">Ukryte: @(string.Join(", ", _hidden.Select(k => PlanFeatureCatalog.Find(k)?.Name ?? k).DefaultIfEmpty("nic")))</div></div>
+        }
+        <div class="d-flex gap-2 justify-content-end mt-3">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="() => _confirm = false">Wróć</button>
+            <button class="btn btn-primary btn-sm" disabled="@_saving" @onclick="SaveAsync">
+                @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }Zapisz i wyślij
+            </button>
+        </div>
+    </div>
+}
+
+@code {
+    private List<Plan> _plans = [];
+    private Dictionary<string, Plan> _original = [];
+    private Dictionary<string, int> _tenantCount = [];
+    private Dictionary<string, int> _trialCount = [];
+    private HashSet<string> _hidden = [];
+    private HashSet<string> _hiddenOriginal = [];
+    private List<Change> _changes = [];
+    private string _trialPlanId = "";
+    private string _previewId = "";
+    private bool _garmin, _sms, _confirm, _saving;
+    private string? _message;
+    private bool _msgError;
+    private Plan? _details;
+    private bool _detailsNew;
+    private string _copyFrom = "";
+
+    private sealed record Change(string PlanId, string Text, bool Loss, bool Price);
+    private List<PlanChangeLog> _history = [];
+
+    /// <summary>Pola planu zapisywane w historii — z nich wczytujemy wersję z powrotem do macierzy.</summary>
+    private static string Snapshot(Plan p)
+    {
+        var d = PlanFeatureCatalog.All.ToDictionary(f => f.Key, f => PlanFeatureCatalog.Get(p, f.Key));
+        d["MonthlyPrice"] = p.MonthlyPrice;
+        d["YearlyPrice"] = p.YearlyPrice;
+        d["IsActive"] = p.IsActive;
+        d["IsFeatured"] = p.IsFeatured;
+        return System.Text.Json.JsonSerializer.Serialize(d);
+    }
+
+    private void LoadVersion(PlanChangeLog h)
+    {
+        if (_plans.FirstOrDefault(x => x.Id == h.PlanId) is not { } plan || h.BeforeJson is null) return;
+        using var doc = System.Text.Json.JsonDocument.Parse(h.BeforeJson);
+        foreach (var prop in doc.RootElement.EnumerateObject())
+        {
+            var v = prop.Value;
+            switch (prop.Name)
+            {
+                case "MonthlyPrice" when v.ValueKind == System.Text.Json.JsonValueKind.Number: plan.MonthlyPrice = v.GetDecimal(); break;
+                case "YearlyPrice": plan.YearlyPrice = v.ValueKind == System.Text.Json.JsonValueKind.Number ? v.GetDecimal() : null; break;
+                case "IsActive": plan.IsActive = v.ValueKind == System.Text.Json.JsonValueKind.True; break;
+                case "IsFeatured": plan.IsFeatured = v.ValueKind == System.Text.Json.JsonValueKind.True; break;
+                default:
+                    if (PlanFeatureCatalog.Find(prop.Name) is not { } f) break;
+                    object? value = f.Kind switch
+                    {
+                        PlanFeatureKind.Flag => v.ValueKind == System.Text.Json.JsonValueKind.True,
+                        PlanFeatureKind.Limit => v.TryGetInt32(out var n) ? n : 0,
+                        _ => v.GetString()
+                    };
+                    PlanFeatureCatalog.Set(plan, f.Key, value);
+                    break;
+            }
+        }
+        Recompute();
+        _message = $"Wczytano plan {plan.Name} sprzed zmiany z {h.ChangedAt.ToLocalTime():dd.MM HH:mm}. Przejrzyj zaznaczone komórki i zapisz albo odrzuć.";
+        _msgError = false;
+    }
+
+    private async Task<string> WhoAsync() => (await AuthState.GetAuthenticationStateAsync()).User.Identity?.Name ?? "admin";
+
+    private async Task LogAsync(string? planId, IEnumerable<string> lines, Plan? before = null)
+    {
+        await using var db = DbFactory.CreateDbContext();
+        db.PlanChangeLogs.Add(new PlanChangeLog { PlanId = planId, ChangedBy = await WhoAsync(), Summary = string.Join("\n", lines), BeforeJson = before is null ? null : Snapshot(before) });
+        await db.SaveChangesAsync();
+    }
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        await using var db = DbFactory.CreateDbContext();
+        _plans = await db.Plans.AsNoTracking().OrderBy(p => p.SortOrder).ToListAsync();
+        _original = _plans.ToDictionary(p => p.Id, PlanFeatureCatalog.Clone);
+        _tenantCount = await db.Tenants.Where(t => t.Status != TenantStatus.Destroyed).GroupBy(t => t.PlanId)
+            .Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count);
+        var now = DateTime.UtcNow;
+        _trialCount = await db.Tenants.Where(t => t.TrialPlanId != null && t.TrialPlanEndsAt > now && t.Status != TenantStatus.Destroyed)
+            .GroupBy(t => t.TrialPlanId!).Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count);
+        _history = await db.PlanChangeLogs.AsNoTracking().OrderByDescending(h => h.ChangedAt).Take(40).ToListAsync();
+        _hidden = (await TenantService.HiddenFeaturesAsync()).ToHashSet();
+        _hiddenOriginal = [.. _hidden];
+        _trialPlanId = await Settings.GetAsync(SiteSettingsService.Keys.TrialPlanId);
+        _garmin = await Settings.GetAsync(SiteSettingsService.Keys.GarminEnabled) == "true";
+        _sms = await Settings.PlatformSmsOnAsync();
+        if (_plans.All(p => p.Id != _previewId)) _previewId = _plans.FirstOrDefault(p => p.IsFeatured)?.Id ?? _plans.FirstOrDefault()?.Id ?? "";
+        _changes = [];
+    }
+
+    private string StudioCount(string planId)
+    {
+        var n = _tenantCount.GetValueOrDefault(planId);
+        var trial = _trialCount.GetValueOrDefault(planId);
+        var text = n == 0 ? "brak studiów" : n == 1 ? "1 studio" : $"{n} studiów";
+        return trial > 0 ? $"{text} + {trial} w okresie próbnym" : text;
+    }
+
+    private RenderFragment Cell(Plan p, PlanFeature f) => f.Kind switch
+    {
+        PlanFeatureKind.Flag => @<input type="checkbox" class="form-check-input" checked="@(PlanFeatureCatalog.Get(p, f.Key) is true)"
+                                        aria-label="@($"{f.Name} w planie {p.Name}")" @onchange='e => Set(p, f, e.Value is true)' />,
+        PlanFeatureKind.Limit => @<input type="text" inputmode="numeric" class="form-control form-control-sm pm-limit"
+                                         value="@LimitText(p, f)" title="∞ = bez limitu, 0 = brak"
+                                         aria-label="@($"{f.Name} w planie {p.Name}")" @onchange='e => SetLimit(p, f, e.Value?.ToString())' />,
+        _ => @<select class="form-select form-select-sm" value="@(PlanFeatureCatalog.Get(p, f.Key) as string)" aria-label="@($"{f.Name} w planie {p.Name}")"
+                      @onchange='e => Set(p, f, e.Value?.ToString())'>
+                  @foreach (var o in f.Options ?? [])
+                  {
+                      <option value="@o">@PlanFeatureCatalog.OptionLabel(f, o)</option>
+                  }
+              </select>
+    };
+
+    private static string LimitText(Plan p, PlanFeature f) =>
+        PlanFeatureCatalog.Get(p, f.Key) is int n ? n >= PlanFeatureCatalog.Unlimited ? "∞" : n.ToString() : "0";
+
+    private void SetLimit(Plan p, PlanFeature f, string? raw)
+    {
+        var t = (raw ?? "").Trim().ToLowerInvariant();
+        int value;
+        if (t is "∞" or "bez limitu" or "inf" or "nieograniczone") value = PlanFeatureCatalog.Unlimited;
+        else if (t.Length == 0) value = 0;
+        else if (!int.TryParse(t.Replace(" ", ""), out value) || value < 0) { _message = $"{f.Name}: wpisz liczbę albo ∞."; _msgError = true; return; }
+        Set(p, f, value);
+    }
+
+    private void Set(Plan p, PlanFeature f, object? value)
+    {
+        PlanFeatureCatalog.Set(p, f.Key, value);
+        Recompute();
+    }
+
+    private void SetPrice(Plan p, ChangeEventArgs e, bool yearly)
+    {
+        var ok = decimal.TryParse(e.Value?.ToString()?.Replace(',', '.'), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var v) && v >= 0;
+        if (yearly) p.YearlyPrice = ok && v > 0 ? v : null;
+        else if (ok) p.MonthlyPrice = v;
+        Recompute();
+    }
+
+    private void ToggleHidden(string key)
+    {
+        if (!_hidden.Remove(key)) _hidden.Add(key);
+    }
+
+    private bool HiddenChanged => !_hidden.SetEquals(_hiddenOriginal);
+
+    private bool Changed(Plan p, PlanFeature f) =>
+        _original.TryGetValue(p.Id, out var o) && !Equals(PlanFeatureCatalog.Get(o, f.Key), PlanFeatureCatalog.Get(p, f.Key));
+
+    private bool IsDirtyRow(PlanFeature f) => _plans.Any(p => Changed(p, f));
+
+    private void Recompute()
+    {
+        var list = new List<Change>();
+        foreach (var p in _plans)
+        {
+            if (!_original.TryGetValue(p.Id, out var o)) continue;
+            if (o.MonthlyPrice != p.MonthlyPrice) list.Add(new(p.Id, $"Cena miesięczna: {o.MonthlyPrice:0} → {p.MonthlyPrice:0} zł", false, true));
+            if (o.YearlyPrice != p.YearlyPrice) list.Add(new(p.Id, $"Cena roczna: {o.YearlyPrice?.ToString("0") ?? "—"} → {p.YearlyPrice?.ToString("0") ?? "—"} zł", false, true));
+            if (o.IsActive != p.IsActive) list.Add(new(p.Id, p.IsActive ? "Wraca do cennika" : "Znika z cennika (obecni klienci zostają)", false, false));
+            if (o.IsFeatured != p.IsFeatured) list.Add(new(p.Id, p.IsFeatured ? "Wyróżniony w cenniku" : "Bez wyróżnienia", false, false));
+            foreach (var f in PlanFeatureCatalog.All.Where(f => Changed(p, f)))
+            {
+                var loss = f.Kind switch
+                {
+                    PlanFeatureKind.Flag => PlanFeatureCatalog.Get(p, f.Key) is false,
+                    PlanFeatureKind.Limit => (int)PlanFeatureCatalog.Get(p, f.Key)! < (int)PlanFeatureCatalog.Get(o, f.Key)!,
+                    _ => PlanFeatureCatalog.Rank(f, PlanFeatureCatalog.Get(p, f.Key) as string) < PlanFeatureCatalog.Rank(f, PlanFeatureCatalog.Get(o, f.Key) as string)
+                };
+                list.Add(new(p.Id, $"{f.Name}: {PlanFeatureCatalog.Describe(o, f)} → {PlanFeatureCatalog.Describe(p, f)}", loss, false));
+            }
+        }
+        _changes = list;
+    }
+
+    private async Task DiscardAsync()
+    {
+        await LoadAsync();
+        _message = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        foreach (var p in _plans.Where(p => p.MonthlyPrice > 0 && p.YearlyPrice is > 0 && p.YearlyPrice >= p.MonthlyPrice * 12))
+        {
+            _message = $"{p.Name}: cena roczna musi być niższa niż 12 × miesięczna — inaczej nikt jej nie wybierze.";
+            _msgError = true; _confirm = false; return;
+        }
+        _saving = true;
+        try
+        {
+            var changedPlans = _changes.Select(c => c.PlanId).Distinct().ToList();
+            await using (var db = DbFactory.CreateDbContext())
+            {
+                foreach (var id in changedPlans)
+                {
+                    var edited = _plans.First(p => p.Id == id);
+                    var old = _original[id];
+                    var entity = await db.Plans.FirstAsync(p => p.Id == id);
+                    // Zmiana ceny — obecni klienci tego planu zostają przy dotychczasowej (blokada tylko tam, gdzie jej jeszcze nie ma).
+                    if (old.MonthlyPrice != edited.MonthlyPrice || old.YearlyPrice != edited.YearlyPrice)
+                    {
+                        var unlocked = await db.Tenants.Where(t => t.PlanId == id && t.Status != TenantStatus.Destroyed && t.LockedMonthlyPrice == null).ToListAsync();
+                        foreach (var t in unlocked) PlanPricing.Lock(t, old);
+                    }
+                    var stripeMonthly = entity.StripeMonthlyPriceId;
+                    var stripeYearly = entity.StripeYearlyPriceId;
+                    db.Entry(entity).CurrentValues.SetValues(edited);
+                    entity.StripeMonthlyPriceId = stripeMonthly;
+                    entity.StripeYearlyPriceId = stripeYearly;
+                }
+                await db.SaveChangesAsync();
+            }
+            foreach (var id in changedPlans)
+                await LogAsync(id, _changes.Where(c => c.PlanId == id).Select(c => c.Text), _original[id]);
+            if (HiddenChanged)
+                await LogAsync(null, [$"Bez planu ukryte: {string.Join(", ", _hidden.Select(k => PlanFeatureCatalog.Find(k)?.Name ?? k).DefaultIfEmpty("nic"))}"]);
+            if (HiddenChanged)
+                await Settings.SetAsync(SiteSettingsService.Keys.PlanFeaturesHidden, System.Text.Json.JsonSerializer.Serialize(_hidden.OrderBy(k => k)));
+
+            int pushed = 0, total = 0;
+            if (HiddenChanged)
+                (pushed, total) = await TenantService.PushAllEntitlementsAsync();
+            else
+                foreach (var id in changedPlans)
+                {
+                    var (ok, all) = await TenantService.PushPlanToTenantsAsync(id);
+                    pushed += ok; total += all;
+                }
+
+            var msg = total == 0 ? "Zapisano." : pushed == total ? $"Zapisano i wysłano do {total} studiów." : $"Zapisano. Wysłano do {pushed}/{total} studiów — pozostałe pobiorą zmiany same (do 15 min).";
+            var error = false;
+            if (await StripeSvc.IsConfiguredAsync())
+                foreach (var id in changedPlans.Where(id => _changes.Any(c => c.PlanId == id && c.Price)))
+                {
+                    var (stripeOk, stripeError) = await StripeSvc.EnsurePricesAsync(id);
+                    if (!stripeOk) { msg += $" Stripe ({id}): {stripeError}"; error = true; }
+                }
+            await LoadAsync();
+            _message = msg; _msgError = error;
+        }
+        catch (Exception ex)
+        {
+            _message = ex.Message; _msgError = true;
+        }
+        finally
+        {
+            _saving = false; _confirm = false;
+        }
+    }
+
+    private async Task SetTrialPlan(ChangeEventArgs e)
+    {
+        _trialPlanId = e.Value?.ToString() ?? "";
+        await Settings.SetAsync(SiteSettingsService.Keys.TrialPlanId, _trialPlanId);
+        var name = _plans.FirstOrDefault(p => p.Id == _trialPlanId)?.Name;
+        await LogAsync(null, [name is null ? "Nowe konta na darmowym planie: bez okresu próbnego" : $"Nowe konta na darmowym planie: okres próbny {name}"]);
+        await using (var db = DbFactory.CreateDbContext())
+            _history = await db.PlanChangeLogs.AsNoTracking().OrderByDescending(h => h.ChangedAt).Take(40).ToListAsync();
+        _message = name is null ? "Nowe konta na darmowym planie startują bez okresu próbnego." : $"Nowe konta na darmowym planie dostaną na start plan {name}.";
+        _msgError = false;
+    }
+
+    private void NewPlan()
+    {
+        _detailsNew = true;
+        _copyFrom = _plans.FirstOrDefault(p => p.IsFeatured)?.Id ?? _plans.FirstOrDefault()?.Id ?? "";
+        _details = new Plan { Id = "", Name = "", IsActive = false, SortOrder = _plans.Count + 1, TrialDays = 14 };
+    }
+
+    private void EditDetails(Plan p)
+    {
+        _detailsNew = false;
+        _details = PlanFeatureCatalog.Clone(_original.GetValueOrDefault(p.Id) ?? p);
+    }
+
+    private async Task SaveDetailsAsync()
+    {
+        if (_details is null) return;
+        if (string.IsNullOrWhiteSpace(_details.Id) || string.IsNullOrWhiteSpace(_details.Name))
+        {
+            _message = "ID i nazwa są wymagane."; _msgError = true; return;
+        }
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            if (_detailsNew)
+            {
+                var id = _details.Id.Trim().ToLowerInvariant();
+                if (await db.Plans.AnyAsync(p => p.Id == id)) throw new InvalidOperationException($"Plan o ID '{id}' już istnieje.");
+                var source = _plans.FirstOrDefault(p => p.Id == _copyFrom);
+                var plan = source is null ? new Plan() : PlanFeatureCatalog.Clone(_original[source.Id]);
+                plan.Id = id;
+                plan.Name = _details.Name.Trim();
+                plan.Description = _details.Description;
+                plan.SortOrder = _details.SortOrder;
+                plan.TrialDays = Math.Clamp(_details.TrialDays, 0, 90);
+                plan.IsActive = false;
+                plan.IsFeatured = false;
+                plan.StripeProductId = plan.StripeMonthlyPriceId = plan.StripeYearlyPriceId = null;
+                db.Plans.Add(plan);
+                await LogAsync(plan.Id, [$"Nowy plan {plan.Name} (funkcje skopiowane z {source?.Name ?? "pustego planu"}), na razie poza cennikiem"]);
+                _message = $"Dodano plan {plan.Name} (na razie poza cennikiem) — ustaw funkcje i ceny w macierzy, potem zaznacz „w cenniku”.";
+            }
+            else
+            {
+                var entity = await db.Plans.FirstAsync(p => p.Id == _details.Id);
+                var lines = new List<string>();
+                if (entity.Name != _details.Name.Trim()) lines.Add($"Nazwa: {entity.Name} → {_details.Name.Trim()}");
+                if (entity.Description != _details.Description) lines.Add("Nowy opis w cenniku");
+                if (entity.TrialDays != Math.Clamp(_details.TrialDays, 0, 90)) lines.Add($"Dni próbne: {entity.TrialDays} → {Math.Clamp(_details.TrialDays, 0, 90)}");
+                if (entity.SortOrder != _details.SortOrder) lines.Add($"Kolejność: {entity.SortOrder} → {_details.SortOrder}");
+                if (lines.Count > 0) await LogAsync(entity.Id, lines);
+                entity.Name = _details.Name.Trim();
+                entity.Description = _details.Description;
+                entity.SortOrder = _details.SortOrder;
+                entity.TrialDays = Math.Clamp(_details.TrialDays, 0, 90);
+                entity.StripeMonthlyPriceId = string.IsNullOrWhiteSpace(_details.StripeMonthlyPriceId) ? null : _details.StripeMonthlyPriceId.Trim();
+                entity.StripeYearlyPriceId = string.IsNullOrWhiteSpace(_details.StripeYearlyPriceId) ? null : _details.StripeYearlyPriceId.Trim();
+                _message = $"Zapisano szczegóły planu {entity.Name}.";
+            }
+            await db.SaveChangesAsync();
+            _msgError = false;
+            _details = null;
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _message = ex.Message; _msgError = true;
+        }
+    }
+
+    private async Task DeleteAsync(string id)
+    {
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            if (await db.Tenants.AnyAsync(t => t.PlanId == id || t.TrialPlanId == id)) throw new InvalidOperationException("Na tym planie są studia — najpierw przenieś je na inny plan.");
+            var p = await db.Plans.FirstOrDefaultAsync(x => x.Id == id);
+            if (p is null) return;
+            db.Plans.Remove(p);
+            await db.SaveChangesAsync();
+            await LogAsync(null, [$"Usunięty plan {p.Name} ({p.Id})"], p);
+            _details = null;
+            await LoadAsync();
+            _message = "Plan usunięty."; _msgError = false;
+        }
+        catch (Exception ex)
+        {
+            _message = ex.Message; _msgError = true;
+        }
+    }
+
+    private static string Money(decimal? v) => v?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) ?? "";
+
+    private static string Plural(int n) => n == 1 ? "zmiana" : n % 10 is >= 2 and <= 4 && n % 100 is < 12 or > 14 ? "zmiany" : "zmian";
+}

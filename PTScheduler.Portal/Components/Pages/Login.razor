@@ -1,0 +1,432 @@
+@page "/login"
+@layout PublicLayout
+
+@inject TrainerAccounts Trainers
+@inject NavigationManager Nav
+
+<PageTitle>Logowanie — Hantly</PageTitle>
+
+<section class="login-page">
+    <div class="login-container">
+        <div class="login-card">
+            <div class="login-header">
+                <div class="login-logo">
+                    <img src="/brand/hantly-mark.svg" alt="" width="44" height="44" />
+                </div>
+                @if (TwoFactorStep)
+                {
+                    <h2>Kod weryfikacyjny</h2>
+                    <p>Otwórz Google Authenticator (albo inną aplikację uwierzytelniającą) i wpisz 6-cyfrowy kod dla Hantly.</p>
+                }
+                else
+                {
+                    <h2>Zaloguj się</h2>
+                    <p>Trenerzy: e-mail i hasło z kreatora aplikacji — trafisz do swojego panelu z planem, płatnościami i stanem aplikacji.</p>
+                }
+            </div>
+
+            @if (_trainerEmail is not null && Wylogowano is null)
+            {
+                <div class="login-alert login-alert-ok">
+                    <i class="bi bi-person-badge" style="font-size:18px" aria-hidden="true"></i>
+                    <span>Panel trenera: zalogowano jako <b>@_trainerEmail</b>. <a href="/moje-konto">Przejdź do panelu</a> albo <a href="/api/konto/wyloguj">wyloguj</a>. Administrator loguje się poniżej.</span>
+                </div>
+            }
+
+            @if (Link == "sent")
+            {
+                <div class="login-alert login-alert-ok">
+                    <i class="bi bi-envelope-check" style="font-size:18px" aria-hidden="true"></i>
+                    Jeśli ten adres ma u nas aplikację, właśnie wysłaliśmy na niego link do logowania. Sprawdź skrzynkę (i spam) — link działa 30 minut.
+                </div>
+            }
+            else if (Error == "link")
+            {
+                <div class="login-alert login-alert-danger">
+                    <i class="bi bi-hourglass-bottom" style="font-size:18px" aria-hidden="true"></i>
+                    Link do logowania wygasł albo został już użyty. Poproś o nowy poniżej.
+                </div>
+            }
+            else if (Wylogowano == "1")
+            {
+                <div class="login-alert login-alert-ok">
+                    <i class="bi bi-door-open" style="font-size:18px" aria-hidden="true"></i>
+                    Wylogowano. Do zobaczenia!
+                </div>
+            }
+
+            @if (Zaproszenie == "ok")
+            {
+                <div class="login-alert login-alert-ok">
+                    <i class="bi bi-check-circle" style="font-size:18px" aria-hidden="true"></i>
+                    Hasło ustawione. Zaloguj się nowym hasłem.
+                </div>
+            }
+
+            @if (TwoFactorStep)
+            {
+                <form method="post" action="/api/account/login-2fa" data-enhance="false">
+                    <input type="hidden" name="returnUrl" value="@(ReturnUrl ?? "/panel")" />
+                    <input type="hidden" name="rememberMe" value="@(Remember == "1" ? "true" : "false")" />
+                    <AntiforgeryToken />
+
+                    @if (Error == "2fa")
+                    {
+                        <div class="login-alert login-alert-danger">
+                            <i class="bi bi-exclamation-circle" style="font-size:18px" aria-hidden="true"></i>
+                            Kod się nie zgadza. Sprawdź, czy zegar w telefonie jest ustawiony automatycznie, i wpisz nowy kod.
+                        </div>
+                    }
+                    else if (Error == "locked")
+                    {
+                        <div class="login-alert login-alert-danger">
+                            <i class="bi bi-lock" style="font-size:18px" aria-hidden="true"></i>
+                            Konto zablokowane po zbyt wielu próbach. Spróbuj za 15 minut.
+                        </div>
+                    }
+
+                    <div class="login-field">
+                        <label for="code">Kod z aplikacji</label>
+                        <div class="login-input-wrap">
+                            <i class="bi bi-shield-lock login-input-icon" aria-hidden="true"></i>
+                            <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="20"
+                                   placeholder="123 456" required autofocus />
+                        </div>
+                        <div class="login-hint">Nie masz telefonu? Wpisz jeden z kodów zapasowych zapisanych przy włączaniu weryfikacji.</div>
+                    </div>
+
+                    <div class="login-remember">
+                        <input type="checkbox" name="rememberDevice" value="true" id="rememberDevice" />
+                        <label for="rememberDevice">Nie pytaj o kod na tym urządzeniu przez 30 dni</label>
+                    </div>
+
+                    <button type="submit" class="login-submit">
+                        <i class="bi bi-check2-circle" style="font-size:20px" aria-hidden="true"></i>
+                        Potwierdź
+                    </button>
+                </form>
+            }
+            else
+            {
+            <form method="post" action="/api/account/login" data-enhance="false">
+                <input type="hidden" name="returnUrl" value="/panel" />
+                <AntiforgeryToken />
+
+                @if (Error == "locked")
+                {
+                    <div class="login-alert login-alert-danger">
+                        <i class="bi bi-lock" style="font-size:18px" aria-hidden="true"></i>
+                        Konto zablokowane po zbyt wielu próbach. Spróbuj za 15 minut.
+                    </div>
+                }
+                else if (Error == "2fa-expired")
+                {
+                    <div class="login-alert login-alert-danger">
+                        <i class="bi bi-hourglass-bottom" style="font-size:18px" aria-hidden="true"></i>
+                        Sesja logowania wygasła — wpisz hasło jeszcze raz.
+                    </div>
+                }
+                else if (_error && Error != "link")
+                {
+                    <div class="login-alert login-alert-danger">
+                        <i class="bi bi-exclamation-circle" style="font-size:18px" aria-hidden="true"></i>
+                        Nieprawidłowy email lub hasło.
+                    </div>
+                }
+
+                <div class="login-field">
+                    <label for="email">Email</label>
+                    <div class="login-input-wrap">
+                        <i class="bi bi-envelope login-input-icon" aria-hidden="true"></i>
+                        <input id="email" type="email" name="email" placeholder="twoj@@email.pl" autocomplete="email" required autofocus />
+                    </div>
+                </div>
+
+                <div class="login-field">
+                    <label for="password">Hasło</label>
+                    <div class="login-input-wrap">
+                        <i class="bi bi-lock login-input-icon" aria-hidden="true"></i>
+                        <input id="password" type="password" name="password" placeholder="Twoje hasło" required />
+                    </div>
+                </div>
+
+                <div class="login-remember">
+                    <input type="checkbox" name="rememberMe" value="true" id="rememberMe" checked />
+                    <label for="rememberMe">Zapamiętaj mnie</label>
+                </div>
+
+                <button type="submit" class="login-submit">
+                    <i class="bi bi-box-arrow-in-right" style="font-size:20px" aria-hidden="true"></i>
+                    Zaloguj się
+                </button>
+            </form>
+
+            <details class="login-magic" open="@(Error == "link" || Error == "1")">
+                <summary><i class="bi bi-magic" aria-hidden="true"></i>Nie pamiętasz hasła? Wyślemy link na e-mail</summary>
+                <form method="post" action="/api/konto/link" data-enhance="false">
+                    <AntiforgeryToken />
+                    <p>Działa dla trenerów — link wpuści Cię do panelu Hantly bez hasła. Hasło do samej aplikacji zmienisz w aplikacji („Nie pamiętasz hasła?” przy logowaniu).</p>
+                    <div class="login-magic-row">
+                        <input type="email" name="email" placeholder="twoj@@email.pl" required autocomplete="email" aria-label="Twój e-mail" />
+                        <button type="submit">Wyślij link</button>
+                    </div>
+                </form>
+            </details>
+            }
+
+            <div class="login-footer">
+                <a href="/">
+                    <i class="bi bi-arrow-left" style="font-size:16px;vertical-align:middle" aria-hidden="true"></i>
+                    Wróć na stronę główną
+                </a>
+            </div>
+        </div>
+    </div>
+</section>
+
+<style>
+    .login-page {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 120px 24px 60px;
+        font-family: var(--pts-font-body);
+        color: var(--pts-text);
+        background: var(--pts-bg);
+        position: relative;
+        overflow: hidden;
+    }
+    .login-page::before {
+        content: '';
+        position: absolute;
+        top: -300px; right: -200px;
+        width: 700px; height: 700px;
+        background: radial-gradient(circle, var(--pts-glow) 0%, transparent 70%);
+        pointer-events: none;
+    }
+    .login-page::after {
+        content: '';
+        position: absolute;
+        bottom: -200px; left: -150px;
+        width: 500px; height: 500px;
+        background: radial-gradient(circle, rgba(6, 214, 160, 0.08) 0%, transparent 70%);
+        pointer-events: none;
+    }
+
+    .login-container {
+        width: 100%;
+        max-width: 420px;
+        position: relative;
+        z-index: 1;
+    }
+
+    .login-card {
+        background: var(--pts-surface);
+        border: 1px solid var(--pts-border);
+        border-radius: 20px;
+        padding: 40px 36px;
+        box-shadow: var(--pts-shadow-lg);
+    }
+
+    .login-header {
+        text-align: center;
+        margin-bottom: 32px;
+    }
+    .login-logo {
+        width: 52px; height: 52px;
+        border-radius: 14px;
+        display: inline-flex;
+        align-items: center; justify-content: center;
+        color: #fff;
+        margin-bottom: 16px;
+    }
+    .login-header h2 {
+        font-family: var(--pts-font-display);
+        font-size: 1.4rem;
+        font-weight: 800;
+        margin: 0 0 6px;
+        letter-spacing: -0.02em;
+    }
+    .login-header p {
+        font-size: 0.88rem;
+        color: var(--pts-text-secondary);
+        margin: 0;
+    }
+
+    .login-alert {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 16px;
+        border-radius: var(--pts-radius-sm);
+        font-size: 0.85rem;
+        font-weight: 500;
+        margin-bottom: 20px;
+    }
+    .login-alert-ok {
+        background: rgba(6, 214, 160, 0.1);
+        color: #047857;
+        border: 1px solid rgba(6, 214, 160, 0.25);
+    }
+    .login-hint { font-size: .78rem; color: var(--pts-text-secondary); margin-top: 6px; }
+    .login-magic { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--pts-border); font-size: .86rem; }
+    .login-magic > summary { cursor: pointer; font-weight: 600; color: var(--pts-primary); display: flex; gap: 8px; align-items: center; list-style: none; }
+    .login-magic > summary::-webkit-details-marker { display: none; }
+    .login-magic p { color: var(--pts-text-secondary); font-size: .8rem; line-height: 1.5; margin: 10px 0; }
+    .login-magic-row { display: flex; gap: 8px; }
+    .login-magic-row input { flex: 1; min-width: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--pts-border); background: var(--pts-surface); color: var(--pts-text); font: inherit; }
+    .login-magic-row button { border: 0; border-radius: 10px; padding: 10px 14px; font: inherit; font-weight: 700; color: #fff; background: var(--pts-primary); cursor: pointer; white-space: nowrap; }
+    .login-alert-danger {
+        background: rgba(239, 68, 68, 0.08);
+        color: #DC2626;
+        border: 1px solid rgba(239, 68, 68, 0.15);
+    }
+
+    .login-field {
+        margin-bottom: 18px;
+    }
+    .login-field label {
+        display: block;
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: var(--pts-text);
+        margin-bottom: 6px;
+    }
+    .login-input-wrap {
+        position: relative;
+    }
+    .login-input-icon {
+        position: absolute;
+        left: 14px; top: 50%;
+        transform: translateY(-50%);
+        font-size: 20px;
+        color: var(--pts-text-secondary);
+        pointer-events: none;
+        opacity: 0.5;
+    }
+    .login-input-wrap input {
+        width: 100%;
+        padding: 12px 16px 12px 44px;
+        border: 2px solid var(--pts-border);
+        border-radius: var(--pts-radius-sm);
+        font-family: var(--pts-font-body);
+        font-size: 0.92rem;
+        color: var(--pts-text);
+        background: var(--pts-bg);
+        outline: none;
+        transition: border-color 0.2s, box-shadow 0.2s;
+        box-sizing: border-box;
+    }
+    .login-input-wrap input::placeholder {
+        color: var(--pts-text-secondary);
+        opacity: 0.5;
+    }
+    .login-input-wrap input:focus {
+        border-color: var(--pts-primary);
+        box-shadow: 0 0 0 3px var(--pts-glow);
+    }
+
+    .login-remember {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 24px;
+    }
+    .login-remember input[type="checkbox"] {
+        width: 16px; height: 16px;
+        accent-color: var(--pts-primary);
+        cursor: pointer;
+    }
+    .login-remember label {
+        font-size: 0.85rem;
+        color: var(--pts-text-secondary);
+        cursor: pointer;
+    }
+
+    .login-submit {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 14px 24px;
+        border: none;
+        border-radius: 12px;
+        background: var(--pts-primary);
+        color: #fff;
+        font-family: var(--pts-font-body);
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.25s;
+        box-shadow: 0 4px 16px rgba(124, 58, 237, 0.35);
+    }
+    .login-submit:hover {
+        background: var(--pts-primary-dark);
+        box-shadow: 0 6px 24px rgba(124, 58, 237, 0.45);
+        transform: translateY(-1px);
+    }
+
+    .login-footer {
+        text-align: center;
+        margin-top: 24px;
+        padding-top: 20px;
+        border-top: 1px solid var(--pts-border);
+    }
+    .login-footer a {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.85rem;
+        color: var(--pts-text-secondary);
+        text-decoration: none;
+        transition: color 0.2s;
+    }
+    .login-footer a:hover {
+        color: var(--pts-primary);
+    }
+
+    @@media (max-width: 480px) {
+        .login-card {
+            padding: 32px 24px;
+            border-radius: 16px;
+        }
+    }
+</style>
+
+@code {
+    [SupplyParameterFromQuery] public string? Error { get; set; }
+    [SupplyParameterFromQuery] public string? Step { get; set; }
+    [SupplyParameterFromQuery] public string? Remember { get; set; }
+    [SupplyParameterFromQuery] public string? ReturnUrl { get; set; }
+    [SupplyParameterFromQuery] public string? Zaproszenie { get; set; }
+    [SupplyParameterFromQuery] public string? Link { get; set; }
+    [SupplyParameterFromQuery] public string? Wylogowano { get; set; }
+    [CascadingParameter] public HttpContext? Http { get; set; }
+
+    private string? _trainerEmail;
+
+    // Zalogowany trener widzi skrót do swojego panelu, ale formularz zostaje — ta sama przeglądarka
+    // może służyć administratorowi (np. po teście kreatora), więc niczego nie przekierowujemy.
+    [SupplyParameterFromQuery(Name = "z")] public string? From { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Http is null || TwoFactorStep || !string.IsNullOrEmpty(Error)) return;
+        // Już zalogowany administrator nie musi wpisywać hasła — od razu do Panelu.
+        if (Http.User.Identity?.IsAuthenticated == true && Http.User.IsInRole("Admin") && Wylogowano is null)
+        {
+            // Pełne wczytanie: Panel działa w innym trybie niż publiczna strona logowania (bez tego adres się zmieniał, a strona nie).
+            Nav.NavigateTo(ReturnUrl is { Length: > 1 } r && r.StartsWith('/') && !r.StartsWith("//") ? r : "/panel", forceLoad: true);
+            return;
+        }
+        _trainerEmail = await TrainerAccounts.CurrentEmailAsync(Http);
+        // Z kreatora („Masz już aplikację?”) zalogowany trener trafia prosto do swojego panelu.
+        if (_trainerEmail is not null && From == "kreator") Nav.NavigateTo("/moje-konto");
+    }
+
+    private bool TwoFactorStep => Step == "2fa";
+
+    private bool _error => !string.IsNullOrEmpty(Error);
+}

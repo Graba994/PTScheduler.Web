@@ -1,0 +1,68 @@
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@using System.Security.Claims
+@rendermode PTScheduler.Web.RenderModes.Server
+
+@* Po zalogowaniu hasłem na telefonie/PWA proponuje logowanie odciskiem palca / Face ID. *@
+@if (_show)
+{
+    <div class="pwa-banner" role="dialog" aria-label="Włącz logowanie odciskiem palca">
+        <div class="pwa-banner-icon d-flex align-items-center justify-content-center"
+             style="background:var(--c-primary-light);color:var(--c-primary);border-radius:12px;font-size:1.6rem">
+            <i class="bi bi-fingerprint"></i>
+        </div>
+        <div class="pwa-banner-text">
+            <div class="pwa-banner-title">Loguj się jednym dotknięciem</div>
+            <div class="pwa-banner-body">Włącz odcisk palca lub Face ID — bez wpisywania hasła.</div>
+        </div>
+        <div class="pwa-banner-actions">
+            <button class="btn btn-primary btn-sm" @onclick="Enable">Włącz</button>
+            <button class="btn btn-link btn-sm pwa-banner-close" @onclick="Dismiss" aria-label="Nie teraz">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _show;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var user = (await AuthState.GetAuthenticationStateAsync()).User;
+            if (user.Identity?.IsAuthenticated != true) return;
+
+            // Zalogowano kluczem → to urządzenie już go ma; logowanie pokaże odcisk palca najpierw.
+            if (user.FindFirst(ClaimTypes.AuthenticationMethod)?.Value == "passkey")
+            {
+                await JS.InvokeVoidAsync("PTPasskey.markEnrolled");
+                return;
+            }
+
+            // Chwila na ewentualny baner instalacji PWA — nie pokazujemy dwóch naraz.
+            await Task.Delay(2500);
+            if (await JS.InvokeAsync<bool>("PTPasskey.shouldOffer"))
+            {
+                _show = true;
+                StateHasChanged();
+            }
+        }
+        catch { } // Propozycja jest opcjonalna — brak JS / rozłączenie nie może psuć strony.
+    }
+
+    private async Task Dismiss()
+    {
+        _show = false;
+        try { await JS.InvokeVoidAsync("PTPasskey.dismiss"); } catch { }
+    }
+
+    private void Enable()
+    {
+        var here = "/" + Nav.ToBaseRelativePath(Nav.Uri);
+        Nav.NavigateTo($"/Account/EnablePasskey?returnUrl={Uri.EscapeDataString(here)}", forceLoad: true);
+    }
+}

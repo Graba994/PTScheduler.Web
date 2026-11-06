@@ -1,9 +1,12 @@
-@rendermode InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 @inject IJSRuntime JS
 @inject ISessionPackageService PackageService
 @inject IClientService ClientService
 @inject ISessionService SessionService
 @inject AuthenticationStateProvider AuthState
+@inject PTScheduler.Web.Services.UpsellService Upsell
+@inject IOffPackageService OffPackage
+@inject IAccountService AccountSvc
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Application.DTOs
@@ -17,7 +20,7 @@
 
         <button class="um-trigger" @ref="_triggerBtn" @onclick="Toggle" title="Menu użytkownika">
             <div class="um-avatar">
-                @_initials
+                @if (_avatarUrl is not null) { <img src="@_avatarUrl" alt="" class="um-avatar-img" /> } else { @_initials }
                 @if (_badge > 0)
                 {
                     <span class="um-badge">@(_badge > 9 ? "9+" : _badge.ToString())</span>
@@ -36,7 +39,7 @@
 
                 <!-- User header -->
                 <div class="um-header">
-                    <div class="um-avatar um-avatar-lg">@_initials</div>
+                    <div class="um-avatar um-avatar-lg">@if (_avatarUrl is not null) { <img src="@_avatarUrl" alt="" class="um-avatar-img" /> } else { @_initials }</div>
                     <div style="min-width:0">
                         <div class="fw-semibold text-truncate">@_name</div>
                         <div class="text-muted text-truncate" style="font-size:.72rem">@_email</div>
@@ -79,13 +82,30 @@
                     </div>
                 </button>
 
+                <!-- PWA install -->
+                @if (_canInstallPwa)
+                {
+                    <button class="um-item um-item-btn" @onclick="InstallPwaAsync">
+                        <i class="bi bi-download"
+                           style="color:var(--c-primary);font-size:1rem;flex-shrink:0"></i>
+                        <span>Zainstaluj aplikację</span>
+                    </button>
+                }
+
                 <div class="um-sep"></div>
 
                 <!-- Account settings -->
                 <a href="/Account/Manage" class="um-item" @onclick="Close">
                     <i class="bi bi-gear-fill" style="font-size:1rem;flex-shrink:0"></i>
-                    <span>Ustawienia konta</span>
+                    <span>Moje konto</span>
                 </a>
+                @if (_canSwitch)
+                {
+                    <a href="/switch-account" class="um-item" @onclick="Close">
+                        <i class="bi bi-people-fill" style="color:var(--c-primary);font-size:1rem;flex-shrink:0"></i>
+                        <span>Przełącz konto</span>
+                    </a>
+                }
 
                 <!-- Legal -->
                 <a href="/legal/terms" class="um-item" @onclick="Close">
@@ -147,6 +167,7 @@
         letter-spacing: .03em;
     }
     .um-avatar-lg { width: 42px; height: 42px; font-size: .95rem; }
+    .um-avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
 
     .um-badge {
         position: absolute;
@@ -264,12 +285,17 @@
     private bool _ready;
     private bool _open;
     private bool _dark;
+    private bool _canInstallPwa;
     private string _initials = "?";
+    private string? _avatarUrl;
     private string _name = string.Empty;
     private string _email = string.Empty;
     private int _badge;
     private string? _userId;
     private string? _role;
+    private bool _mustChangePassword;
+    private bool _canSwitch;
+    private bool _isTrainer;
     private List<NotifItem> _notifs = [];
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -281,6 +307,10 @@
             _userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             _name   = user.Identity?.Name ?? string.Empty;
             _email  = user.FindFirst(ClaimTypes.Email)?.Value ?? _name;
+            _mustChangePassword = user.HasClaim(PTScheduler.Web.Services.AppClaimsPrincipalFactory.MustChangePasswordClaim, "1");
+            _canSwitch = user.IsInRole(Roles.Admin) || PTScheduler.Web.Services.AccountSwitchService.IsSwitched(user);
+            _isTrainer = user.IsInRole(Roles.Trainer);
+            try { if (_userId is not null) _avatarUrl = await AccountSvc.GetAvatarUrlAsync(_userId); } catch { }
 
             var parts = _name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             _initials = parts.Length >= 2
@@ -292,7 +322,23 @@
                   : user.IsInRole(Roles.Subordinate) ? Roles.Trainer
                   : Roles.Client;
 
-            try { _dark = await JS.InvokeAsync<bool>("PTTheme.isDark"); } catch { } // JS interop may fail during prerender
+            try { _dark = await JS.InvokeAsync<bool>("PTTheme.isDark"); } catch { }
+            try
+            {
+                var standalone = await JS.InvokeAsync<bool>("eval",
+                    "window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true");
+                if (!standalone)
+                {
+                    _canInstallPwa = await JS.InvokeAsync<bool>("eval", "!!window._installPrompt");
+                    if (!_canInstallPwa)
+                    {
+                        var isIos = await JS.InvokeAsync<bool>("eval",
+                            "/iphone|ipad|ipod/i.test(navigator.userAgent.toLowerCase())");
+                        _canInstallPwa = isIos;
+                    }
+                }
+            }
+            catch { }
 
             await LoadNotifsAsync();
             _ready = true;
@@ -318,10 +364,25 @@
         _notifs.Clear();
         try
         {
+            if (_mustChangePassword)
+                _notifs.Add(new("Ustaw własne hasło", "Obecne nadała Ci inna osoba — zmień je",
+                    "bi-shield-lock-fill", "var(--c-danger)", "/Account/Manage/ChangePassword"));
+
+            // Coś się kończy (SMS-y, wideo, limit klientów) — właściciel widzi to też w dzwonku.
+            if (_role is Roles.Admin || _isTrainer)
+                foreach (var u in (await Upsell.GetAsync()).Where(n => n.IsUrgent))
+                    _notifs.Add(new(u.Title, u.CtaLabel, u.Icon,
+                        u.Level == "critical" ? "var(--c-danger)" : "var(--c-warning)", u.CtaHref));
+
             var trainerFilter = _role == Roles.Admin ? null : _userId;
 
             if (_role is Roles.Admin or Roles.Trainer)
             {
+                var off = await OffPackage.GetCountsAsync(trainerFilter);
+                if (off.Requests > 0)
+                    _notifs.Add(new("Prośby o termin", $"{off.Requests} do akceptacji — klient zapłaci u Ciebie",
+                        "bi-hand-index-thumb", "var(--c-info)", "/sessions"));
+
                 var pending = await ClientService.GetPendingClientsAsync(trainerFilter);
                 if (pending.Count > 0)
                     _notifs.Add(new("Klienci oczekujący",
@@ -334,8 +395,8 @@
                         $"{expiring.Count} {Pl(expiring.Count, "pakiet wygasa", "pakietów wygasa")} w ciągu 7 dni",
                         "bi-box-seam-fill", "var(--c-danger)", "/finance"));
 
-                var todaySessions = await SessionService.GetSessionsAsync(DateTime.Today, DateTime.Today.AddDays(1), trainerFilter);
-                var unfinished = todaySessions.Count(s => s.Status == SessionStatus.Scheduled && s.StartTime < DateTime.Now);
+                var todaySessions = await SessionService.GetSessionsAsync(StudioClock.Today, StudioClock.Today.AddDays(1), trainerFilter);
+                var unfinished = todaySessions.Count(s => s.Status == SessionStatus.Scheduled && s.StartTime < StudioClock.Now);
                 if (unfinished > 0)
                     _notifs.Add(new("Nieoznaczone sesje",
                         $"{unfinished} sesji dzisiaj bez statusu",
@@ -344,7 +405,7 @@
             else if (_role == Roles.Client)
             {
                 var upcoming = await SessionService.GetUpcomingAsync(count: 5);
-                var tomorrow = upcoming.FirstOrDefault(s => s.StartTime.Date == DateTime.Today.AddDays(1).Date);
+                var tomorrow = upcoming.FirstOrDefault(s => s.StartTime.Date == StudioClock.Today.AddDays(1).Date);
                 if (tomorrow is not null)
                     _notifs.Add(new("Trening jutro!",
                         $"{tomorrow.StartTime:HH:mm} — {tomorrow.SessionTypeName}",
@@ -356,7 +417,7 @@
                     var pkgs = await PackageService.GetPackagesAsync(client.Id);
                     var nearExpiry = pkgs.FirstOrDefault(p =>
                         p.Status == PackageStatus.Active && p.ExpiresAt.HasValue &&
-                        (p.ExpiresAt.Value - DateTime.Now).TotalDays <= 7);
+                        (p.ExpiresAt.Value - StudioClock.Now).TotalDays <= 7);
                     if (nearExpiry is not null)
                         _notifs.Add(new("Pakiet wygasa wkrótce",
                             $"\"{nearExpiry.Name}\"",
@@ -382,8 +443,8 @@
         {
             var r = await JS.InvokeAsync<MenuRect>("PTMenu.getRect", _triggerBtn);
             _dropStyle = Direction == "up"
-                ? $"bottom:{r.Vh - r.Top + 8}px;left:{r.Left}px;width:{Math.Max(240, (int)r.Width)}px"
-                : $"top:{r.Bottom + 8}px;right:{r.Vw - r.Right}px";
+                ? FormattableString.Invariant($"bottom:{r.Vh - r.Top + 8}px;left:{r.Left}px;width:{Math.Max(240, (int)r.Width)}px")
+                : FormattableString.Invariant($"top:{r.Bottom + 8}px;right:{r.Vw - r.Right}px");
         }
         catch { } // JS interop for positioning may fail; menu opens at default position
         _open = true;
@@ -394,7 +455,27 @@
     private async Task ToggleDarkAsync()
     {
         try { _dark = await JS.InvokeAsync<bool>("PTTheme.toggle"); }
-        catch { } // JS interop may fail during prerender
+        catch { }
+    }
+
+    private async Task InstallPwaAsync()
+    {
+        try
+        {
+            var hasPrompt = await JS.InvokeAsync<bool>("eval", "!!window._installPrompt");
+            if (hasPrompt)
+            {
+                var accepted = await JS.InvokeAsync<bool>("triggerPwaInstall");
+                if (accepted) _canInstallPwa = false;
+            }
+            else
+            {
+                // iOS — show instructions via alert since there's no native prompt
+                await JS.InvokeVoidAsync("eval",
+                    "alert('Nacisnij przycisk Udostepnij w Safari, a nastepnie wybierz \\\"Dodaj do ekranu glownego\\\".')");
+            }
+        }
+        catch { }
     }
 
     private static string Pl(int n, string one, string many) => n == 1 ? one : many;

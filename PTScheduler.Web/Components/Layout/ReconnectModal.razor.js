@@ -1,63 +1,96 @@
-// Set up event handlers
-const reconnectModal = document.getElementById("components-reconnect-modal");
-reconnectModal.addEventListener("components-reconnect-state-changed", handleReconnectStateChanged);
+// Ciche wznawianie połączenia z serwerem (Blazor Server).
+// Telefon usypia PWA albo kartę przeglądarki i zrywa połączenie. Zamiast okna „Łączę z serwerem…”:
+//  - Blazor łączy się sam od razu po powrocie do aplikacji (szybkie próby ustawione w blazor-start.js),
+//  - gdy serwer nie pamięta już sesji, wznawiamy ją (Blazor.resumeCircuit) albo po cichu przeładowujemy stronę,
+//  - cienki pasek u góry pojawia się dopiero, gdy łączenie trwa dłużej niż 1,5 s,
+//  - „Brak internetu” — tylko gdy połączenia naprawdę nie ma.
+const modal = document.getElementById("components-reconnect-modal");
+const bar = document.getElementById("pt-reconnect-bar");
+const pill = document.getElementById("pt-offline-pill");
 
-const retryButton = document.getElementById("components-reconnect-button");
-retryButton.addEventListener("click", retry);
+let down = false;
+let failed = false;
+let busy = false;
+let barTimer = 0;
+let pillTimer = 0;
 
-const resumeButton = document.getElementById("components-resume-button");
-resumeButton.addEventListener("click", resume);
-
-function handleReconnectStateChanged(event) {
-    if (event.detail.state === "show") {
-        reconnectModal.showModal();
-    } else if (event.detail.state === "hide") {
-        reconnectModal.close();
-    } else if (event.detail.state === "failed") {
-        document.addEventListener("visibilitychange", retryWhenDocumentBecomesVisible);
-    } else if (event.detail.state === "rejected") {
-        location.reload();
-    }
-}
-
-async function retry() {
-    document.removeEventListener("visibilitychange", retryWhenDocumentBecomesVisible);
-
-    try {
-        // Reconnect will asynchronously return:
-        // - true to mean success
-        // - false to mean we reached the server, but it rejected the connection (e.g., unknown circuit ID)
-        // - exception to mean we didn't reach the server (this can be sync or async)
-        const successful = await Blazor.reconnect();
-        if (!successful) {
-            // We have been able to reach the server, but the circuit is no longer available.
-            // We'll reload the page so the user can continue using the app as quickly as possible.
-            const resumeSuccessful = await Blazor.resumeCircuit();
-            if (!resumeSuccessful) {
-                location.reload();
-            } else {
-                reconnectModal.close();
-            }
-        }
-    } catch (err) {
-        // We got an exception, server is currently unavailable
-        document.addEventListener("visibilitychange", retryWhenDocumentBecomesVisible);
-    }
-}
-
-async function resume() {
-    try {
-        const successful = await Blazor.resumeCircuit();
-        if (!successful) {
+modal.addEventListener("components-reconnect-state-changed", event => {
+    switch (event.detail.state) {
+        case "show":
+        case "retrying":
+            connectionLost();
+            break;
+        case "hide":
+            connectionRestored();
+            break;
+        case "failed":
+            // Blazor przestał próbować — próbujemy dalej sami, bez okna.
+            failed = true;
+            showPillAfter(0);
+            break;
+        case "rejected":
+        case "paused":
+            resumeOrReload();
+            break;
+        case "resume-failed":
             location.reload();
+            break;
+    }
+});
+
+function connectionLost() {
+    if (down) return;
+    down = true;
+    clearTimeout(barTimer);
+    barTimer = setTimeout(() => down && bar.classList.add("on"), 1500);
+    showPillAfter(navigator.onLine ? 12000 : 3000);
+}
+
+function showPillAfter(ms) {
+    clearTimeout(pillTimer);
+    pillTimer = setTimeout(() => down && pill.classList.add("on"), ms);
+}
+
+function connectionRestored() {
+    down = false;
+    failed = false;
+    clearTimeout(barTimer);
+    clearTimeout(pillTimer);
+    bar.classList.remove("on");
+    pill.classList.remove("on");
+}
+
+// Serwer nie zna już tej sesji (dłuższa przerwa, aktualizacja): wznowienie zapisanego stanu albo ciche przeładowanie.
+async function resumeOrReload() {
+    if (busy) return;
+    busy = true;
+    try {
+        if (await Blazor.resumeCircuit()) {
+            busy = false;
+            connectionRestored();
+            return;
         }
     } catch {
-        reconnectModal.classList.replace("components-reconnect-paused", "components-reconnect-resume-failed");
+        // wznowienie niemożliwe — przeładowanie niżej
+    }
+    location.reload();
+}
+
+// Po wyczerpaniu prób Blazora: kolejna próba, gdy aplikacja wraca na ekran albo wraca internet.
+async function reconnectNow() {
+    if (!failed || busy || document.visibilityState !== "visible") return;
+    busy = true;
+    try {
+        const ok = await Blazor.reconnect(); // true — połączono, false — serwer nie zna już sesji
+        busy = false;
+        if (ok) connectionRestored();
+        else await resumeOrReload();
+    } catch {
+        busy = false; // serwer dalej niedostępny — spróbujemy przy następnej okazji
     }
 }
 
-async function retryWhenDocumentBecomesVisible() {
-    if (document.visibilityState === "visible") {
-        await retry();
-    }
-}
+document.addEventListener("visibilitychange", reconnectNow);
+window.addEventListener("online", reconnectNow);
+window.addEventListener("focus", reconnectNow);
+setInterval(reconnectNow, 10000);

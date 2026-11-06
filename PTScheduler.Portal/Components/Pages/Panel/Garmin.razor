@@ -1,0 +1,298 @@
+@page "/panel/garmin"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject GarminService GarminSvc
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@rendermode InteractiveServer
+
+@* Garmin Connect (plan Starter): klucze aplikacji, adresy do wklejenia w portalu dewelopera Garmina, tryb testowy
+   (połączenie i przykładowe dane bez prawdziwego zegarka), ostatnie paczki danych i połączenia klientów. *@
+
+<PageTitle>Garmin — Hantly Portal</PageTitle>
+
+<PanelHeader Title="Garmin" Icon="bi-smartwatch" BackHref="/panel/setup" BackLabel="Konfiguracja platformy"
+             Subtitle="Zegarki klientów trenerów: sen, regeneracja, tętno i aktywności trafiają do karty klienta i gotowości przed wizytą. Jedna aplikacja partnerska Garmina dla wszystkich studiów." />
+
+@if (_cfg is null)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    @if (_cfg.Enabled)
+    {
+        <StatusBanner Tone="ok" Icon="bi-check-circle-fill" Title="Garmin włączony">Klienci studiów z planem, który ma „Zegarki klientów”, mogą łączyć zegarki. Połączeń: <b>@_active</b> z @GarminService.StarterLimit (limit planu Starter).</StatusBanner>
+    }
+    else if (_cfg.On)
+    {
+        <StatusBanner Tone="info" Icon="bi-smartwatch" Title="Włączony, czeka na klucze">Klienci widzą opcję Garmina z informacją „wkrótce”. Po akceptacji wniosku wklej klucze aplikacji poniżej — tryb testowy działa już teraz.</StatusBanner>
+    }
+    else
+    {
+        <StatusBanner Tone="warn" Icon="bi-toggle-off" Title="Garmin wyłączony">Klienci nigdzie go nie widzą, a dane z Garmina nie trafiają do studiów. Włącz, gdy chcesz go pokazać.</StatusBanner>
+    }
+
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body d-flex align-items-start gap-3 flex-wrap">
+            <div class="flex-grow-1" style="min-width:240px">
+                <div class="fw-semibold">Garmin dla klientów</div>
+                <div class="small text-muted">Globalny włącznik dla wszystkich studiów. Dostępność od planu ustawisz w <a href="/panel/plans">Planach cenowych</a> (pole „Zegarki klientów (Garmin)”). Po zmianie od razu wysyłamy nowe uprawnienia do aplikacji studiów; włączony pokazuje też Garmina na stronie głównej i w cenniku.</div>
+            </div>
+            <div class="form-check form-switch fs-4 m-0">
+                <input class="form-check-input" type="checkbox" role="switch" aria-label="Garmin dla klientów" checked="@_cfg.On" disabled="@_busy" @onchange="e => ToggleAsync((bool)(e.Value ?? false))" />
+            </div>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body d-flex align-items-start gap-3 flex-wrap">
+            <div class="flex-grow-1" style="min-width:240px">
+                <div class="fw-semibold">Plany na zegarek (Training API)</div>
+                <div class="small text-muted">
+                    Trener wysyła dzień planu na zegarek klienta (ćwiczenia, serie, powtórzenia, ciężar, przerwy) — trening pojawia się w Garmin Connect i w kalendarzu zegarka.
+                    Najpierw w portalu dewelopera Garmina dodaj <b>Training API</b> do aplikacji (API Configuration Tool). Studio włącza to u siebie w Ustawienia → Moduły.
+                    Klient musi zezwolić na import treningów — połączeni wcześniej mogą potrzebować ponownego połączenia.
+                </div>
+            </div>
+            <div class="form-check form-switch fs-4 m-0">
+                <input class="form-check-input" type="checkbox" role="switch" aria-label="Plany na zegarek" checked="@_cfg.TrainingOn" disabled="@_busy" @onchange="e => ToggleTrainingAsync((bool)(e.Value ?? false))" />
+            </div>
+        </div>
+    </div>
+
+    @if (_msg is not null)
+    {
+        <div class="alert @(_msgError ? "alert-danger" : "alert-success") py-2 small">@_msg</div>
+    }
+
+    <div class="row g-3">
+        <div class="col-12 col-xl-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-key"></i></span>Klucze aplikacji Garmin</div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold" for="g-id">Client ID (Consumer Key)</label>
+                        <input id="g-id" class="form-control font-monospace" @bind="_clientId" autocomplete="off" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold" for="g-secret">Client Secret</label>
+                        <input id="g-secret" type="password" class="form-control font-monospace" @bind="_secret" autocomplete="new-password"
+                               placeholder="@(_cfg.HasSecret ? "zapisany — zostaw puste, żeby nie zmieniać" : "")" />
+                        <div class="form-text">Sekret zapisujemy zaszyfrowany i nie pokazujemy go ponownie.</div>
+                    </div>
+                    <button class="btn btn-primary" @onclick="SaveAsync"><i class="bi bi-floppy me-1"></i>Zapisz</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-xl-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-list-check"></i></span>Jak włączyć (plan Starter)</div>
+                <div class="card-body small">
+                    <ol class="ps-3 mb-0">
+                        <li class="mb-2">Złóż wniosek w <b>Garmin Connect Developer Program</b> (poziom Starter — bezpłatny, do 1000 osób). We wniosku wymień dostawcę AI jako podmiot przetwarzający dane.</li>
+                        <li class="mb-2">Po akceptacji utwórz aplikację i wklej obok <b>Client ID</b> i <b>Client Secret</b>.</li>
+                        <li class="mb-2">Adres powrotu (Redirect URI): <code style="user-select:all">@GarminSvc.RedirectUri</code></li>
+                        <li class="mb-2">W konfiguracji endpointów ustaw tryb <b>Push</b> i ten adres dla: Dailies, Sleeps, HRV, Activities, Deregistrations, User Permissions Change:
+                            <code class="d-block mt-1" style="user-select:all;overflow-wrap:anywhere">@_pushUrl</code></li>
+                        <li>W polityce prywatności musi być widoczne <b>oświadczenie o AI</b> i zgoda klienta (klient zaznacza ją przy łączeniu) — sprawdź w <a href="/panel/dokumenty">Dokumentach prawnych</a>.</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-tools"></i></span>Tryb testowy — bez zegarka</div>
+                <div class="card-body">
+                    <p class="small text-muted mb-3">Łączy wybranego klienta „na niby” i wysyła przykładowe dane z ostatnich dni w formacie Garmina (dziś gorsza noc — gotowość wyjdzie niska). Przechodzą tę samą drogę co prawdziwe: kolejka → aplikacja studia.</p>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-12 col-md-5">
+                            <label class="form-label small fw-semibold" for="g-tenant">Studio</label>
+                            <select id="g-tenant" class="form-select" @bind="_testTenantId">
+                                <option value="0">— wybierz —</option>
+                                @foreach (var t in _tenants)
+                                {
+                                    <option value="@t.Id">@t.Name (@t.Slug)</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-6 col-md-2">
+                            <label class="form-label small fw-semibold" for="g-client">Id klienta</label>
+                            <input id="g-client" type="number" min="1" class="form-control" @bind="_testClientId" />
+                        </div>
+                        <div class="col-6 col-md-2">
+                            <label class="form-label small fw-semibold" for="g-days">Dni danych</label>
+                            <input id="g-days" type="number" min="1" max="30" class="form-control" @bind="_testDays" />
+                        </div>
+                        <div class="col-12 col-md-3 d-flex gap-2 flex-wrap">
+                            <button class="btn btn-outline-primary" disabled="@(_busy || !_cfg.On || _testTenantId == 0 || _testClientId < 1)" @onclick="TestAsync">
+                                @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                Połącz i wyślij dane
+                            </button>
+                        </div>
+                    </div>
+                    <div class="form-text">Id klienta znajdziesz w adresie karty klienta w aplikacji studia (/clients/<b>12</b>).@(_cfg.On ? "" : " Najpierw włącz Garmina — wyłączony pomija dane.") Studio musi mieć plan z „Zegarkami klientów”, żeby trener zobaczył dane.</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-xl-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header pp-card-header d-flex align-items-center"><span class="pp-icon pp-icon-sm"><i class="bi bi-inbox"></i></span>Ostatnie paczki danych
+                    <button class="btn btn-sm btn-link ms-auto" disabled="@_busy" @onclick="ProcessAsync"><i class="bi bi-arrow-repeat me-1"></i>Przekaż teraz</button>
+                </div>
+                <div class="card-body p-0">
+                    <p class="small text-muted px-3 pt-2 mb-1">Przy każdym rodzaju liczba rekordów zapisanych w aplikacji studia — np. „sleeps: 0” znaczy, że noc przyszła, ale się nie zapisała.</p>
+                    @if (_inbox.Count == 0)
+                    {
+                        <p class="small text-muted p-3 mb-0">Garmin jeszcze nic nie przysłał.</p>
+                    }
+                    else
+                    {
+                        <table class="table table-sm small mb-0">
+                            <thead><tr><th>Przyszło</th><th>Dane</th><th>Stan</th></tr></thead>
+                            <tbody>
+                                @foreach (var i in _inbox)
+                                {
+                                    <tr>
+                                        <td class="text-nowrap">@i.ReceivedAt.ToLocalTime().ToString("dd.MM HH:mm:ss")</td>
+                                        <td>
+                                            @i.Kinds
+                                            @if (GarminService.FieldNames(i.Payload) is { Count: > 0 } fields)
+                                            {
+                                                <details class="mt-1">
+                                                    <summary class="text-muted">pola (bez wartości)</summary>
+                                                    @foreach (var (kind, names) in fields)
+                                                    {
+                                                        <div class="font-monospace text-break" style="font-size:.72rem"><b>@kind:</b> @names</div>
+                                                    }
+                                                </details>
+                                            }
+                                        </td>
+                                        <td>
+                                            @if (i.ProcessedAt is not null) { <span class="text-success"><i class="bi bi-check2 me-1"></i>przekazane</span> }
+                                            else if (i.Attempts == 0) { <span class="text-muted">w kolejce</span> }
+                                            else { <span class="text-warning-emphasis" title="@i.Error">czeka (próba @i.Attempts)</span> }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-xl-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-people"></i></span>Połączone zegarki</div>
+                <div class="card-body p-0">
+                    @if (_conns.Count == 0)
+                    {
+                        <p class="small text-muted p-3 mb-0">Żaden klient nie połączył jeszcze zegarka.</p>
+                    }
+                    else
+                    {
+                        <table class="table table-sm small mb-0">
+                            <thead><tr><th>Studio</th><th>Klient</th><th>Od</th><th>Ostatnie dane</th></tr></thead>
+                            <tbody>
+                                @foreach (var c in _conns)
+                                {
+                                    <tr class="@(c.DisconnectedAt is null ? "" : "text-muted")">
+                                        <td>@(c.Tenant?.Slug)@if (c.IsTest) { <span class="badge text-bg-light border ms-1">test</span> }</td>
+                                        <td>#@c.TenantClientId</td>
+                                        <td class="text-nowrap">@c.ConnectedAt.ToLocalTime().ToString("dd.MM.yyyy")@(c.DisconnectedAt is null ? "" : " · odłączony")</td>
+                                        <td class="text-nowrap">@(c.LastDataAt?.ToLocalTime().ToString("dd.MM HH:mm") ?? "—")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private GarminService.Config? _cfg;
+    private string _clientId = "";
+    private string? _secret;
+    private string _pushUrl = "";
+    private int _active;
+    private string? _msg;
+    private bool _msgError, _busy;
+    private int _testTenantId, _testClientId, _testDays = 14;
+    private List<(int Id, string Name, string Slug)> _tenants = [];
+    private List<GarminInboxItem> _inbox = [];
+    private List<GarminConnection> _conns = [];
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _cfg = await GarminSvc.ConfigAsync();
+        _clientId = _cfg.ClientId;
+        _pushUrl = await GarminSvc.PushUrlAsync();
+        _active = await GarminSvc.ActiveConnectionsAsync();
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _tenants = (await db.Tenants.AsNoTracking().OrderBy(t => t.Slug).Select(t => new { t.Id, t.CompanyName, t.Slug }).ToListAsync())
+            .Select(t => (t.Id, string.IsNullOrWhiteSpace(t.CompanyName) ? t.Slug : t.CompanyName, t.Slug)).ToList();
+        _inbox = await db.GarminInbox.AsNoTracking().OrderByDescending(i => i.Id).Take(15).ToListAsync();
+        _conns = await db.GarminConnections.AsNoTracking().Include(c => c.Tenant).OrderByDescending(c => c.ConnectedAt).Take(30).ToListAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        await GarminSvc.SaveConfigAsync(_clientId, _secret);
+        _secret = null;
+        _msg = "Zapisane."; _msgError = false;
+        await LoadAsync();
+    }
+
+    private async Task TestAsync()
+    {
+        _busy = true; _msg = null;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var tenant = await db.Tenants.AsNoTracking().FirstAsync(t => t.Id == _testTenantId);
+            var userId = await GarminSvc.ConnectTestAsync(tenant, _testClientId);
+            await GarminSvc.EnqueueSampleAsync(userId, Math.Clamp(_testDays, 1, 30), DateOnly.FromDateTime(DateTime.Now));
+            var done = await GarminSvc.ProcessInboxAsync();
+            _msgError = done == 0;
+            _msg = done > 0 ? $"Połączono klienta #{_testClientId} w {tenant.Slug} i przekazano dane — zobacz kartę klienta w aplikacji studia."
+                            : "Dane są w kolejce, ale studio ich nie przyjęło — sprawdź, czy aplikacja studia działa i ma ten numer klienta.";
+        }
+        catch (Exception ex) { _msgError = true; _msg = ex.Message; }
+        finally { _busy = false; await LoadAsync(); }
+    }
+
+    private async Task ToggleAsync(bool on)
+    {
+        _busy = true;
+        try
+        {
+            var (pushed, total) = await GarminSvc.SetOnAsync(on);
+            _msgError = pushed < total;
+            _msg = (on ? "Garmin włączony" : "Garmin wyłączony") + (total == 0 ? "." : $" — uprawnienia wysłane do {pushed} z {total} studiów{(pushed < total ? " (pozostałe dostaną je przy następnym starcie)" : "")}.");
+        }
+        finally { _busy = false; await LoadAsync(); }
+    }
+
+    private async Task ToggleTrainingAsync(bool on)
+    {
+        await GarminSvc.SetTrainingAsync(on);
+        _msg = on ? "Plany na zegarek włączone — studia zobaczą przycisk po włączeniu modułu u siebie." : "Plany na zegarek wyłączone.";
+        _msgError = false;
+        await LoadAsync();
+    }
+
+    private async Task ProcessAsync()
+    {
+        _busy = true;
+        try { var n = await GarminSvc.ProcessInboxAsync(); _msg = $"Przekazano paczek: {n}."; _msgError = false; }
+        finally { _busy = false; await LoadAsync(); }
+    }
+}

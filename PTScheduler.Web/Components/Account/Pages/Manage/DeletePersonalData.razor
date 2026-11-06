@@ -9,6 +9,7 @@
 @inject IdentityRedirectManager RedirectManager
 @inject ILogger<DeletePersonalData> Logger
 @inject PTScheduler.Infrastructure.Data.ApplicationDbContext DbContext
+@inject PTScheduler.Application.Interfaces.IProgressPhotoService PhotoService
 
 <PageTitle>Usuń konto</PageTitle>
 
@@ -114,6 +115,9 @@
                 DbContext.SessionInvitations.RemoveRange(invitations);
 
             await DbContext.SaveChangesAsync();
+
+            // Zdjęcia sylwetki leżą też na dysku — kaskada w bazie ich nie usunie.
+            await PhotoService.DeleteAllForClientAsync(client.Id);
 
             DbContext.Clients.Remove(client);
             await DbContext.SaveChangesAsync();

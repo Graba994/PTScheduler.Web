@@ -1,0 +1,35 @@
+@* „Nie teraz? Wyślemy Ci link” — dla osób (głównie na telefonie), które wrócą do kreatora później.
+   Formularz bez JavaScriptu: POST /link-na-pozniej, powrót na stronę główną z ?link=wyslany. Adresu nie zapisujemy. *@
+<div class="ld-later @Css" id="@Css">
+    @if (Sent == "wyslany")
+    {
+        <p class="ld-later-ok" role="status"><i class="bi bi-envelope-check"></i>Link jest już w Twojej skrzynce. Wróć, kiedy będzie Ci wygodnie.</p>
+    }
+    else
+    {
+        <details open="@(Sent == "blad")">
+            <summary>Nie teraz? Wyślemy Ci link na e-mail</summary>
+            <form method="post" action="/link-na-pozniej" data-enhance="false" data-ld-later>
+                <AntiforgeryToken />
+                <input type="hidden" name="nazwa" />
+                <input type="hidden" name="kolor" />
+                <input type="hidden" name="wroc" value="@Css" />
+                <label class="visually-hidden" for="@($"{Css}-email")">Twój e-mail</label>
+                <input id="@($"{Css}-email")" type="email" name="email" required maxlength="160" autocomplete="email" inputmode="email" placeholder="Twój e-mail" />
+                <button type="submit">Wyślij link</button>
+            </form>
+            @if (Sent == "blad")
+            {
+                <p class="ld-later-err">Nie udało się wysłać — sprawdź adres e-mail albo spróbuj za kilka minut.</p>
+            }
+            <small>Jeden e-mail z linkiem do kreatora (z nazwą studia, jeśli ją wpisano). Adresu nie zapisujemy.</small>
+        </details>
+    }
+</div>
+
+@code {
+    /// <summary>Wynik wysyłki z adresu: „wyslany”, „blad” albo nic.</summary>
+    [Parameter] public string? Sent { get; set; }
+    /// <summary>Wariant wyglądu i kotwica powrotu (np. ld-later-hero, ld-later-dark).</summary>
+    [Parameter, EditorRequired] public string Css { get; set; } = "";
+}

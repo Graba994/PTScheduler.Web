@@ -1,0 +1,153 @@
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.Exceptions
+@using PTScheduler.Domain.Enums
+@inject ISessionService SessionService
+@inject EntitlementService Entitlements
+@inject IAppClock Clock
+
+@* Jeden zestaw akcji wizyty wszędzie, gdzie widać wizytę klienta (ekran Dziś, Pulpit):
+   rozpocznij trening, zakończ, przełóż, odwołaj, nieobecność, profil, wiadomość, telefon.
+   Te same ikony i te same słowa — trener nie musi szukać, gdzie co jest. *@
+<div class="vab @(Compact ? "is-compact" : "")">
+    <div class="vab-row">
+        @if (IsOpen && _plansOn)
+        {
+            <a class="vab-btn primary" href="@StartHref" title="Rozpocznij trening na żywo"><i class="bi bi-play-circle-fill"></i><span>Rozpocznij trening</span></a>
+        }
+        @if (IsOpen && Session.StartTime <= Clock.LocalNow.AddHours(2))
+        {
+            <button type="button" class="vab-btn ok" disabled="@_busy" title="Oznacz wizytę jako ukończoną" @onclick="CompleteAsync"><i class="bi bi-check2-circle"></i><span>Zakończ</span></button>
+        }
+        @if (IsOpen)
+        {
+            <button type="button" class="vab-btn @(_panel == "move" ? "on" : "")" title="Przełóż na inny termin" @onclick='() => Toggle("move")'><i class="bi bi-calendar-event"></i><span>Przełóż</span></button>
+            <button type="button" class="vab-btn danger @(_panel == "cancel" ? "on" : "")" title="Odwołaj wizytę" @onclick='() => Toggle("cancel")'><i class="bi bi-x-circle"></i><span>Odwołaj</span></button>
+            @if (Session.StartTime <= Clock.LocalNow.AddHours(2))
+            {
+                <button type="button" class="vab-btn warn @(_panel == "noshow" ? "on" : "")" title="Klient się nie pojawił" @onclick='() => Toggle("noshow")'><i class="bi bi-person-x"></i><span>Nieobecność</span></button>
+            }
+        }
+        @if (Session.Status is SessionStatus.Cancelled or SessionStatus.NoShow)
+        {
+            <button type="button" class="vab-btn" disabled="@_busy" title="Przywróć wizytę" @onclick="RestoreAsync"><i class="bi bi-arrow-counterclockwise"></i><span>Przywróć</span></button>
+        }
+        <span class="vab-sep" aria-hidden="true"></span>
+        <a class="vab-btn icon" href="@($"/clients/{Session.ClientId}")" title="Profil klienta" aria-label="Profil klienta"><i class="bi bi-person-vcard"></i><span>Profil</span></a>
+        <a class="vab-btn icon" href="@($"/chat?client={Session.ClientId}")" title="Wiadomość" aria-label="Wiadomość"><i class="bi bi-chat-dots"></i><span>Wiadomość</span></a>
+        @if (!string.IsNullOrWhiteSpace(Phone))
+        {
+            <a class="vab-btn icon" href="@($"tel:{Phone.Replace(" ", "")}")" title="Zadzwoń" aria-label="Zadzwoń"><i class="bi bi-telephone"></i><span>Zadzwoń</span></a>
+        }
+        @ExtraContent
+    </div>
+
+    @switch (_panel)
+    {
+        case "move":
+            <div class="vab-panel">
+                <label class="vab-field"><span>Dzień</span><input type="date" class="form-control form-control-sm" @bind="_moveDate" /></label>
+                <label class="vab-field"><span>Godzina</span><input type="time" class="form-control form-control-sm" step="900" @bind="_moveTime" /></label>
+                <div class="vab-panel-actions">
+                    <button type="button" class="btn btn-sm btn-light" @onclick='() => _panel = null'>Anuluj</button>
+                    <button type="button" class="btn btn-sm btn-primary" disabled="@_busy" @onclick="() => MoveAsync(false)">Przełóż</button>
+                </div>
+                @if (_conflict)
+                {
+                    <div class="vab-note warn">W tym terminie jest już inna wizyta.
+                        <button type="button" class="btn btn-link btn-sm p-0" disabled="@_busy" @onclick="() => MoveAsync(true)">Przełóż mimo to</button></div>
+                }
+                <div class="vab-note">Klient dostanie informację o nowym terminie.</div>
+            </div>
+            break;
+        case "cancel":
+            <div class="vab-panel">
+                <input class="form-control form-control-sm" placeholder="Powód (opcjonalnie) — klient go zobaczy" @bind="_reason" aria-label="Powód odwołania" />
+                <label class="form-check small mb-0">
+                    <input class="form-check-input" type="checkbox" @bind="_charge" />
+                    <span class="form-check-label">Odwołanie po terminie — trening przepada (schodzi z pakietu)</span>
+                </label>
+                <div class="vab-panel-actions">
+                    <button type="button" class="btn btn-sm btn-light" @onclick='() => _panel = null'>Nie odwołuj</button>
+                    <button type="button" class="btn btn-sm btn-danger" disabled="@_busy" @onclick="CancelAsync">Odwołaj wizytę</button>
+                </div>
+            </div>
+            break;
+        case "noshow":
+            <div class="vab-panel inline">
+                <span>Oznaczyć nieobecność — @Session.DisplayName?</span>
+                <div class="vab-panel-actions">
+                    <button type="button" class="btn btn-sm btn-light" @onclick='() => _panel = null'>Nie</button>
+                    <button type="button" class="btn btn-sm btn-warning" disabled="@_busy" @onclick="NoShowAsync">Tak, nieobecność</button>
+                </div>
+            </div>
+            break;
+    }
+    @if (_error is not null) { <div class="vab-note danger" role="alert">@_error</div> }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public SessionDto Session { get; set; } = null!;
+    /// <summary>Dzień planu wybrany na wizytę — wtedy trening startuje od razu na nim.</summary>
+    [Parameter] public SessionPlanDayDto? Day { get; set; }
+    [Parameter] public string? Phone { get; set; }
+    /// <summary>Wąskie miejsca (Pulpit): same ikony, podpisy w podpowiedziach.</summary>
+    [Parameter] public bool Compact { get; set; }
+    /// <summary>Po każdej zmianie: odświeżona wizyta i komunikat dla trenera.</summary>
+    [Parameter] public EventCallback<(SessionDto Session, string Message)> OnChanged { get; set; }
+    [Parameter] public RenderFragment? ExtraContent { get; set; }
+
+    private bool IsOpen => Session.Status is SessionStatus.Scheduled or SessionStatus.AwaitingPackage;
+    private bool _plansOn, _busy, _conflict, _charge;
+    private string? _panel, _error, _reason;
+    private DateTime _moveDate;
+    private TimeOnly _moveTime;
+
+    protected override void OnInitialized() => _plansOn = Entitlements.IsAllowed("TrainingPlansEnabled");
+
+    private string StartHref => Day is { } d
+        ? $"/train?klient={Session.ClientId}&plan={d.PlanId}&dzien={d.PlanDayId}&wizyta={Session.Id}"
+        : $"/train?klient={Session.ClientId}&wizyta={Session.Id}";
+
+    private void Toggle(string panel)
+    {
+        _error = null; _conflict = false;
+        _panel = _panel == panel ? null : panel;
+        if (_panel == "move")
+        {
+            _moveDate = Session.StartTime.Date.AddDays(Session.StartTime < Clock.LocalNow ? 7 : 0);
+            _moveTime = TimeOnly.FromDateTime(Session.StartTime);
+        }
+        if (_panel == "cancel") { _reason = null; _charge = false; }
+    }
+
+    private Task CompleteAsync() => RunAsync(() => SessionService.UpdateStatusAsync(Session.Id, SessionStatus.Completed, includePartner: true), "Wizyta ukończona.");
+    private Task NoShowAsync() => RunAsync(() => SessionService.UpdateStatusAsync(Session.Id, SessionStatus.NoShow), "Zapisano nieobecność.");
+    private Task RestoreAsync() => RunAsync(() => SessionService.RestoreAsync(Session.Id), "Przywrócono wizytę.");
+    private Task CancelAsync() => RunAsync(() => SessionService.UpdateStatusAsync(Session.Id, SessionStatus.Cancelled,
+        string.IsNullOrWhiteSpace(_reason) ? null : _reason.Trim(), chargeSession: _charge, includePartner: true), "Wizyta odwołana — klient dostał informację.");
+
+    private async Task MoveAsync(bool allowOverlap)
+    {
+        var start = _moveDate.Date.Add(_moveTime.ToTimeSpan());
+        if (start < Clock.LocalNow) { _error = "Wybierz termin w przyszłości."; return; }
+        _conflict = false;
+        await RunAsync(() => SessionService.RescheduleAsync(Session.Id, start, allowOverlap), $"Przełożono na {start:dd.MM, HH:mm}.");
+    }
+
+    private async Task RunAsync(Func<Task> action, string message)
+    {
+        _busy = true; _error = null;
+        try
+        {
+            await action();
+            _panel = null;
+            var fresh = await SessionService.GetSessionAsync(Session.Id) ?? Session;
+            await OnChanged.InvokeAsync((fresh, message));
+        }
+        catch (SlotConflictException) { _conflict = true; }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+        catch { _error = "Nie udało się — spróbuj jeszcze raz."; }
+        finally { _busy = false; }
+    }
+}

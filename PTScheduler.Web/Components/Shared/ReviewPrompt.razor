@@ -1,0 +1,129 @@
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.Marketing
+@inject IReviewService ReviewService
+@inject IJSRuntime JS
+
+@* Prośba o opinię (panel klienta) albo edycja własnej opinii (profil). *@
+@if (_state is { Enabled: true } && (_editing || _thanks || _state.ShouldAsk || (EditMode && _state.Existing is not null)))
+{
+    <div class="card review-card mb-3">
+        <div class="card-body">
+            @if (_thanks)
+            {
+                <div class="d-flex align-items-start gap-3">
+                    <div class="review-icon"><i class="bi bi-heart-fill"></i></div>
+                    <div>
+                        <div class="fw-semibold">Dziękujemy za opinię!</div>
+                        @if (!string.IsNullOrEmpty(_state.GoogleReviewUrl))
+                        {
+                            <div class="small text-muted mb-2">Masz jeszcze minutę? Opinia w Google pomaga innym znaleźć dobrego trenera.</div>
+                            <a href="@_state.GoogleReviewUrl" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-primary"
+                               @onclick="GoogleClickedAsync">
+                                <i class="bi bi-google me-1"></i>Dodaj opinię w Google
+                            </a>
+                        }
+                    </div>
+                </div>
+            }
+            else if (!_editing && _state.Existing is not null)
+            {
+                <div class="d-flex justify-content-between align-items-start gap-2">
+                    <div>
+                        <div class="fw-semibold mb-1">Twoja opinia</div>
+                        <div class="review-stars-static" aria-label="Ocena @_state.Existing.Rating z 5">
+                            @for (var i = 1; i <= 5; i++) { <i class="bi @(i <= _state.Existing.Rating ? "bi-star-fill" : "bi-star")"></i> }
+                        </div>
+                        @if (!string.IsNullOrEmpty(_state.Existing.Text)) { <div class="small mt-1">@_state.Existing.Text</div> }
+                        <div class="small text-muted mt-1">
+                            @(_state.Existing.IsPublished ? "Widoczna na stronie trenera." : _state.Existing.PublishConsent ? "Czeka na akceptację trenera." : "Widzi ją tylko trener.")
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="StartEdit">Zmień</button>
+                </div>
+            }
+            else
+            {
+                <div class="fw-semibold mb-1">@(_state.Existing is null ? "Jak Ci się z nami trenuje?" : "Zmień opinię")</div>
+                <div class="small text-muted mb-2">Twoja ocena pomaga trenerowi — i innym osobom, które szukają trenera.</div>
+                <div class="review-stars" role="radiogroup" aria-label="Ocena">
+                    @for (var i = 1; i <= 5; i++)
+                    {
+                        var n = i;
+                        <button type="button" class="review-star @(n <= _rating ? "on" : "")" role="radio" aria-checked="@(n == _rating ? "true" : "false")"
+                                aria-label="@n z 5" @onclick="() => Pick(n)">
+                            <i class="bi @(n <= _rating ? "bi-star-fill" : "bi-star")"></i>
+                        </button>
+                    }
+                </div>
+                @if (_rating > 0)
+                {
+                    <textarea class="form-control form-control-sm mt-2" rows="3" maxlength="1000" @bind="_text"
+                              placeholder="Co Ci się podoba? Co możemy poprawić? (opcjonalnie)"></textarea>
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="checkbox" id="revConsent" @bind="_consent" />
+                        <label class="form-check-label small" for="revConsent">
+                            Zgadzam się na publikację opinii na stronie trenera (imię i pierwsza litera nazwiska).
+                        </label>
+                    </div>
+                    @if (_error is not null) { <div class="text-danger small mt-1">@_error</div> }
+                    <div class="d-flex gap-2 mt-2">
+                        <button class="btn btn-sm btn-primary" disabled="@_busy" @onclick="SubmitAsync">Wyślij opinię</button>
+                        @if (_editing) { <button class="btn btn-sm btn-outline-secondary" @onclick="() => _editing = false">Anuluj</button> }
+                    </div>
+                }
+                @if (_state.Existing is null && !_editing)
+                {
+                    <button class="btn btn-sm btn-link text-muted px-0 mt-1" @onclick="SnoozeAsync">Nie teraz</button>
+                }
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public int ClientId { get; set; }
+    /// <summary>W profilu: pokaż własną opinię z możliwością edycji, nawet gdy nie ma prośby.</summary>
+    [Parameter] public bool EditMode { get; set; }
+
+    private ReviewPromptDto? _state;
+    private int _rating;
+    private string? _text;
+    private bool _consent;
+    private bool _editing;
+    private bool _thanks;
+    private bool _busy;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _state = await ReviewService.GetPromptAsync(ClientId);
+    }
+
+    private void Pick(int n) => _rating = n;
+
+    private void StartEdit()
+    {
+        if (_state?.Existing is not { } r) return;
+        _rating = r.Rating; _text = r.Text; _consent = r.PublishConsent;
+        _editing = true;
+    }
+
+    private async Task SubmitAsync()
+    {
+        _busy = true; _error = null;
+        var (ok, error) = await ReviewService.SubmitAsync(ClientId, _rating, _text, _consent);
+        _busy = false;
+        if (!ok) { _error = error; return; }
+        _state = await ReviewService.GetPromptAsync(ClientId);
+        _editing = false;
+        _thanks = true;
+    }
+
+    private async Task SnoozeAsync()
+    {
+        await ReviewService.SnoozeAsync(ClientId);
+        if (_state is not null) _state.ShouldAsk = false;
+    }
+
+    private Task GoogleClickedAsync() => ReviewService.MarkGoogleClickedAsync(ClientId);
+}

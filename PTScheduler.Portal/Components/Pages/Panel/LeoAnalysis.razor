@@ -1,0 +1,449 @@
+@page "/panel/leo"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject LeoAnalytics Analytics
+@inject LeoWeeklyReport Weekly
+@inject AssistantService Assistant
+@inject SiteSettingsService Settings
+@inject IDbContextFactory<PTScheduler.Portal.Data.PortalDbContext> DbFactory
+@inject NavigationManager Nav
+@rendermode InteractiveServer
+@using Microsoft.EntityFrameworkCore
+@using K = PTScheduler.Portal.Services.SiteSettingsService.Keys
+
+@* Szeroka analiza Leo: pytania, ostrzeżenia, segmenty, pieniądze zagrożone, głos klientów i raport tygodniowy.
+   Liczby z reguł (LeoAnalytics), AI tylko opisuje i szkicuje — administrator zawsze czyta przed wysłaniem. *@
+
+<PageTitle>Leo — analiza — Hantly Portal</PageTitle>
+
+<PanelHeader Title="Leo — analiza" Icon="bi-graph-up-arrow" IconClass="pp-tone-info"
+             Subtitle="Co się dzieje u trenerów: nietypowe zmiany, kto rośnie, kto zasypia, ile pieniędzy jest zagrożone i o co proszą. Same sumy z aplikacji — bez danych klientów trenerów.">
+    <Actions>
+        <button class="btn btn-sm btn-outline-secondary" @onclick="LoadAsync" disabled="@_loading"><i class="bi bi-arrow-clockwise me-1"></i>Odśwież</button>
+    </Actions>
+</PanelHeader>
+
+@if (_loading || _o is null)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    @if (!_o.HasActivityData)
+    {
+        <div class="pp-callout mb-3"><i class="bi bi-info-circle"></i><div>Pełne dane (wizyty z tygodnia, nieobecności, przychód) pojawią się po aktualizacji aplikacji trenerów i pierwszym odczycie metryk (co 6 godzin). Do tego czasu Leo liczy z liczników klientów i wizyt.</div></div>
+    }
+
+    <div class="pp-stats">
+        <StatTile Label="Ostrzeżenia" Value="@_o.Warnings.Count.ToString()" Meta="@WarnMeta()" Icon="bi-exclamation-triangle" Tone="@(_o.Warnings.Count > 0 ? "warn" : "ok")" />
+        <StatTile Label="Rosną" Value="@Seg(LeoAnalytics.Growing).Items.Count.ToString()" Meta="więcej klientów lub wizyt" Icon="bi-graph-up-arrow" Tone="ok" />
+        <StatTile Label="Blisko limitu" Value="@Seg(LeoAnalytics.NearLimit).Items.Count.ToString()" Meta="szansa na wyższy plan" Icon="bi-arrow-up-circle" Tone="info" />
+        <StatTile Label="Uśpieni" Value="@Seg(LeoAnalytics.Dormant).Items.Count.ToString()" Meta="bez logowań lub wizyt" Icon="bi-moon" Tone="muted" />
+        <StatTile Label="Zagrożone" Value="@LeoAnalytics.Zl(_o.Money.MonthlyAtRisk)" Meta="abonamenty miesięcznie" Icon="bi-cash-coin" Tone="@(_o.Money.Items.Count > 0 ? "danger" : "ok")" />
+    </div>
+
+    <div class="pp-seg mb-3 leo-tabs" role="tablist" aria-label="Sekcje analizy">
+        @foreach (var (key, label, icon, count) in Tabs())
+        {
+            var k = key;
+            <button type="button" role="tab" class="@(_tab == k ? "active" : "")" aria-selected="@(_tab == k ? "true" : "false")" @onclick="() => _tab = k">
+                <i class="bi @icon"></i>@label@if (count > 0) { <span class="mt-count">@count</span> }
+            </button>
+        }
+    </div>
+
+    @switch (_tab)
+    {
+        case "ask":
+            <PanelCard Title="Zapytaj Leo" Icon="bi-chat-square-text" IconClass="pp-tone-info"
+                       Subtitle="Gotowe pytania liczą reguły (bez kosztów). Własne pytanie — AI odpowiada z liczb i nazw studiów, bez danych właścicieli.">
+                <div class="leo-ask-chips">
+                    @foreach (var (key, label) in LeoAnalytics.Presets)
+                    {
+                        var k = key;
+                        <button type="button" class="btn btn-sm @(_presetKey == k ? "btn-primary" : "btn-outline-primary")" @onclick="() => Preset(k)">@label</button>
+                    }
+                </div>
+                <form class="leo-ask-form" @onsubmit="AskAsync" @onsubmit:preventDefault>
+                    <input class="form-control" placeholder="Np. Które studia mają najwięcej nieobecności?" @bind="_question" @bind:event="oninput" maxlength="400" aria-label="Pytanie do Leo" />
+                    <button type="submit" class="btn btn-primary text-nowrap" disabled="@(_asking || string.IsNullOrWhiteSpace(_question))">
+                        @if (_asking) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-send me-1"></i> }
+                        Zapytaj
+                    </button>
+                </form>
+                @if (_answer is not null)
+                {
+                    <div class="leo-answer">
+                        <img src="@PuppyArt.DataUri(_answer.FromAi ? "happy" : "think")" alt="" width="40" height="40" />
+                        <div class="min-w-0 flex-grow-1">
+                            <div class="small text-muted mb-1">@(_answer.FromAi ? "Odpowiedź AI z danych — sprawdź przed decyzją" : "Z reguł (bez AI)")</div>
+                            <div class="leo-insight-body">
+                                @foreach (var line in _answer.Text.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                                {
+                                    var l = line.Trim();
+                                    if (l.StartsWith("- ")) { <div class="leo-point">@l[2..]</div> }
+                                    else { <p class="mb-1">@l</p> }
+                                }
+                            </div>
+                            @if (_answer.Unverified.Count > 0)
+                            {
+                                <div class="small text-warning-emphasis mt-2"><i class="bi bi-exclamation-triangle me-1"></i>Sprawdź liczby, których nie ma w danych: @string.Join(", ", _answer.Unverified)</div>
+                            }
+                            @if (_answer.Error is { } err) { <div class="small text-muted mt-1">@err</div> }
+                        </div>
+                    </div>
+                }
+            </PanelCard>
+            break;
+
+        case "warnings":
+            @if (_o.Warnings.Count == 0)
+            {
+                <PanelCard><div class="pp-empty"><img src="@PuppyArt.DataUri("happy")" alt="" width="88" height="88" /><div class="pp-empty-title">Spokojnie — brak nietypowych zmian</div>
+                    <p>Leo porównuje tydzień do tygodnia: spadek wizyt, nieobecności, odwołania, pusty kalendarz, odpływ klientów i przychód.</p></div></PanelCard>
+            }
+            else
+            {
+                <div class="d-flex flex-column gap-3">
+                    @foreach (var group in _o.Warnings.GroupBy(w => w.Studio.Id).OrderByDescending(g => g.Max(w => w.Severity)).ThenByDescending(g => g.Count()))
+                    {
+                        var list = group.ToList();
+                        var st = list[0].Studio;
+                        var worst = list.Max(w => w.Severity);
+                        <section class="pp-card leo-row">
+                            <div class="leo-row-head mb-2">
+                                <span class="pp-icon pp-icon-sm @(worst >= 3 ? "pp-tone-danger" : "pp-tone-warn")"><i class="bi @WarnIcon(list[0].Kind)"></i></span>
+                                <div class="min-w-0 flex-grow-1">
+                                    <a class="fw-semibold" href="/panel/tenants/@st.Id">@st.Name</a>
+                                    <div class="small text-muted">plan @st.PlanName · @list.Count @LeoService.Plural(list.Count, "sygnał", "sygnały", "sygnałów")</div>
+                                </div>
+                            </div>
+                            <div class="leo-signals">
+                                @foreach (var w in list)
+                                {
+                                    <div class="leo-signal">
+                                        <span class="pp-chip @(w.Severity >= 3 ? "pp-tone-danger" : "pp-tone-warn")"><i class="bi @WarnIcon(w.Kind) me-1"></i>@w.Title</span>
+                                        <div class="small text-muted">@w.Detail</div>
+                                        <div class="small"><i class="bi bi-lightbulb me-1"></i>@w.Action</div>
+                                    </div>
+                                }
+                            </div>
+                            <LeoDraft To="@st.OwnerEmail" Label="Szkic wiadomości" Generate="() => Analytics.WarningDraftAsync(list)" />
+                        </section>
+                    }
+                </div>
+            }
+            break;
+
+        case "segments":
+            <div class="row g-3">
+                @foreach (var seg in _o.Segments)
+                {
+                    var segment = seg;
+                    <div class="col-12 col-xl-4">
+                        <PanelCard Title="@segment.Title" Subtitle="@segment.Hint" Icon="@SegIcon(segment.Key)" IconClass="@SegTone(segment.Key)" Class="h-100">
+                            @if (segment.Items.Count == 0)
+                            {
+                                <div class="small text-muted">Nikt w tej grupie.</div>
+                            }
+                            else
+                            {
+                                <div class="d-flex flex-column gap-2">
+                                    @foreach (var item in segment.Items)
+                                    {
+                                        var it = item;
+                                        <div class="leo-seg-item">
+                                            <div class="d-flex justify-content-between gap-2 align-items-start">
+                                                <div class="min-w-0">
+                                                    <a class="fw-semibold" href="/panel/tenants/@it.Studio.Id">@it.Studio.Name</a>
+                                                    <div class="small text-muted">@it.Note · plan @it.Studio.PlanName</div>
+                                                </div>
+                                            </div>
+                                            <LeoDraft To="@it.Studio.OwnerEmail" Label="@DraftLabel(segment.Key)" Generate="() => SegmentDraftAsync(segment, it)" />
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </PanelCard>
+                    </div>
+                }
+            </div>
+            break;
+
+        case "money":
+            <PanelCard Title="Pieniądze zagrożone" Icon="bi-cash-coin" IconClass="pp-tone-danger"
+                       Subtitle="Ryzyko odejścia × wartość abonamentu (plan + miesięczne dodatki). Oczekiwana strata = wartość × punkty ryzyka / 100.">
+                @if (_o.Money.Items.Count == 0)
+                {
+                    <div class="pp-empty"><img src="@PuppyArt.DataUri("happy")" alt="" width="80" height="80" /><div class="pp-empty-title">Nic nie jest zagrożone</div><p>Żadne studio z abonamentem nie ma podwyższonego ryzyka odejścia.</p></div>
+                }
+                else
+                {
+                    <div class="leo-money-sum">
+                        <div><span>Miesięcznie</span><b>@LeoAnalytics.Zl(_o.Money.MonthlyAtRisk)</b></div>
+                        <div><span>Rocznie</span><b>@LeoAnalytics.Zl(_o.Money.YearlyAtRisk)</b></div>
+                        <div><span>Oczekiwana strata / mies.</span><b>@LeoAnalytics.Zl(_o.Money.ExpectedMonthly)</b></div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle mb-0 leo-money">
+                            <thead><tr><th>Studio</th><th class="text-end">Abonament</th><th>Ryzyko</th><th class="text-end">Oczekiwana strata</th><th>Powody</th></tr></thead>
+                            <tbody>
+                                @foreach (var i in _o.Money.Items)
+                                {
+                                    <tr>
+                                        <td><a class="fw-semibold" href="/panel/tenants/@i.Studio.Id">@i.Studio.Name</a><div class="small text-muted">plan @i.Studio.PlanName</div></td>
+                                        <td class="text-end">@LeoAnalytics.Zl(i.Monthly)</td>
+                                        <td style="min-width:120px">
+                                            <div class="pp-meter pp-tone-danger"><div style="width:@(i.Score)%"></div></div>
+                                            <span class="small">@i.Score pkt</span>
+                                        </td>
+                                        <td class="text-end fw-semibold">@LeoAnalytics.Zl(i.Expected)</td>
+                                        <td class="small text-muted">@string.Join(" · ", i.Reasons.Take(2))</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="small mt-2"><a href="/panel/ryzyko">Kontakty i szkice wiadomości → Zagrożeni odejściem</a></div>
+                }
+            </PanelCard>
+            break;
+
+        case "voice":
+            <div class="row g-3">
+                <div class="col-12 col-xl-7">
+                    <PanelCard Title="O co proszą trenerzy" Icon="bi-megaphone" IconClass="pp-tone-ok"
+                               Subtitle="@($"Ranking tematów z ostatnich 6 miesięcy: ankieta, notatki ze spotkań, oceny aplikacji i zgłoszenia ({_o.Voice.Texts} {LeoService.Plural(_o.Voice.Texts, "wypowiedź", "wypowiedzi", "wypowiedzi")}).")">
+                        @if (_o.Voice.Topics.Count == 0)
+                        {
+                            <div class="small text-muted">Brak wypowiedzi do analizy.</div>
+                        }
+                        else
+                        {
+                            var max = Math.Max(1, _o.Voice.Topics.Max(t => t.Mentions));
+                            <div class="d-flex flex-column gap-3">
+                                @foreach (var t in _o.Voice.Topics)
+                                {
+                                    <div class="leo-voice">
+                                        <div class="d-flex justify-content-between gap-2"><b>@t.Label</b><span class="small text-muted text-nowrap">@t.Mentions @LeoService.Plural(t.Mentions, "wzmianka", "wzmianki", "wzmianek")</span></div>
+                                        <div class="pp-meter pp-tone-ok my-1"><div style="width:@(t.Mentions * 100 / max)%"></div></div>
+                                        <div class="d-flex flex-wrap gap-1 mb-1">
+                                            @foreach (var (src, n) in t.Sources) { <span class="pp-chip pp-tone-muted">@LeoAnalytics.SourceLabels.GetValueOrDefault(src, src) @n</span> }
+                                        </div>
+                                        @foreach (var q in t.Quotes) { <div class="leo-quote">„@q”</div> }
+                                    </div>
+                                }
+                            </div>
+                            @if (_o.Voice.Unmatched > 0)
+                            {
+                                <div class="small text-muted mt-3">Bez rozpoznanego tematu: @_o.Voice.Unmatched — przeczytasz je w ankiecie, spotkaniach i ocenach.</div>
+                            }
+                        }
+                    </PanelCard>
+                </div>
+                <div class="col-12 col-xl-5">
+                    <section class="card border-0 shadow-sm leo-card">
+                        <div class="card-body">
+                            <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+                                <img src="@PuppyArt.DataUri(_voiceBusy ? "think" : _voice is null ? "hello" : "happy")" alt="" width="44" height="44" />
+                                <div class="me-auto">
+                                    <div class="fw-semibold">Wnioski od Leo</div>
+                                    <div class="small text-muted">@(_voice is null ? "Co zrobić najpierw — Leo podsumuje ranking." : $"{(_voice.FromAi ? "Napisane przez AI" : "Z reguł (bez AI)")} · {_voice.At.ToLocalTime():dd.MM.yyyy HH:mm}")</div>
+                                </div>
+                                <button type="button" class="btn btn-sm btn-primary" @onclick="VoiceAsync" disabled="@_voiceBusy">
+                                    @if (_voiceBusy) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-stars me-1"></i> }
+                                    @(_voice is null ? "Wygeneruj" : "Wygeneruj ponownie")
+                                </button>
+                            </div>
+                            @if (_voice is not null)
+                            {
+                                <div class="leo-insight-body">
+                                    @foreach (var line in _voice.Text.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                                    {
+                                        var l = line.Trim();
+                                        if (l.StartsWith("- ")) { <div class="leo-point">@l[2..]</div> }
+                                        else if (l.EndsWith(':')) { <div class="leo-subhead">@l</div> }
+                                        else { <p class="mb-1">@l</p> }
+                                    }
+                                </div>
+                                @if (_voice.Unverified.Count > 0)
+                                {
+                                    <div class="small text-warning-emphasis mt-2"><i class="bi bi-exclamation-triangle me-1"></i>Sprawdź liczby, których nie ma w danych: @string.Join(", ", _voice.Unverified)</div>
+                                }
+                            }
+                        </div>
+                    </section>
+                </div>
+            </div>
+            break;
+
+        case "weekly":
+            <PanelCard Title="Raport tygodniowy" Icon="bi-envelope-paper" IconClass="pp-tone-info"
+                       Subtitle="W każdy poniedziałek o godzinie porannego raportu, na adres powiadomień administratora.">
+                <Actions>
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="weeklyOn" checked="@_weeklyOn" @onchange="ToggleWeeklyAsync" />
+                        <label class="form-check-label small" for="weeklyOn">Wysyłaj w poniedziałki</label>
+                    </div>
+                </Actions>
+                <ChildContent>
+                    <div class="d-flex gap-2 flex-wrap align-items-center mb-3">
+                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="PreviewAsync" disabled="@_weeklyBusy"><i class="bi bi-eye me-1"></i>@(_preview is null ? "Pokaż podgląd" : "Odśwież podgląd")</button>
+                        <button type="button" class="btn btn-sm btn-primary" @onclick="SendWeeklyAsync" disabled="@_weeklyBusy">
+                            @if (_weeklyBusy) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-send me-1"></i> }
+                            Wyślij teraz
+                        </button>
+                        @if (_weeklyStatus is not null) { <span class="small @(_weeklyError ? "text-danger" : "text-success")">@_weeklyStatus</span> }
+                    </div>
+                    @if (_preview is not null)
+                    {
+                        <iframe class="leo-preview" srcdoc="@_preview" title="Podgląd raportu tygodniowego" sandbox=""></iframe>
+                    }
+                </ChildContent>
+            </PanelCard>
+            break;
+    }
+}
+
+@code {
+    private bool _loading = true;
+    private LeoAnalytics.Overview? _o;
+    private List<PTScheduler.Portal.Entities.Plan> _plans = [];
+    private string _tab = "ask";
+
+    private string? _question, _presetKey;
+    private LeoAnalytics.Answer? _answer;
+    private bool _asking;
+
+    private AssistantService.Insight? _voice;
+    private bool _voiceBusy;
+
+    private bool _weeklyOn = true, _weeklyBusy, _weeklyError;
+    private string? _preview, _weeklyStatus;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _weeklyOn = await Settings.GetAsync(K.LeoWeeklyEnabled) != "false";
+        _voice = await Analytics.LoadVoiceInsightAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _o = await Analytics.BuildAsync();
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _plans = await db.Plans.AsNoTracking().ToListAsync();
+        if (_presetKey is not null) _answer = LeoAnalytics.AnswerPreset(_presetKey, _o);
+        _loading = false;
+    }
+
+    private IEnumerable<(string Key, string Label, string Icon, int Count)> Tabs()
+    {
+        yield return ("ask", "Zapytaj", "bi-chat-square-text", 0);
+        yield return ("warnings", "Ostrzeżenia", "bi-exclamation-triangle", _o!.Warnings.Count);
+        yield return ("segments", "Segmenty", "bi-diagram-3", _o.Segments.Sum(s => s.Items.Count));
+        yield return ("money", "Pieniądze", "bi-cash-coin", _o.Money.Items.Count);
+        yield return ("voice", "Głos klientów", "bi-megaphone", _o.Voice.Topics.Count);
+        yield return ("weekly", "Raport tygodniowy", "bi-envelope-paper", 0);
+    }
+
+    private string WarnMeta()
+    {
+        var studios = _o!.Warnings.Select(w => w.Studio.Id).Distinct().Count();
+        return studios == 0 ? "brak nietypowych zmian" : $"w {studios} {LeoService.Plural(studios, "studiu", "studiach", "studiach")}";
+    }
+
+    private LeoAnalytics.Segment Seg(string key) => _o!.Segments.First(s => s.Key == key);
+
+    private void Preset(string key)
+    {
+        _presetKey = key;
+        _question = null;
+        _answer = LeoAnalytics.AnswerPreset(key, _o!);
+    }
+
+    private async Task AskAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_question) || _o is null) return;
+        _asking = true;
+        _presetKey = null;
+        try { _answer = await Analytics.AskAsync(_question, _o); }
+        finally { _asking = false; }
+    }
+
+    private async Task VoiceAsync()
+    {
+        _voiceBusy = true;
+        try { _voice = await Analytics.VoiceInsightAsync(_o!.Voice); }
+        finally { _voiceBusy = false; }
+    }
+
+    private Task<AssistantService.Draft> SegmentDraftAsync(LeoAnalytics.Segment segment, LeoAnalytics.SegmentItem item) =>
+        segment.Key == LeoAnalytics.NearLimit
+            ? Analytics.UpgradeDraftAsync(item.Studio, LeoAnalytics.NextPlan(_plans, item.Studio))
+            : Analytics.SegmentDraftAsync(segment, item);
+
+    private async Task ToggleWeeklyAsync(ChangeEventArgs e)
+    {
+        _weeklyOn = e.Value is true;
+        await Settings.SetAsync(K.LeoWeeklyEnabled, _weeklyOn ? "true" : "false");
+        _weeklyStatus = _weeklyOn ? "Raport pójdzie w najbliższy poniedziałek." : "Raport tygodniowy wyłączony.";
+        _weeklyError = false;
+    }
+
+    private async Task PreviewAsync()
+    {
+        _weeklyBusy = true;
+        try
+        {
+            var report = await Weekly.BuildAsync();
+            _preview = LeoWeeklyReport.RenderHtml(report, Nav.BaseUri.TrimEnd('/'), await Assistant.IconsVersionAsync(AssistantService.Leo));
+        }
+        finally { _weeklyBusy = false; }
+    }
+
+    private async Task SendWeeklyAsync()
+    {
+        _weeklyBusy = true;
+        try
+        {
+            var error = await Weekly.SendAsync(force: true, baseUrl: Nav.BaseUri);
+            _weeklyError = error is not null;
+            _weeklyStatus = error ?? "Wysłano na adres administratora.";
+        }
+        finally { _weeklyBusy = false; }
+    }
+
+    private static string WarnIcon(string kind) => kind switch
+    {
+        "spadek_wizyt" => "bi-graph-down-arrow",
+        "nieobecnosci" => "bi-person-x",
+        "odwolania" => "bi-calendar-x",
+        "pusty_kalendarz" => "bi-calendar",
+        "odplyw_klientow" => "bi-people",
+        "spadek_przychodu" => "bi-cash-stack",
+        _ => "bi-exclamation-triangle",
+    };
+
+    private static string SegIcon(string key) => key switch
+    {
+        LeoAnalytics.Growing => "bi-graph-up-arrow",
+        LeoAnalytics.NearLimit => "bi-arrow-up-circle",
+        _ => "bi-moon",
+    };
+
+    private static string SegTone(string key) => key switch
+    {
+        LeoAnalytics.Growing => "pp-tone-ok",
+        LeoAnalytics.NearLimit => "pp-tone-info",
+        _ => "pp-tone-muted",
+    };
+
+    private static string DraftLabel(string key) => key switch
+    {
+        LeoAnalytics.Growing => "Gratulacje i polecenie",
+        LeoAnalytics.NearLimit => "Propozycja wyższego planu",
+        _ => "Szkic wiadomości",
+    };
+}

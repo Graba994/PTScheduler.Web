@@ -12,9 +12,10 @@ public class IntroSessionConfigDto
     public string? Description { get; set; }
     public bool IsActive { get; set; } = true;
 
-    public decimal EffectivePrice => PromoPrice.HasValue && PromoValidUntil.HasValue && PromoValidUntil > DateTime.UtcNow
-        ? PromoPrice.Value
-        : Price;
+    // EffectivePrice usunięte — nie było używane, a liczyło ważność promocji
+    // względem DateTime.UtcNow, czyli inaczej niż strona publiczna. Regułą
+    // rozstrzygającą jest PTScheduler.Domain.Rules.PromoRules; jeśli cena
+    // efektywna będzie tu kiedyś potrzebna, ustaw ją w serwisie przez tę regułę.
 }
 
 public class SaveIntroConfigDto

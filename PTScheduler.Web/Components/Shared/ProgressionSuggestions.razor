@@ -1,0 +1,107 @@
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Rules
+@inject IProgressionService Progression
+
+@if (_items.Count > 0 || _applied.Count > 0)
+{
+    <div class="card mb-3 border-0 shadow-sm">
+        <div class="card-body">
+            <div class="d-flex align-items-start justify-content-between gap-2 mb-1">
+                <h6 class="fw-semibold mb-0"><i class="bi bi-graph-up-arrow me-1" style="color:var(--c-primary)"></i>Propozycje progresji</h6>
+                @if (_items.Count > 0) { <span class="badge rounded-pill bg-primary-subtle text-primary-emphasis">@_items.Count</span> }
+            </div>
+            <p class="small text-muted mb-2">Na podstawie ostatnich serii i oceny wysiłku (RPE) z ankiety po treningu. Nic nie zmienia się samo — decydujesz Ty.</p>
+
+            @foreach (var a in _applied)
+            {
+                <div class="alert alert-success small py-2 mb-2"><i class="bi bi-check2 me-1"></i>@a</div>
+            }
+
+            <div class="d-flex flex-column gap-2">
+                @foreach (var s in _items)
+                {
+                    var up = s.Action == ProgressionAction.Increase;
+                    <div class="border rounded-3 p-2 px-3">
+                        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+                            <div class="min-w-0">
+                                <div class="fw-semibold">@s.ExerciseName</div>
+                                <div class="small text-muted">
+                                    @s.PlanName · @s.DayLabel · @s.LastWorkoutDate.ToString("d MMM")
+                                </div>
+                            </div>
+                            <span class="badge @(up ? "bg-success-subtle text-success-emphasis" : "bg-warning-subtle text-warning-emphasis") fs-6 fw-semibold">
+                                <i class="bi @(up ? "bi-arrow-up" : "bi-arrow-down") me-1"></i>@Signed(s.DeltaKg) kg
+                            </span>
+                        </div>
+                        <div class="small mt-1">
+                            <span class="text-muted">Ostatnio:</span> @s.LastRepsText powt. × @Kg(s.FromKg)
+                            @if (s.Rpe is decimal rpe) { <span class="text-muted"> · RPE @rpe.ToString("0.#")</span> }
+                            <span class="text-muted"> · plan: @s.PlannedSets × @s.Reps</span>
+                        </div>
+                        <div class="small text-muted">@s.Reason</div>
+                        <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+                            <div class="input-group input-group-sm" style="max-width:160px">
+                                <span class="input-group-text">Cel</span>
+                                <input type="number" step="0.5" min="0" class="form-control" value="@Value(s)"
+                                       @onchange="e => _custom[s.PlanExerciseId] = e.Value?.ToString() ?? string.Empty"
+                                       aria-label="@($"Nowy ciężar docelowy — {s.ExerciseName}")" />
+                                <span class="input-group-text">kg</span>
+                            </div>
+                            <button class="btn btn-sm btn-primary" disabled="@_busy" @onclick="() => ApplyAsync(s)"><i class="bi bi-check2 me-1"></i>Zastosuj w planie</button>
+                            <button class="btn btn-sm btn-link text-muted" disabled="@_busy" @onclick="() => DismissAsync(s)">Pomiń</button>
+                        </div>
+                    </div>
+                }
+            </div>
+            @if (_error is not null) { <div class="alert alert-danger small py-2 mt-2 mb-0">@_error</div> }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public int ClientId { get; set; }
+    [Parameter, EditorRequired] public string UserId { get; set; } = "";
+    [Parameter] public bool IsAdmin { get; set; }
+
+    private List<ProgressionSuggestionDto> _items = [];
+    private readonly List<string> _applied = [];
+    private readonly Dictionary<int, string> _custom = [];
+    private bool _busy;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync() =>
+        _items = await Progression.GetSuggestionsAsync(UserId, IsAdmin, ClientId);
+
+    private string Value(ProgressionSuggestionDto s) =>
+        _custom.TryGetValue(s.PlanExerciseId, out var v) ? v : s.SuggestedKg.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+
+    private async Task ApplyAsync(ProgressionSuggestionDto s)
+    {
+        _error = null;
+        var raw = Value(s).Replace(',', '.');
+        if (!decimal.TryParse(raw, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var kg) || kg < 0)
+        {
+            _error = "Podaj ciężar w kilogramach, np. 42,5.";
+            return;
+        }
+        _busy = true;
+        if (await Progression.ApplyAsync(UserId, IsAdmin, s.PlanExerciseId, kg))
+        {
+            _applied.Add($"{s.ExerciseName}: nowy cel {Kg(kg)} w planie „{s.PlanName}”. Klient zobaczy go przy następnym treningu.");
+            _items.Remove(s);
+        }
+        else _error = "Nie udało się zapisać — plan mógł zostać usunięty.";
+        _busy = false;
+    }
+
+    private async Task DismissAsync(ProgressionSuggestionDto s)
+    {
+        _busy = true;
+        if (await Progression.DismissAsync(UserId, IsAdmin, s.PlanExerciseId)) _items.Remove(s);
+        _busy = false;
+    }
+
+    private static string Kg(decimal kg) => kg.ToString("0.##") + " kg";
+    private static string Signed(decimal d) => (d > 0 ? "+" : "−") + Math.Abs(d).ToString("0.##");
+}

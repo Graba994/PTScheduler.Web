@@ -1,0 +1,42 @@
+@implements IDisposable
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@inject IChatService ChatService
+@inject IChatNotifier Notifier
+@inject AuthenticationStateProvider AuthState
+
+@* Licznik nieprzeczytanych wiadomości czatu — odświeża się na żywo. *@
+@if (_count > 0)
+{
+    <span class="badge rounded-pill bg-danger chat-unread-badge">@(_count > 99 ? "99+" : _count.ToString())</span>
+}
+
+@code {
+    private int _count;
+    private string _userId = "";
+    private bool _isStaff;
+    private bool _isAdmin;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        _userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        if (_userId.Length == 0) return;
+        _isAdmin = user.IsInRole(Roles.Admin);
+        _isStaff = _isAdmin || user.IsInRole(Roles.Trainer) || user.IsInRole(Roles.Subordinate);
+        _count = await ChatService.GetUnreadCountAsync(_userId, _isStaff, _isAdmin);
+        Notifier.ConversationChanged += OnChanged;
+    }
+
+    private void OnChanged(int clientId) => _ = InvokeAsync(async () =>
+    {
+        try
+        {
+            _count = await ChatService.GetUnreadCountAsync(_userId, _isStaff, _isAdmin);
+            StateHasChanged();
+        }
+        catch { /* obwód zamknięty */ }
+    });
+
+    public void Dispose() => Notifier.ConversationChanged -= OnChanged;
+}

@@ -1,0 +1,150 @@
+@page "/trainer/styl"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer")]
+@using PTScheduler.Domain.Rules
+@using PTScheduler.Application.Messaging
+@inject PTScheduler.Web.Services.MessageDraftService Drafts
+@inject AuthenticationStateProvider AuthState
+@rendermode PTScheduler.Web.RenderModes.Server
+
+@* Styl wiadomości trenera: forma, emoji, długość, powitanie, podpis i przykłady. Asystent uczy się też z poprawek szkiców. *@
+
+<AppTitle Page="Mój styl wiadomości" />
+
+<div class="rt-wrap">
+    <div class="rt-head">
+        <div>
+            <h1 class="rt-title"><i class="bi bi-pen"></i>Mój styl wiadomości</h1>
+            <p class="rt-sub">Według tego asystent pisze szkice wiadomości do Twoich klientów. Każdy poprawiony i wysłany szkic też go uczy — im częściej poprawiasz, tym bardziej brzmi jak Ty.</p>
+        </div>
+        <a class="btn btn-sm btn-outline-secondary" href="/trainer/retencja"><i class="bi bi-heart-pulse me-1"></i>Mogą odejść</a>
+    </div>
+
+    @if (_style is null)
+    {
+        <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+    }
+    else
+    {
+        <div class="ms-grid">
+            <section class="rt-card">
+                <h2 class="ms-h">Jak piszesz</h2>
+                <div class="ms-field">
+                    <span class="ms-label">Forma</span>
+                    <div class="md-purposes">
+                        <button type="button" class="md-chip @(_style.Address == "ty" ? "on" : "")" @onclick='() => _style.Address = "ty"'>Na Ty</button>
+                        <button type="button" class="md-chip @(_style.Address == "pan" ? "on" : "")" @onclick='() => _style.Address = "pan"'>Grzecznościowo</button>
+                    </div>
+                </div>
+                <div class="ms-field">
+                    <span class="ms-label">Emoji</span>
+                    <div class="md-purposes">
+                        @foreach (var (v, l) in new[] { ("brak", "Bez emoji"), ("czasem", "Czasem"), ("często", "Często") })
+                        {
+                            <button type="button" class="md-chip @(_style.Emoji == v ? "on" : "")" @onclick="() => _style.Emoji = v">@l</button>
+                        }
+                    </div>
+                </div>
+                <div class="ms-field">
+                    <span class="ms-label">Długość</span>
+                    <div class="md-purposes">
+                        <button type="button" class="md-chip @(_style.Length == "krotko" ? "on" : "")" @onclick='() => _style.Length = "krotko"'>Krótko (1–2 zdania)</button>
+                        <button type="button" class="md-chip @(_style.Length == "srednio" ? "on" : "")" @onclick='() => _style.Length = "srednio"'>Trochę dłużej (3–4 zdania)</button>
+                    </div>
+                </div>
+                <div class="row g-2">
+                    <div class="col-sm-5">
+                        <label class="ms-label" for="ms-greet">Powitanie</label>
+                        <input id="ms-greet" class="form-control form-control-sm" @bind="_style.Greeting" maxlength="40" placeholder="@(_style.Address == "pan" ? "Dzień dobry" : "Cześć")" />
+                    </div>
+                    <div class="col-sm-7">
+                        <label class="ms-label" for="ms-sign">Podpis</label>
+                        <input id="ms-sign" class="form-control form-control-sm" @bind="_style.Signature" maxlength="80" placeholder="np. Trener Janek" />
+                    </div>
+                    <div class="col-12">
+                        <label class="ms-label" for="ms-notes">Opisz swój styl (opcjonalnie)</label>
+                        <input id="ms-notes" class="form-control form-control-sm" @bind="_style.Notes" maxlength="300" placeholder="np. luźno, konkretnie, z humorem; nie piszę „kochani”" />
+                    </div>
+                </div>
+                <div class="d-flex gap-2 align-items-center mt-3">
+                    <button class="btn btn-sm btn-primary" @onclick="SaveAsync"><i class="bi bi-check-lg me-1"></i>Zapisz</button>
+                    @if (_saved) { <span class="small text-success">Zapisane.</span> }
+                </div>
+            </section>
+
+            <section class="rt-card">
+                <h2 class="ms-h">Podgląd</h2>
+                <div class="md-purposes mb-2">
+                    @foreach (var p in Enum.GetValues<DraftPurpose>())
+                    {
+                        <button type="button" class="md-chip @(p == _preview ? "on" : "")" @onclick="() => _preview = p">@MessageTemplates.Label(p)</button>
+                    }
+                </div>
+                <div class="ms-bubble">@Preview</div>
+                <p class="small text-muted mb-0 mt-2">Tak wygląda szablon bez AI („Ania” zamiast imienia klienta). Z AI asystent przeredaguje go według przykładów poniżej.</p>
+            </section>
+        </div>
+
+        <section class="rt-card mt-3">
+            <h2 class="ms-h">Przykłady Twoich wiadomości</h2>
+            <p class="small text-muted">Wklej 2–3 wiadomości wysłane klientom — imiona zamienimy na [klient], numery i e-maile usuniemy. Poprawione szkice dopisują się tu same (najwyżej @PTScheduler.Web.Services.MessageDraftService.MaxLearned najnowszych).</p>
+            <textarea class="form-control form-control-sm" rows="3" @bind="_newExample" placeholder="np. Hej! Jak tam po wczorajszych nogach? 😅 Widzimy się w czwartek o 18?"></textarea>
+            <div class="d-flex gap-2 align-items-center mt-2">
+                <button class="btn btn-sm btn-outline-primary" @onclick="AddAsync"><i class="bi bi-plus-lg me-1"></i>Dodaj przykład</button>
+                @if (_error is not null) { <span class="small text-danger">@_error</span> }
+            </div>
+            @if (_examples.Count > 0)
+            {
+                <ul class="ms-examples">
+                    @foreach (var e in _examples)
+                    {
+                        <li>
+                            <span class="ms-src @(e.Source == "poprawka" ? "learned" : "")">@(e.Source == "poprawka" ? "z poprawki" : "Twój przykład")</span>
+                            <span class="ms-text">@e.Text</span>
+                            <button type="button" class="btn btn-sm btn-link text-muted" aria-label="Usuń przykład" @onclick="() => DeleteAsync(e.Id)"><i class="bi bi-trash"></i></button>
+                        </li>
+                    }
+                </ul>
+            }
+        </section>
+    }
+</div>
+
+@code {
+    private PTScheduler.Domain.Entities.TrainerStyle? _style;
+    private List<PTScheduler.Domain.Entities.TrainerStyleExample> _examples = [];
+    private DraftPurpose _preview = DraftPurpose.Comeback;
+    private string _userId = "";
+    private string? _newExample;
+    private string? _error;
+    private bool _saved;
+
+    private string Preview => MessageTemplates.Build(_preview,
+        new(_style!.Address, _style.Emoji, _style.Greeting, _style.Signature),
+        new Dictionary<string, string> { ["liczba_treningow"] = "20", ["pozostale_wejscia"] = "1" }).Replace(MessageTemplates.ClientTag, "Ania");
+
+    protected override async Task OnInitializedAsync()
+    {
+        _userId = (await AuthState.GetAuthenticationStateAsync()).User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        _style = await Drafts.GetStyleAsync(_userId);
+        _examples = await Drafts.GetExamplesAsync(_userId);
+    }
+
+    private async Task SaveAsync()
+    {
+        await Drafts.SaveStyleAsync(_style!);
+        _saved = true;
+    }
+
+    private async Task AddAsync()
+    {
+        _error = await Drafts.AddExampleAsync(_userId, _newExample ?? "");
+        if (_error is null) _newExample = null;
+        _examples = await Drafts.GetExamplesAsync(_userId);
+    }
+
+    private async Task DeleteAsync(int id)
+    {
+        await Drafts.DeleteExampleAsync(_userId, id);
+        _examples = await Drafts.GetExamplesAsync(_userId);
+    }
+}

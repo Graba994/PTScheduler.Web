@@ -1,0 +1,29 @@
+@page "/uwaga"
+@using Microsoft.AspNetCore.Authorization
+@using PTScheduler.Domain.Constants
+@attribute [Authorize(Roles = Roles.Admin + "," + Roles.Trainer + "," + Roles.Subordinate)]
+@inject PTScheduler.Web.Services.AttentionService AttentionSvc
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+
+@* Wejście „Wymaga uwagi” z menu: od razu pierwsza zakładka, w której coś czeka. *@
+<div class="text-center text-muted py-5"><div class="spinner-border"></div></div>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        var isAdmin = user.IsInRole(Roles.Admin);
+        var owner = isAdmin || user.IsInRole(Roles.Trainer);
+        var target = owner ? "/trainer/retencja" : "/zaleglosci";
+        try
+        {
+            var c = await AttentionSvc.CountsAsync(userId, isAdmin, owner);
+            if (owner)
+                target = c.Risks > 0 ? "/trainer/retencja" : c.Debts > 0 ? "/zaleglosci" : c.Slots > 0 ? "/okienka" : c.Packages > 0 ? "/pakiety-koncza" : "/trainer/retencja";
+        }
+        catch { }
+        Nav.NavigateTo(target, replace: true);
+    }
+}

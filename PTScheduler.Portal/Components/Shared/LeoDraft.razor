@@ -1,0 +1,106 @@
+@inject EmailService Email
+@inject SiteSettingsService Settings
+@inject IJSRuntime JS
+
+@* Szkic odpowiedzi e-mail od Leo (AI albo szablon): kategoria, temat i treść do poprawienia, potem „Wyślij” albo „Kopiuj”.
+   Wysyłka w firmowym szablonie (EmailService.BrandedMessage: logo, karta, podpis ekipy, stopka) — „Podgląd”
+   pokazuje dokładnie to, co dostanie trener. Nic nie wychodzi samo — administrator zawsze czyta szkic przed wysłaniem. *@
+@if (_draft is null)
+{
+    <button type="button" class="btn btn-sm btn-outline-primary text-nowrap" @onclick="GenerateAsync" disabled="@_busy">
+        @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-pencil-square me-1"></i> }
+        @Label
+    </button>
+}
+else
+{
+    <div class="leo-draft">
+        <div class="leo-draft-head">
+            <img src="@PuppyArt.DataUri("think")" alt="" width="28" height="28" />
+            <span class="pp-chip pp-tone-info">@_draft.Category</span>
+            <span class="small text-muted">@(_draft.FromAi ? "szkic od AI — przeczytaj przed wysłaniem" : "szablon (bez AI)")</span>
+            <button type="button" class="btn-close btn-close-sm ms-auto" aria-label="Zamknij szkic" @onclick="() => _draft = null"></button>
+        </div>
+        @if (_draft.Error is { } err) { <div class="small text-muted mb-1">@err</div> }
+        <input class="form-control form-control-sm mb-2" @bind="_subject" aria-label="Temat e-maila" maxlength="150" />
+        @if (_preview)
+        {
+            <iframe class="leo-preview" srcdoc="@PreviewHtml" title="Podgląd e-maila"></iframe>
+        }
+        else
+        {
+            <textarea class="form-control form-control-sm" rows="8" @bind="_body" @bind:event="oninput" aria-label="Treść e-maila"></textarea>
+            <div class="form-text">Logo, podpis „Ekipa @_brand” i stopkę doda szablon — zobaczysz je w podglądzie.</div>
+        }
+        <div class="d-flex gap-2 flex-wrap align-items-center mt-2">
+            @if (!string.IsNullOrWhiteSpace(To))
+            {
+                <button type="button" class="btn btn-sm btn-primary" @onclick="SendAsync" disabled="@_busy"><i class="bi bi-send me-1"></i>Wyślij na @To</button>
+            }
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _preview = !_preview"><i class="bi @(_preview ? "bi-pencil" : "bi-eye") me-1"></i>@(_preview ? "Edytuj" : "Podgląd")</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CopyAsync"><i class="bi bi-clipboard me-1"></i>Kopiuj</button>
+            <button type="button" class="btn btn-sm btn-link" @onclick="GenerateAsync" disabled="@_busy">Napisz od nowa</button>
+            @if (_status is not null) { <span class="small @(_statusError ? "text-danger" : "text-success")">@_status</span> }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public Func<Task<AssistantService.Draft>> Generate { get; set; } = default!;
+    [Parameter] public string? To { get; set; }
+    [Parameter] public string Label { get; set; } = "Szkic odpowiedzi";
+    /// <summary>Po wysłaniu (np. oznacz opinię jako przeczytaną, dopisz notatkę do zgłoszenia).</summary>
+    [Parameter] public EventCallback<string> OnSent { get; set; }
+
+    private AssistantService.Draft? _draft;
+    private string _subject = "";
+    private string _body = "";
+    private bool _busy;
+    private string? _status;
+    private bool _statusError;
+    private bool _preview;
+    private string _brand = "Hantly";
+
+    private string PreviewHtml => EmailService.ForPreview(EmailService.BrandedMessage(_body, _brand));
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { if (await Settings.GetAsync(SiteSettingsService.Keys.BrandName) is { Length: > 0 } b) _brand = b.Trim(); } catch { }
+    }
+
+    private async Task GenerateAsync()
+    {
+        _busy = true;
+        _status = null;
+        try
+        {
+            _draft = await Generate();
+            _subject = _draft.Subject;
+            _body = EmailService.StripSignature(_draft.Body, _brand);
+            _preview = false;
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task SendAsync()
+    {
+        if (string.IsNullOrWhiteSpace(To) || string.IsNullOrWhiteSpace(_body)) return;
+        _busy = true;
+        var (ok, error) = await Email.SendAsync(To.Trim(), _subject.Trim(), EmailService.BrandedMessage(_body, _brand));
+        _busy = false;
+        _statusError = !ok;
+        _status = ok ? "Wysłane." : error ?? "Nie udało się wysłać.";
+        if (ok) await OnSent.InvokeAsync(_subject.Trim());
+    }
+
+    private async Task CopyAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", $"{_subject}\n\n{_body}\n\nEkipa {_brand}");
+            _statusError = false;
+            _status = "Skopiowane.";
+        }
+        catch (JSException) { _statusError = true; _status = "Przeglądarka nie pozwoliła skopiować — zaznacz tekst ręcznie."; }
+    }
+}

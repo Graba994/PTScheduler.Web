@@ -1,0 +1,201 @@
+@page "/panel/testerzy"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject TesterService TesterSvc
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject AuthenticationStateProvider AuthState
+@rendermode InteractiveServer
+
+@* Program testerów: 3 miesiące za darmo za cotygodniową opinię z aplikacji (ocena, co przeszkadzało, czego brakuje).
+   Kod z programu (Kody zaproszeń / Spotkania → „3 miesiące gratis”) włącza testera sam; tu można dodać ręcznie. *@
+
+<PageTitle>Testerzy — Hantly Portal</PageTitle>
+
+<PanelHeader Title="Testerzy" Icon="bi-clipboard2-pulse" IconClass="pp-tone-info"
+             Subtitle="Trzy miesiące za darmo za cotygodniową opinię. Bez rachunków i blokady do końca programu." />
+
+@if (_message is not null)
+{
+    <div class="alert @(_error ? "alert-danger" : "alert-success") py-2 small d-flex justify-content-between align-items-center">@_message<button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null"></button></div>
+}
+
+@{
+    var active = _rows.Where(r => r.Tenant.TesterUntil > DateTime.UtcNow).ToList();
+    var thisWeek = active.Count(r => r.Week >= 1 && r.Feedback.Any(f => f.Week == r.Week));
+    var expected = active.Count(r => r.Week >= 1);
+    var all = _rows.SelectMany(r => r.Feedback).ToList();
+}
+<div class="ts-kpis">
+    <div><b>@active.Count</b><span>aktywnych testerów</span></div>
+    <div><b>@thisWeek / @expected</b><span>opinii za ten tydzień</span></div>
+    <div><b>@(all.Count == 0 ? "—" : all.Average(f => f.Rating).ToString("0.0"))</b><span>średnia ocena tygodnia</span></div>
+    <div class="@(active.Any(r => r.Missed >= 2) ? "warn" : "")"><b>@active.Count(r => r.Missed >= 2)</b><span>zalega 2+ tygodnie</span></div>
+</div>
+
+<section class="pp-card">
+    <h2 class="ts-h2">Dodaj testera</h2>
+    <p class="small text-muted">Kody „3 miesiące gratis” z Kodów zaproszeń i ze Spotkań włączają program same po uruchomieniu aplikacji. Tutaj — dla studia, które już działa.</p>
+    <div class="row g-2 align-items-end">
+        <div class="col-md-6">
+            <label class="form-label small fw-semibold" for="ts-tenant">Studio</label>
+            <select id="ts-tenant" class="form-select" @bind="_newTenant">
+                <option value="0">Wybierz…</option>
+                @foreach (var t in _candidates)
+                {
+                    <option value="@t.Id">@t.CompanyName (@t.Slug)</option>
+                }
+            </select>
+        </div>
+        <div class="col-6 col-md-2">
+            <label class="form-label small fw-semibold" for="ts-days">Na ile dni</label>
+            <input id="ts-days" type="number" min="7" max="365" class="form-control" @bind="_newDays" />
+        </div>
+        <div class="col-6 col-md-auto">
+            <button class="btn btn-primary" @onclick="AddAsync" disabled="@(_newTenant == 0)"><i class="bi bi-plus-lg me-1"></i>Dodaj do programu</button>
+        </div>
+    </div>
+</section>
+
+@if (_rows.Count == 0)
+{
+    <div class="pp-card text-muted small"><i class="bi bi-info-circle me-1"></i>Jeszcze nikt nie jest w programie. Pierwszy tester pojawi się po uruchomieniu aplikacji z kodu „3 miesiące gratis”.</div>
+}
+
+<div class="ts-grid">
+    @foreach (var r in _rows)
+    {
+        var t = r.Tenant;
+        var on = t.TesterUntil > DateTime.UtcNow;
+        var days = (int)Math.Max(0, ((t.TesterUntil ?? DateTime.UtcNow) - t.TesterSince!.Value).TotalDays);
+        var done = (int)Math.Clamp((DateTime.UtcNow - t.TesterSince.Value).TotalDays, 0, days);
+        <article class="pp-card ts-card @(on ? "" : "is-ended")">
+            <div class="d-flex justify-content-between gap-2 align-items-start">
+                <div class="min-w-0">
+                    <a class="ts-name" href="/panel/tenants/@t.Id">@t.CompanyName</a>
+                    <div class="small text-muted">@t.Slug · od @t.TesterSince.Value.ToLocalTime().ToString("dd.MM") do @t.TesterUntil?.ToLocalTime().ToString("dd.MM.yyyy")</div>
+                </div>
+                @if (!on)
+                {
+                    <span class="ts-chip">zakończony</span>
+                }
+                else if (r.Week == 0)
+                {
+                    <span class="ts-chip">pierwszy tydzień</span>
+                }
+                else if (r.Due)
+                {
+                    <span class="ts-chip warn">czeka na opinię · tydz. @r.Week</span>
+                }
+                else
+                {
+                    <span class="ts-chip ok"><i class="bi bi-check2"></i> tydz. @r.Week</span>
+                }
+            </div>
+
+            <div class="ts-progress" title="@($"Dzień {done} z {days}")"><span style="width:@(days == 0 ? 0 : done * 100 / days)%"></span></div>
+            <div class="ts-weeks" aria-label="Opinie w kolejnych tygodniach">
+                @for (var w = 1; w <= r.Weeks; w++)
+                {
+                    var fb = r.Feedback.FirstOrDefault(f => f.Week == w);
+                    var cls = fb is not null ? $"r{fb.Rating}" : w < r.Week || (!on && w <= r.Week) ? "miss" : w == r.Week ? "due" : "future";
+                    <i class="@cls" title="@($"Tydzień {w}: {(fb is null ? (cls == "miss" ? "brak opinii" : cls == "due" ? "czeka" : "jeszcze nie") : $"ocena {fb.Rating}/5")}")"></i>
+                }
+            </div>
+            <div class="small text-muted mb-2">
+                Opinie: @r.Feedback.Count@(r.Missed > 0 ? $" · bez opinii: {r.Missed} tydz." : "")@(r.AvgRating is { } avg ? $" · średnio {avg:0.0}/5" : "")
+            </div>
+
+            @if (r.Feedback.FirstOrDefault() is { } last)
+            {
+                <div class="ts-last">
+                    <div class="ts-stars" aria-label="@($"Ocena {last.Rating} z 5")">@(new string('★', last.Rating))<span>@(new string('★', 5 - last.Rating))</span> <small>tydz. @last.Week</small></div>
+                    @if (last.Annoyed is not null) { <p class="ts-q bad"><i class="bi bi-emoji-frown"></i>@last.Annoyed</p> }
+                    @if (last.Missing is not null) { <p class="ts-q"><i class="bi bi-lightbulb"></i>@last.Missing</p> }
+                </div>
+            }
+
+            <div class="d-flex flex-wrap gap-2 mt-2">
+                <button class="btn btn-outline-primary btn-sm" @onclick="() => ExtendAsync(t.Id, 30)"><i class="bi bi-calendar-plus me-1"></i>+30 dni</button>
+                @if (on)
+                {
+                    @if (_confirmEnd == t.Id)
+                    {
+                        <button class="btn btn-danger btn-sm" @onclick="() => EndAsync(t.Id)">Zakończ teraz</button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => _confirmEnd = null">Anuluj</button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => _confirmEnd = t.Id">Zakończ program</button>
+                    }
+                }
+            </div>
+        </article>
+    }
+</div>
+
+@if (all.Count > 0)
+{
+    <section class="pp-card">
+        <h2 class="ts-h2">Wszystkie opinie</h2>
+        <ul class="ts-feed">
+            @foreach (var f in all.OrderByDescending(f => f.CreatedAt).Take(60))
+            {
+                var name = _rows.First(r => r.Tenant.Id == f.TenantId).Tenant.CompanyName;
+                <li>
+                    <div class="ts-feed-head"><b>@name</b> <span class="text-muted">tydz. @f.Week · @f.CreatedAt.ToLocalTime().ToString("dd.MM HH:mm")</span>
+                        <span class="ts-stars ms-auto">@(new string('★', f.Rating))<span>@(new string('★', 5 - f.Rating))</span></span></div>
+                    @if (f.Annoyed is not null) { <p class="ts-q bad"><i class="bi bi-emoji-frown"></i>@f.Annoyed</p> }
+                    @if (f.Missing is not null) { <p class="ts-q"><i class="bi bi-lightbulb"></i>@f.Missing</p> }
+                </li>
+            }
+        </ul>
+    </section>
+}
+
+@code {
+    private List<TesterService.Row> _rows = [];
+    private List<Tenant> _candidates = [];
+    private int _newTenant, _newDays = TesterRules.DefaultDays;
+    private int? _confirmEnd;
+    private string? _message;
+    private bool _error;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _rows = await TesterSvc.ListAsync();
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var now = DateTime.UtcNow;
+        _candidates = await db.Tenants.AsNoTracking().Where(t => t.Status == TenantStatus.Active && !(t.TesterUntil > now))
+            .OrderBy(t => t.CompanyName).ToListAsync();
+    }
+
+    private async Task<string> WhoAsync() => (await AuthState.GetAuthenticationStateAsync()).User.Identity?.Name ?? "admin";
+
+    private async Task AddAsync()
+    {
+        if (_newTenant == 0) return;
+        await TesterSvc.StartAsync(_newTenant, Math.Clamp(_newDays, 7, 365), await WhoAsync());
+        Show("Dodano do programu — aplikacja pokaże ankietę po pierwszym tygodniu.", false);
+        _newTenant = 0;
+        await LoadAsync();
+    }
+
+    private async Task ExtendAsync(int id, int days)
+    {
+        await TesterSvc.ExtendAsync(id, days, await WhoAsync());
+        Show($"Przedłużono o {days} dni.", false);
+        await LoadAsync();
+    }
+
+    private async Task EndAsync(int id)
+    {
+        await TesterSvc.EndAsync(id, await WhoAsync());
+        _confirmEnd = null;
+        Show("Program zakończony. Okres próbny planu kończy się sam w ustalonym terminie.", false);
+        await LoadAsync();
+    }
+
+    private void Show(string text, bool error) { _message = text; _error = error; }
+}

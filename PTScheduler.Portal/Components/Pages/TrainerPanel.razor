@@ -1,0 +1,422 @@
+@page "/moje-konto"
+@layout PublicLayout
+@inject TrainerAccounts Trainers
+@inject TenantService TenantSvc
+@inject UpdateService Updates
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject NavigationManager Nav
+@inject AccountingService Accounting
+
+@* Panel trenera na stronie Hantly: gdzie jest aplikacja, w jakim jest stanie, plan i płatności.
+   Logowanie hasłem z kreatora albo linkiem z e-maila (osobny schemat — bez dostępu do panelu admina). *@
+
+<PageTitle>Twój panel — Hantly</PageTitle>
+
+<section class="tp">
+    <div class="tp-wrap">
+        <header class="tp-head">
+            <div>
+                <div class="tp-eyebrow"><i class="bi bi-person-badge"></i>Twój panel Hantly</div>
+                <h1>Cześć@(FirstName is { } n ? $", {n}" : "")!</h1>
+                <p>Zalogowano jako <b>@_email</b></p>
+            </div>
+            <a class="tp-logout" href="/api/konto/wyloguj"><i class="bi bi-box-arrow-right"></i>Wyloguj</a>
+        </header>
+
+        @if (Blad == "stripe")
+        {
+            <div class="tp-note" role="alert"><i class="bi bi-exclamation-circle"></i>Stripe chwilowo nie odpowiada. Spróbuj za kilka minut albo napisz do nas.</div>
+        }
+
+        @if (_apps.Count == 0)
+        {
+            <div class="tp-card tp-empty">
+                <i class="bi bi-phone"></i>
+                <h2>Nie widzimy jeszcze Twojej aplikacji</h2>
+                <p>Zbuduj ją w kreatorze — zajmie to około minuty, a tutaj zobaczysz jej adres, stan i płatności.</p>
+                <a class="tp-btn" href="/register"><i class="bi bi-magic"></i>Zbuduj aplikację</a>
+            </div>
+        }
+
+        @foreach (var app in _apps)
+        {
+            var t = app.Tenant;
+            var st = app.State;
+            <article class="tp-app" aria-label="@t.CompanyName">
+                <div class="tp-card tp-hero tone-@st.Tone">
+                    <div class="tp-hero-top">
+                        <span class="tp-mono" aria-hidden="true">@Monogram(t.CompanyName)</span>
+                        <div class="tp-hero-name">
+                            <h2>@t.CompanyName</h2>
+                            <span class="tp-plan-tag">plan @(t.Plan?.Name ?? t.PlanId)</span>
+                        </div>
+                        <span class="tp-pill tone-@st.Tone"><i class="bi @st.Icon"></i>@st.Label</span>
+                    </div>
+
+                    <div class="tp-addr">
+                        <small>@(st.Key is "running" or "updating" or "down" ? "Twoja aplikacja i strona są pod adresem" : "Adres Twojej aplikacji (zarezerwowany)")</small>
+                        <div class="tp-addr-row">
+                            <a class="tp-addr-url" href="@app.Url" target="_blank" rel="noopener">@app.Host</a>
+                            <button type="button" class="tp-copy" data-copy="@app.Url" onclick="navigator.clipboard && navigator.clipboard.writeText(this.dataset.copy).then(() => { this.classList.add('ok'); this.querySelector('span').textContent = 'Skopiowano'; })">
+                                <i class="bi bi-copy"></i><span>Kopiuj</span>
+                            </button>
+                        </div>
+                        @if (!string.IsNullOrEmpty(t.CustomDomain))
+                        {
+                            <div class="tp-domain">
+                                <i class="bi bi-globe"></i>
+                                <span>Własna domena <b>@t.CustomDomain</b> — @DomainText(t.CustomDomainStatus)</span>
+                            </div>
+                        }
+                    </div>
+
+                    <div class="tp-status tone-@st.Tone">
+                        <i class="bi @st.Icon"></i>
+                        <p>@st.Text</p>
+                    </div>
+
+                    @if (st.Step is >= 0 and < 4)
+                    {
+                        <ol class="tp-steps" aria-label="Etapy uruchomienia">
+                            @for (var i = 0; i < TrainerPanelStatus.Steps.Length; i++)
+                            {
+                                <li class="@(i < st.Step ? "done" : i == st.Step ? "now" : "")">
+                                    <span class="tp-step-dot">@if (i < st.Step) { <i class="bi bi-check-lg"></i> } else { @(i + 1) }</span>
+                                    <span>@TrainerPanelStatus.Steps[i]</span>
+                                </li>
+                            }
+                        </ol>
+                    }
+
+                    <div class="tp-actions">
+                        @if (st.Key is "running" or "updating" or "down")
+                        {
+                            <a class="tp-btn tp-btn-lg" href="@($"{app.Url}/Account/Login")" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i>Otwórz aplikację</a>
+                            <a class="tp-btn tp-btn-ghost" href="@app.Url" target="_blank" rel="noopener"><i class="bi bi-globe2"></i>Zobacz stronę jak klient</a>
+                        }
+                        else if (st.Key is "payment" or "card" or "preparing")
+                        {
+                            <a class="tp-btn tp-btn-lg" href="/register"><i class="bi bi-arrow-right-circle"></i>Dokończ w kreatorze</a>
+                        }
+                    </div>
+                </div>
+
+                <div class="tp-grid">
+                    <section class="tp-card" aria-label="Plan">
+                        <h3><i class="bi bi-gem"></i>Plan i rozliczenie</h3>
+                        <div class="tp-plan">
+                            <b>@(t.Plan?.Name ?? t.PlanId)</b>
+                            <span class="tp-price">@PriceText(t)</span>
+                        </div>
+                        <dl class="tp-dl">
+                            <dt>Rozliczenie</dt><dd>@(t.BillingInterval == "yearly" ? "rocznie" : "miesięcznie")</dd>
+                            <dt>Status</dt><dd>@BillingText(t)</dd>
+                            @if (t.TrialEndsAt is { } trial && trial > DateTime.UtcNow)
+                            {
+                                <dt>Okres próbny</dt><dd>do @trial.ToLocalTime().ToString("dd.MM.yyyy") <span class="tp-muted">(zostało @Math.Max(1, (int)Math.Ceiling((trial - DateTime.UtcNow).TotalDays)) dni)</span></dd>
+                            }
+                            @if (t.FreeMonths > 0)
+                            {
+                                <dt>Za darmo</dt><dd>@t.FreeMonths mies. z poleceń</dd>
+                            }
+                        </dl>
+                        @if (t.CancelRequestedAt is { } c)
+                        {
+                            <p class="tp-note"><i class="bi bi-calendar-x"></i>Rezygnacja zapisana @c.ToLocalTime().ToString("dd.MM.yyyy") — aplikacja zostanie uśpiona w dniu rozliczenia.</p>
+                        }
+                        <div class="tp-card-actions">
+                            @if (app.CanManage)
+                            {
+                                <a class="tp-btn tp-btn-sm" href="/moje-konto/subskrypcja/@t.Id"><i class="bi bi-credit-card-2-front"></i>Zarządzaj subskrypcją</a>
+                            }
+                            <a class="tp-btn tp-btn-sm tp-btn-ghost" href="/#cennik"><i class="bi bi-stars"></i>Porównaj plany</a>
+                        </div>
+                    </section>
+
+                    <section class="tp-card" aria-label="Płatności">
+                        <h3><i class="bi bi-receipt"></i>Płatności</h3>
+                        @if (app.Bills.Count == 0)
+                        {
+                            <p class="tp-muted">@(string.IsNullOrEmpty(t.StripeCustomerId) ? "Nie ma jeszcze rachunków. Pierwszy przyjdzie e-mailem po okresie próbnym." : "Płacisz kartą — faktury znajdziesz w „Zarządzaj subskrypcją”.")</p>
+                        }
+                        else
+                        {
+                            <ul class="tp-bills">
+                                @foreach (var b in app.Bills)
+                                {
+                                    var unpaid = b.Status == TenantBillStatus.Issued;
+                                    <li>
+                                        <span class="tp-bill-main"><b>@b.PeriodStart.ToString("MM.yyyy")</b><small>@b.Number</small></span>
+                                        <span class="tp-bill-amt">@b.Amount.ToString("0.00") zł</span>
+                                        @if (unpaid)
+                                        {
+                                            <a class="tp-chip warn" href="/rachunek/@b.PayToken">Zapłać<i class="bi bi-arrow-right"></i></a>
+                                        }
+                                        else
+                                        {
+                                            <span class="tp-chip @(b.Status == TenantBillStatus.Paid ? "ok" : "")">@(b.Status == TenantBillStatus.Paid ? "Opłacony" : "Anulowany")</span>
+                                        }
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </section>
+
+                    <section class="tp-card tp-invoice" id="dane-do-faktury" aria-label="Dane do rachunku">
+                        <h3><i class="bi bi-person-vcard"></i>Dane do rachunku i faktury</h3>
+                        @if (Dane == "ok")
+                        {
+                            <p class="tp-ok" role="status"><i class="bi bi-check-circle"></i>Zapisane. Następne dokumenty wystawimy na te dane.</p>
+                        }
+                        else if (Dane == "blad" || AccountingService.BuyerErrors.Contains(Dane))
+                        {
+                            <p class="tp-note" role="alert"><i class="bi bi-exclamation-circle"></i>@(Dane == "blad" ? "Formularz wygasł — wyślij go jeszcze raz." : Dane)</p>
+                        }
+                        <form method="post" action="/api/konto/dane-do-faktury" data-enhance="false" class="tp-form">
+                            <AntiforgeryToken />
+                            <input type="hidden" name="tenant" value="@t.Id" />
+                            <fieldset class="tp-seg">
+                                <legend class="visually-hidden">Na kogo dokument</legend>
+                                <label><input type="radio" name="typ" value="osoba" checked="@string.IsNullOrEmpty(t.InvoiceTaxId)" /><span>Osoba prywatna</span></label>
+                                <label><input type="radio" name="typ" value="firma" checked="@(!string.IsNullOrEmpty(t.InvoiceTaxId))" /><span>Firma (z NIP)</span></label>
+                            </fieldset>
+                            <label class="tp-field"><span>Imię i nazwisko albo nazwa firmy</span>
+                                <input name="nazwa" maxlength="300" value="@(t.InvoiceName ?? "")" placeholder="@t.OwnerName" autocomplete="organization" /></label>
+                            <label class="tp-field"><span>Adres</span>
+                                <textarea name="adres" rows="2" maxlength="500" placeholder="ul. Przykładowa 1&#10;00-001 Miasto" autocomplete="street-address">@(t.InvoiceAddress ?? "")</textarea></label>
+                            <label class="tp-field tp-nip"><span>NIP (tylko dla firmy)</span>
+                                <input name="nip" maxlength="20" inputmode="numeric" value="@(t.InvoiceTaxId ?? "")" placeholder="1234567890" /></label>
+                            <label class="tp-field"><span>E-mail do dokumentów</span>
+                                <input name="email" type="email" maxlength="256" value="@(t.InvoiceEmail ?? "")" placeholder="@t.OwnerEmail" autocomplete="email" /></label>
+                            <button class="tp-btn tp-btn-sm" type="submit"><i class="bi bi-check2"></i>Zapisz dane</button>
+                        </form>
+                        @if (app.Docs.Count > 0)
+                        {
+                            <h4 class="tp-sub">Twoje dokumenty</h4>
+                            <ul class="tp-bills">
+                                @foreach (var d in app.Docs)
+                                {
+                                    <li>
+                                        <span class="tp-bill-main"><b>@d.Number</b><small>@SalesDocumentKinds.Label(d.Kind) · @d.IssueDate.ToString("dd.MM.yyyy")</small></span>
+                                        <span class="tp-bill-amt">@d.Gross.ToString("0.00") zł</span>
+                                        <a class="tp-chip" href="/moje-konto/dokument/@(d.Id).pdf"><i class="bi bi-download"></i>PDF</a>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </section>
+
+                    <section class="tp-card tp-help" aria-label="Pomoc">
+                        <h3><i class="bi bi-chat-heart"></i>Pomoc</h3>
+                        <p>Coś nie działa albo chcesz zmienić plan? Odpisujemy zwykle tego samego dnia.</p>
+                        <a class="tp-btn tp-btn-sm tp-btn-ghost" href="mailto:kontakt@@hantly.pl?subject=@Uri.EscapeDataString(t.CompanyName)"><i class="bi bi-envelope"></i>kontakt@@hantly.pl</a>
+                        <p class="tp-muted tp-small">Hasło do aplikacji zmienisz w samej aplikacji: Moje konto → Bezpieczeństwo.</p>
+                    </section>
+                </div>
+            </article>
+        }
+    </div>
+</section>
+
+<style>
+    .tp { min-height: 80vh; padding: 104px 16px 64px; background: var(--pts-bg); color: var(--pts-text); font-family: var(--pts-font-body); }
+    .tp-wrap { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: 22px; }
+    .tp-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    .tp-head h1 { font-family: var(--pts-font-display); font-weight: 800; font-size: clamp(1.6rem, 3vw, 2.2rem); margin: 4px 0 2px; text-wrap: balance; }
+    .tp-head p { margin: 0; color: var(--pts-text-secondary); font-size: .9rem; }
+    .tp-eyebrow { display: inline-flex; gap: 8px; align-items: center; font-size: .74rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--pts-primary); }
+    .tp-logout { display: inline-flex; gap: 6px; align-items: center; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--pts-border); color: var(--pts-text-secondary); text-decoration: none; font-weight: 600; font-size: .86rem; background: var(--pts-surface); }
+    .tp-logout:hover { color: var(--pts-primary); border-color: var(--pts-primary-light); }
+
+    .tp-app { display: flex; flex-direction: column; gap: 16px; }
+    .tp-card { background: var(--pts-surface); border: 1px solid var(--pts-border); border-radius: 22px; padding: 22px; box-shadow: var(--pts-shadow); }
+    .tp-card h3 { display: flex; align-items: center; gap: 8px; font-family: var(--pts-font-display); font-size: 1rem; font-weight: 800; margin: 0 0 14px; }
+    .tp-card h3 i { color: var(--pts-primary); }
+
+    .tp-hero { padding: 26px; display: flex; flex-direction: column; gap: 18px; position: relative; overflow: hidden; }
+    .tp-hero::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--tone-c, var(--pts-primary)); }
+    .tone-ok { --tone-c: #10b981; --tone-bg: #ecfdf5; --tone-tx: #065f46; }
+    .tone-info { --tone-c: #6366f1; --tone-bg: #eef2ff; --tone-tx: #3730a3; }
+    .tone-warn { --tone-c: #f59e0b; --tone-bg: #fffbeb; --tone-tx: #92400e; }
+    .tone-danger { --tone-c: #ef4444; --tone-bg: #fef2f2; --tone-tx: #991b1b; }
+    .tone-muted { --tone-c: #94a3b8; --tone-bg: #f1f5f9; --tone-tx: #334155; }
+    .tp-hero-top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+    .tp-mono { width: 52px; height: 52px; border-radius: 16px; display: grid; place-items: center; font-family: var(--pts-font-display); font-weight: 800; font-size: 1.2rem; color: #fff; background: linear-gradient(135deg, var(--pts-primary), var(--pts-primary-dark)); }
+    .tp-hero-name { flex: 1 1 200px; min-width: 0; }
+    .tp-hero-name h2 { font-family: var(--pts-font-display); font-weight: 800; font-size: 1.35rem; margin: 0; overflow-wrap: anywhere; }
+    .tp-plan-tag { font-size: .78rem; color: var(--pts-text-secondary); }
+    .tp-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; font-size: .82rem; font-weight: 800; color: var(--tone-tx); background: var(--tone-bg); border: 1px solid color-mix(in srgb, var(--tone-c) 35%, transparent); }
+    .tp-pill.tone-info i.bi-arrow-repeat, .tp-pill.tone-info i.bi-hammer { animation: tp-spin 2.4s linear infinite; }
+    @@keyframes tp-spin { to { transform: rotate(360deg); } }
+
+    .tp-addr { padding: 16px 18px; border-radius: 18px; background: color-mix(in srgb, var(--pts-primary) 6%, var(--pts-surface)); border: 1.5px solid color-mix(in srgb, var(--pts-primary) 22%, transparent); }
+    .tp-addr small { display: block; font-size: .78rem; font-weight: 600; color: var(--pts-text-secondary); margin-bottom: 4px; }
+    .tp-addr-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .tp-addr-url { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 800; font-size: clamp(1.1rem, 2.6vw, 1.55rem); color: var(--pts-primary); text-decoration: none; overflow-wrap: anywhere; }
+    .tp-addr-url:hover { text-decoration: underline; }
+    .tp-copy { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--pts-border); background: var(--pts-surface); font: inherit; font-size: .78rem; font-weight: 700; color: var(--pts-text-secondary); cursor: pointer; }
+    .tp-copy:hover, .tp-copy.ok { color: var(--pts-primary); border-color: var(--pts-primary-light); }
+    .tp-domain { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-size: .84rem; color: var(--pts-text-secondary); }
+
+    .tp-status { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border-radius: 16px; background: var(--tone-bg); color: var(--tone-tx); }
+    .tp-status i { font-size: 1.2rem; margin-top: 1px; }
+    .tp-status p { margin: 0; font-size: .92rem; line-height: 1.5; }
+
+    .tp-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+    .tp-steps li { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; font-size: .76rem; font-weight: 600; color: var(--pts-text-secondary); }
+    .tp-steps li::before { content: ""; position: absolute; top: 15px; left: calc(-50% + 18px); right: calc(50% + 18px); height: 2px; background: var(--pts-border); }
+    .tp-steps li:first-child::before { display: none; }
+    .tp-steps li.done::before, .tp-steps li.now::before { background: var(--pts-primary); }
+    .tp-step-dot { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; background: var(--pts-surface-alt); border: 2px solid var(--pts-border); position: relative; z-index: 1; }
+    .tp-steps li.done .tp-step-dot { background: var(--pts-primary); border-color: var(--pts-primary); color: #fff; }
+    .tp-steps li.now { color: var(--pts-text); }
+    .tp-steps li.now .tp-step-dot { border-color: var(--pts-primary); color: var(--pts-primary); box-shadow: 0 0 0 5px color-mix(in srgb, var(--pts-primary) 15%, transparent); }
+
+    .tp-actions, .tp-card-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .tp-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 16px; border-radius: 14px; border: 0; font: inherit; font-weight: 700; font-size: .9rem; text-decoration: none; color: #fff; background: var(--pts-primary); cursor: pointer; }
+    .tp-btn:hover { color: #fff; background: var(--pts-primary-dark); }
+    .tp-btn-lg { padding: 14px 22px; font-size: 1rem; border-radius: 16px; box-shadow: 0 10px 24px -12px var(--pts-primary); }
+    .tp-btn-sm { padding: 8px 13px; font-size: .84rem; border-radius: 12px; }
+    .tp-btn-ghost { color: var(--pts-text); background: var(--pts-surface-alt); }
+    .tp-btn-ghost:hover { color: var(--pts-primary); background: color-mix(in srgb, var(--pts-primary) 8%, var(--pts-surface)); }
+    .tp-btn:focus-visible, .tp-copy:focus-visible, .tp-logout:focus-visible { outline: 3px solid var(--pts-primary-light); outline-offset: 2px; }
+
+    .tp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+    .tp-plan { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+    .tp-plan b { font-family: var(--pts-font-display); font-size: 1.3rem; }
+    .tp-price { font-weight: 800; color: var(--pts-primary); font-variant-numeric: tabular-nums; }
+    .tp-dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: .88rem; margin: 0 0 14px; }
+    .tp-dl dt { color: var(--pts-text-secondary); font-weight: 600; }
+    .tp-dl dd { margin: 0; }
+    .tp-muted { color: var(--pts-text-secondary); font-size: .88rem; }
+    .tp-small { font-size: .78rem; margin: 12px 0 0; }
+    .tp-note { display: flex; gap: 8px; padding: 10px 12px; border-radius: 12px; background: #fffbeb; color: #92400e; font-size: .84rem; }
+    .tp-help p { font-size: .9rem; line-height: 1.5; margin: 0 0 12px; }
+
+    .tp-bills { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+    .tp-bills li { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--pts-border); font-size: .88rem; }
+    .tp-bills li:first-child { border-top: 0; padding-top: 0; }
+    .tp-bill-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .tp-bill-main small { color: var(--pts-text-secondary); font-size: .74rem; }
+    .tp-bill-amt { font-weight: 700; font-variant-numeric: tabular-nums; }
+    .tp-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 999px; font-size: .74rem; font-weight: 700; background: var(--pts-surface-alt); color: var(--pts-text-secondary); text-decoration: none; }
+    .tp-chip.ok { background: #ecfdf5; color: #047857; }
+    .tp-chip.warn { background: #f59e0b; color: #fff; }
+    .tp-chip.warn:hover { color: #fff; background: #d97706; }
+
+    .tp-form { display: flex; flex-direction: column; gap: 10px; }
+    .tp-field { display: flex; flex-direction: column; gap: 4px; font-size: .8rem; font-weight: 700; color: var(--pts-text-secondary); }
+    .tp-field input, .tp-field textarea { font: inherit; font-size: .9rem; font-weight: 400; color: var(--pts-text); background: var(--pts-surface); border: 1px solid var(--pts-border); border-radius: 12px; padding: 9px 12px; }
+    .tp-field input:focus, .tp-field textarea:focus { outline: 3px solid color-mix(in srgb, var(--pts-primary) 25%, transparent); border-color: var(--pts-primary); }
+    .tp-seg { display: flex; gap: 6px; border: 0; margin: 0; padding: 4px; border-radius: 14px; background: var(--pts-surface-alt); }
+    .tp-seg label { flex: 1; }
+    .tp-seg input { position: absolute; opacity: 0; pointer-events: none; }
+    .tp-seg span { display: block; text-align: center; padding: 7px 10px; border-radius: 10px; font-size: .84rem; font-weight: 700; color: var(--pts-text-secondary); cursor: pointer; }
+    .tp-seg input:checked + span { background: var(--pts-surface); color: var(--pts-primary); box-shadow: var(--pts-shadow); }
+    .tp-seg input:focus-visible + span { outline: 3px solid var(--pts-primary-light); }
+    .tp-form:has(input[value="osoba"]:checked) .tp-nip { display: none; }
+    .tp-form .tp-btn { align-self: flex-start; }
+    .tp-ok { display: flex; gap: 8px; padding: 10px 12px; border-radius: 12px; background: #ecfdf5; color: #047857; font-size: .84rem; margin: 0 0 12px; }
+    .tp-invoice .tp-note { margin: 0 0 12px; }
+    .tp-sub { font-size: .82rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--pts-text-secondary); margin: 18px 0 8px; }
+
+    .tp-empty { text-align: center; padding: 40px 24px; }
+    .tp-empty > i { font-size: 2.2rem; color: var(--pts-primary); }
+    .tp-empty h2 { font-family: var(--pts-font-display); font-weight: 800; font-size: 1.3rem; margin: 10px 0 6px; }
+    .tp-empty p { color: var(--pts-text-secondary); max-width: 46ch; margin: 0 auto 16px; }
+
+    @@media (max-width: 600px) {
+        .tp-hero { padding: 20px; }
+        .tp-hero-name { flex-basis: calc(100% - 70px); }
+        .tp-steps { grid-template-columns: 1fr; gap: 8px; }
+        .tp-steps li { flex-direction: row; text-align: left; }
+        .tp-steps li::before { display: none; }
+        .tp-actions .tp-btn { width: 100%; }
+    }
+    @@media (prefers-reduced-motion: reduce) { .tp-pill i { animation: none !important; } }
+</style>
+
+@code {
+    [CascadingParameter] public HttpContext? Http { get; set; }
+    [SupplyParameterFromQuery] public string? Blad { get; set; }
+    [SupplyParameterFromQuery] public string? Dane { get; set; }
+
+    private sealed record AppView(Tenant Tenant, TrainerPanelStatus.State State, string Url, string Host, List<TenantBill> Bills, bool CanManage, List<SalesDocument> Docs);
+
+    private string _email = "";
+    private List<AppView> _apps = [];
+    private string? FirstName => _apps.Select(a => TenantSetupPayload.SplitName(a.Tenant.OwnerName).First).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Http is null || await TrainerAccounts.CurrentEmailAsync(Http) is not { } email)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+        Http.Response.Headers.CacheControl = "no-store";
+        _email = email;
+        var tenants = await Trainers.TenantsOfAsync(email);
+        var updating = await UpdatingSlugsAsync(tenants);
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var ids = tenants.Select(t => t.Id).ToList();
+        var bills = await db.TenantBills.AsNoTracking().Where(b => ids.Contains(b.TenantId) && b.Status != TenantBillStatus.Cancelled)
+            .OrderByDescending(b => b.IssuedAt).ToListAsync();
+        var docs = await Accounting.DocumentsOfTenantsAsync(ids, 40);
+
+        foreach (var t in tenants)
+        {
+            var url = await TenantSvc.PublicUrlAsync(t);
+            var host = string.IsNullOrWhiteSpace(t.Domain) ? url.Replace("https://", "").Replace("http://", "") : t.Domain;
+            var own = bills.Where(b => b.TenantId == t.Id).Take(6).ToList();
+            var canManage = t.Status != TenantStatus.Destroyed
+                && (!string.IsNullOrEmpty(t.StripeCustomerId) || own.Count > 0 || (t.Plan?.MonthlyPrice ?? 0) > 0);
+            _apps.Add(new AppView(t, TrainerPanelStatus.From(t, updating.Contains(t.Slug)), url, host, own, canManage,
+                docs.Where(d => d.TenantId == t.Id).Take(8).ToList()));
+        }
+    }
+
+    /// <summary>Instancje, które Guardian właśnie aktualizuje (bez Guardiana — żadne; nie czekamy dłużej niż 2 s).</summary>
+    private async Task<HashSet<string>> UpdatingSlugsAsync(List<Tenant> tenants)
+    {
+        if (!tenants.Any(t => t.Status == TenantStatus.Active)) return [];
+        try
+        {
+            var call = Updates.GetGuardianStatusAsync();
+            if (await Task.WhenAny(call, Task.Delay(2000)) != call) return [];
+            var job = (await call)?.ActiveJob;
+            return job?.TenantResults?.Where(r => r.StartedAt is not null && r.CompletedAt is null).Select(r => r.Slug).ToHashSet() ?? [];
+        }
+        catch { return []; }
+    }
+
+    private static string Monogram(string name)
+    {
+        var words = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return words.Length switch { 0 => "H", 1 => words[0][..1].ToUpperInvariant(), _ => (words[0][..1] + words[1][..1]).ToUpperInvariant() };
+    }
+
+    private static string PriceText(Tenant t)
+    {
+        if (t.Plan is not { } p || PlanPricing.Monthly(t, p) <= 0) return "0 zł";
+        return t.BillingInterval == "yearly" && PlanPricing.Yearly(t, p) is { } y ? $"{y:0.##} zł / rok" : $"{PlanPricing.Monthly(t, p):0.##} zł / mies.";
+    }
+
+    private static string BillingText(Tenant t) => t.BillingStatus switch
+    {
+        "trialing" => "okres próbny",
+        "active" => "opłacony",
+        "past_due" => "zaległa płatność",
+        "canceled" => "anulowany",
+        _ => t.TrialPlanId is not null && t.TrialPlanEndsAt > DateTime.UtcNow ? "okres próbny" : (t.Plan?.MonthlyPrice ?? 0) <= 0 ? "plan darmowy" : t.TrialEndsAt > DateTime.UtcNow ? "okres próbny" : "rachunki e-mailem"
+    };
+
+    private static string DomainText(string? status) => status switch
+    {
+        "active" => "działa",
+        "waiting" => "czekamy, aż DNS wskaże nasz serwer (sprawdzamy co 10 minut)",
+        "failed" => "DNS nie wskazał serwera — napisz do nas, pomożemy",
+        _ => "w przygotowaniu"
+    };
+}

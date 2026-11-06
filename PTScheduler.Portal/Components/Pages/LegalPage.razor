@@ -1,0 +1,46 @@
+@page "/regulamin"
+@page "/polityka-prywatnosci"
+@page "/umowa-powierzenia"
+@layout PublicLayout
+@inject LegalService Legal
+@inject NavigationManager Nav
+
+@* Dokumenty prawne platformy — treść z Legal/*.html, dane firmy z Panelu → Dokumenty prawne. Do druku i zapisu jako PDF. *@
+
+<PageTitle>@_doc.Title — @_brand</PageTitle>
+<HeadContent>
+    <meta name="description" content="@_doc.Title @_brand — aplikacji dla trenerów personalnych. Wersja @_doc.Version." />
+</HeadContent>
+
+<section class="lg">
+    <div class="lg-wrap">
+        <nav class="lg-tabs" aria-label="Dokumenty">
+            @foreach (var d in LegalService.Docs)
+            {
+                <a href="@d.Path" class="@(d.Key == _doc.Key ? "on" : "")" aria-current="@(d.Key == _doc.Key ? "page" : null)">@d.Title</a>
+            }
+        </nav>
+        <header class="lg-head">
+            <h1>@(_doc.Key == "powierzenie" ? "Umowa powierzenia przetwarzania danych osobowych" : _doc.Title + " " + _brand)</h1>
+            <div class="lg-meta">
+                <span>Wersja @_doc.Version</span>
+                <button type="button" class="lg-print" onclick="window.print()"><i class="bi bi-printer"></i>Drukuj albo zapisz PDF</button>
+            </div>
+        </header>
+        <article class="lg-body">@((MarkupString)_html)</article>
+    </div>
+</section>
+
+@code {
+    private LegalService.Doc _doc = LegalService.Docs[0];
+    private string _html = "";
+    private string _brand = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var path = "/" + Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].TrimEnd('/');
+        _doc = LegalService.Docs.FirstOrDefault(d => d.Path == path) ?? LegalService.Docs[0];
+        _html = await Legal.RenderAsync(_doc.Key);
+        _brand = (await Legal.CompanyAsync()).Brand;
+    }
+}

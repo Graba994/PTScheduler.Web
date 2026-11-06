@@ -1,0 +1,672 @@
+using System.Net.Http.Headers;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.EntityFrameworkCore;
+using PTScheduler.Portal.Data;
+using PTScheduler.Portal.Entities;
+using K = PTScheduler.Portal.Services.SiteSettingsService.Keys;
+
+namespace PTScheduler.Portal.Services;
+
+/// <summary>
+/// Garmin Connect (program partnerski, plan Starter): Hantly jest jednym partnerem dla wszystkich studiów.
+/// Logowanie klienta do Garmina (OAuth2 PKCE) prowadzi Portal; dane Garmin wysyła sam (push) na jeden adres
+/// z kluczem — zapisujemy je od razu, a w tle przekazujemy do aplikacji właściwego studia (z ponawianiem).
+/// Plan Starter: tylko push, bez historii sprzed połączenia, do 1000 połączonych osób.
+/// </summary>
+public sealed class GarminService(
+    SiteSettingsService settings,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    IDataProtectionProvider dataProtection,
+    IConfiguration config,
+    TenantService tenants,
+    ILogger<GarminService> logger)
+{
+    public const string AuthorizeUrl = "https://connect.garmin.com/oauth2Confirm";
+    public const string TokenUrl = "https://diauth.garmin.com/di-oauth2-service/oauth/token";
+    public const string UserIdUrl = "https://apis.garmin.com/wellness-api/rest/user/id";
+    public const string RegistrationUrl = "https://apis.garmin.com/wellness-api/rest/user/registration";
+    /// <summary>Training API V2: tworzenie treningu, operacje na treningu i harmonogram (wg dokumentacji Garmina 2.0).</summary>
+    public const string WorkoutCreateUrl = "https://apis.garmin.com/workoutportal/workout/v2";
+    public const string WorkoutUrl = "https://apis.garmin.com/training-api/workout/v2/";
+    public const string ScheduleUrl = "https://apis.garmin.com/training-api/schedule/";
+    /// <summary>Limit połączonych osób w planie Starter.</summary>
+    public const int StarterLimit = 1000;
+    /// <summary>Rodzaje danych przekazywane do studiów (reszta: odłączenia i zmiany uprawnień — obsługujemy tutaj).</summary>
+    public static readonly string[] ForwardKinds = ["dailies", "sleeps", "hrv", "activities"];
+
+    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
+    private IDataProtector Secrets => dataProtection.CreateProtector("garmin-secrets");
+
+    /// <param name="On">Globalny włącznik (Portal). Wyłączony — klienci nie widzą Garmina, dane z Garmina są pomijane.</param>
+    /// <param name="TrainingOn">Plany na zegarek (Training API) — osobny włącznik, bo wymaga dodania API w portalu Garmina.</param>
+    public sealed record Config(string ClientId, bool HasSecret, string PushKey, bool On, bool TrainingOn = false)
+    {
+        /// <summary>Studia mogą wysyłać treningi na zegarki klientów.</summary>
+        public bool Workouts => Enabled && TrainingOn;
+        /// <summary>Klucze aplikacji wpisane.</summary>
+        public bool HasKeys => ClientId.Length > 0 && HasSecret;
+        /// <summary>Klient może połączyć zegarek: włącznik i klucze.</summary>
+        public bool Enabled => On && HasKeys;
+    }
+
+    public async Task<Config> ConfigAsync()
+    {
+        var s = await settings.GetAllAsync(K.GarminClientId, K.GarminClientSecret, K.GarminPushKey, K.GarminEnabled, K.GarminTrainingEnabled);
+        var key = s[K.GarminPushKey];
+        // Klucz w adresie odbioru danych powstaje od razu — adres można wkleić do Garmina jeszcze przed kluczami aplikacji.
+        if (string.IsNullOrWhiteSpace(key)) await settings.SetAsync(K.GarminPushKey, key = NewKey(24));
+        return new(s[K.GarminClientId].Trim(), !string.IsNullOrWhiteSpace(s[K.GarminClientSecret]), key, s[K.GarminEnabled] == "true",
+            s[K.GarminTrainingEnabled] == "true");
+    }
+
+    public async Task SaveConfigAsync(string clientId, string? secret)
+    {
+        var values = new Dictionary<string, string> { [K.GarminClientId] = clientId.Trim() };
+        if (!string.IsNullOrWhiteSpace(secret)) values[K.GarminClientSecret] = Secrets.Protect(secret.Trim());
+        if (string.IsNullOrWhiteSpace(await settings.GetAsync(K.GarminPushKey))) values[K.GarminPushKey] = NewKey(24);
+        await settings.SetManyAsync(values);
+    }
+
+    /// <summary>Globalny włącznik: zapis i od razu nowe uprawnienia do wszystkich studiów (pokaż / ukryj Garmina u klientów).</summary>
+    public async Task<(int Pushed, int Total)> SetOnAsync(bool on)
+    {
+        await settings.SetAsync(K.GarminEnabled, on ? "true" : "false");
+        return await tenants.PushAllEntitlementsAsync();
+    }
+
+    public Task SetTrainingAsync(bool on) => settings.SetAsync(K.GarminTrainingEnabled, on ? "true" : "false");
+
+    public string PortalUrl => PortalUrls.Public(config);
+    public string RedirectUri => $"{PortalUrl}/garmin/callback";
+    public async Task<string> PushUrlAsync() => $"{PortalUrl}/api/garmin/push/{(await ConfigAsync()).PushKey}";
+
+    private async Task<(string Id, string Secret)?> CredentialsAsync()
+    {
+        var s = await settings.GetAllAsync(K.GarminClientId, K.GarminClientSecret);
+        if (string.IsNullOrWhiteSpace(s[K.GarminClientId]) || string.IsNullOrWhiteSpace(s[K.GarminClientSecret])) return null;
+        try { return (s[K.GarminClientId].Trim(), Secrets.Unprotect(s[K.GarminClientSecret])); }
+        catch (CryptographicException) { return null; }
+    }
+
+    public async Task<int> ActiveConnectionsAsync()
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        return await db.GarminConnections.CountAsync(c => c.DisconnectedAt == null && !c.IsTest);
+    }
+
+    // ── Logowanie (OAuth2 PKCE) ──
+
+    /// <summary>Adres logowania do Garmina dla klienta studia. <paramref name="returnPath"/> — ścieżka w aplikacji studia.</summary>
+    public async Task<(string? Url, string? Error)> StartAsync(Tenant tenant, int clientId, string? returnPath)
+    {
+        var cfg = await ConfigAsync();
+        if (!cfg.On) return (null, "Łączenie z Garminem jest teraz wyłączone.");
+        if (!cfg.HasKeys) return (null, "Garmin nie jest jeszcze gotowy na platformie — spróbuj wkrótce.");
+        if (await ActiveConnectionsAsync() >= StarterLimit) return (null, "Osiągnęliśmy limit połączeń z Garminem — napisz do nas, zwiększymy go.");
+        var verifier = NewKey(64);
+        var state = NewKey(32);
+        await using var db = await dbFactory.CreateDbContextAsync();
+        await db.GarminAuthRequests.Where(r => r.CreatedAt < DateTime.UtcNow.AddHours(-1)).ExecuteDeleteAsync();
+        db.GarminAuthRequests.Add(new GarminAuthRequest
+        {
+            State = state, CodeVerifier = verifier, TenantId = tenant.Id, TenantClientId = clientId, ReturnPath = SafePath(returnPath)
+        });
+        await db.SaveChangesAsync();
+        var url = $"{AuthorizeUrl}?response_type=code&client_id={Uri.EscapeDataString(cfg.ClientId)}"
+                  + $"&code_challenge={Challenge(verifier)}&code_challenge_method=S256"
+                  + $"&redirect_uri={Uri.EscapeDataString(RedirectUri)}&state={state}";
+        return (url, null);
+    }
+
+    /// <summary>Powrót z Garmina: wymiana kodu na tokeny, identyfikator użytkownika, zapis i powiadomienie studia.</summary>
+    public async Task<string> CallbackAsync(string? code, string? state, string? error)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var req = string.IsNullOrEmpty(state) ? null : await db.GarminAuthRequests.FirstOrDefaultAsync(r => r.State == state);
+        if (req is null || req.CreatedAt < DateTime.UtcNow.AddMinutes(-15)) return $"{PortalUrl}/?garmin=wygaslo";
+        db.GarminAuthRequests.Remove(req);
+        await db.SaveChangesAsync();
+
+        var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Id == req.TenantId);
+        if (tenant is null) return PortalUrl;
+        var back = (await tenants.PublicUrlAsync(tenant)).TrimEnd('/') + req.ReturnPath;
+        if (!string.IsNullOrEmpty(error) || string.IsNullOrEmpty(code)) return Append(back, "garmin=anulowano");
+
+        try
+        {
+            var creds = await CredentialsAsync() ?? throw new InvalidOperationException("Brak kluczy Garmina.");
+            var tokens = await TokenAsync(new Dictionary<string, string>
+            {
+                ["grant_type"] = "authorization_code", ["client_id"] = creds.Id, ["client_secret"] = creds.Secret,
+                ["code"] = code, ["code_verifier"] = req.CodeVerifier, ["redirect_uri"] = RedirectUri
+            });
+            var userId = await UserIdAsync(tokens.Access);
+
+            // Jedno konto Garmin = jeden klient: ponowne połączenie (także w innym studiu) przenosi je.
+            var conn = await db.GarminConnections.FirstOrDefaultAsync(c => c.GarminUserId == userId);
+            var previous = conn is { DisconnectedAt: null } && (conn.TenantId != req.TenantId || conn.TenantClientId != req.TenantClientId)
+                ? (conn.TenantId, conn.TenantClientId) : ((int, int)?)null;
+            if (conn is null) db.GarminConnections.Add(conn = new GarminConnection { GarminUserId = userId });
+            conn.TenantId = req.TenantId;
+            conn.TenantClientId = req.TenantClientId;
+            conn.IsTest = false;
+            Store(conn, tokens);
+            conn.ConnectedAt = DateTime.UtcNow;
+            conn.DisconnectedAt = null;
+            await db.SaveChangesAsync();
+
+            if (previous is { } p && await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Id == p.Item1) is { } prevTenant)
+                await NotifyLinkAsync(prevTenant, p.Item2, false);
+            await NotifyLinkAsync(tenant, req.TenantClientId, true);
+            return Append(back, "garmin=ok");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Połączenie Garmina dla studia {Slug} (klient {ClientId}) nie powiodło się.", tenant.Slug, req.TenantClientId);
+            return Append(back, "garmin=blad");
+        }
+    }
+
+    /// <summary>Odłączenie z aplikacji studia: wyrejestrowanie u Garmina i usunięcie tokenów.</summary>
+    public async Task<string?> DisconnectAsync(Tenant tenant, int clientId)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var conns = await db.GarminConnections.Where(c => c.TenantId == tenant.Id && c.TenantClientId == clientId && c.DisconnectedAt == null).ToListAsync();
+        string? error = null;
+        foreach (var c in conns)
+        {
+            if (!c.IsTest)
+            {
+                try
+                {
+                    var token = await AccessTokenAsync(c);
+                    if (token is not null)
+                    {
+                        using var req = new HttpRequestMessage(HttpMethod.Delete, RegistrationUrl);
+                        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                        using var resp = await Http.SendAsync(req);
+                        if (!resp.IsSuccessStatusCode && resp.StatusCode != System.Net.HttpStatusCode.NotFound)
+                            error = $"Garmin odpowiedział {(int)resp.StatusCode}";
+                    }
+                }
+                catch (Exception ex) { logger.LogWarning(ex, "Wyrejestrowanie Garmina {User} nie powiodło się.", c.GarminUserId); error = "Garmin nie odpowiedział"; }
+            }
+            c.DisconnectedAt = DateTime.UtcNow;
+            c.AccessTokenProtected = c.RefreshTokenProtected = null;
+        }
+        await db.SaveChangesAsync();
+        return error;
+    }
+
+    private sealed record Tokens(string Access, DateTime AccessExpires, string? Refresh);
+
+    private static async Task<Tokens> TokenAsync(Dictionary<string, string> form)
+    {
+        using var resp = await Http.PostAsync(TokenUrl, new FormUrlEncodedContent(form));
+        var text = await resp.Content.ReadAsStringAsync();
+        if (!resp.IsSuccessStatusCode) throw new InvalidOperationException($"Garmin token: {(int)resp.StatusCode} {text[..Math.Min(200, text.Length)]}");
+        using var doc = JsonDocument.Parse(text);
+        var r = doc.RootElement;
+        var expires = r.TryGetProperty("expires_in", out var e) && e.TryGetInt32(out var sec) ? sec : 3600;
+        return new(r.GetProperty("access_token").GetString()!, DateTime.UtcNow.AddSeconds(expires - 60),
+            r.TryGetProperty("refresh_token", out var rt) ? rt.GetString() : null);
+    }
+
+    private static async Task<string> UserIdAsync(string accessToken)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, UserIdUrl);
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        using var resp = await Http.SendAsync(req);
+        resp.EnsureSuccessStatusCode();
+        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        return doc.RootElement.GetProperty("userId").GetString() ?? throw new InvalidOperationException("Garmin nie zwrócił userId.");
+    }
+
+    private void Store(GarminConnection c, Tokens t)
+    {
+        c.AccessTokenProtected = Secrets.Protect(t.Access);
+        c.AccessTokenExpiresAt = t.AccessExpires;
+        if (t.Refresh is not null) c.RefreshTokenProtected = Secrets.Protect(t.Refresh);
+    }
+
+    /// <summary>Ważny token dostępu (odświeżany, gdy wygasł). Null — brak tokenów albo odświeżenie się nie udało.</summary>
+    private async Task<string?> AccessTokenAsync(GarminConnection c)
+    {
+        try
+        {
+            if (c.AccessTokenProtected is not null && c.AccessTokenExpiresAt > DateTime.UtcNow) return Secrets.Unprotect(c.AccessTokenProtected);
+            if (c.RefreshTokenProtected is null || await CredentialsAsync() is not { } creds) return null;
+            var t = await TokenAsync(new Dictionary<string, string>
+            {
+                ["grant_type"] = "refresh_token", ["client_id"] = creds.Id, ["client_secret"] = creds.Secret,
+                ["refresh_token"] = Secrets.Unprotect(c.RefreshTokenProtected)
+            });
+            Store(c, t);
+            return t.Access;
+        }
+        catch (Exception ex) { logger.LogWarning(ex, "Token Garmina {User} niedostępny.", c.GarminUserId); return null; }
+    }
+
+    // ── Plany na zegarek (Training API V2) ──
+
+    public sealed record WorkoutResult(long? WorkoutId, long? ScheduleId, string? Error);
+
+    /// <summary>Klient i HttpClient do Training API — w testach podmieniany.</summary>
+    public HttpMessageInvoker TrainingHttp { get; set; } = Http;
+
+    /// <summary>
+    /// Tworzy trening na koncie Garmin klienta i planuje go na <paramref name="date"/>. Gdy podano poprzedni trening
+    /// (ponowna wysyłka tego samego dnia planu), najpierw go usuwa. Połączenie testowe — bez wywołań Garmina.
+    /// </summary>
+    public async Task<WorkoutResult> PushWorkoutAsync(Tenant tenant, int clientId, JsonElement workout, DateOnly date, long? replaceWorkoutId)
+    {
+        if (!(await ConfigAsync()).Workouts) return new(null, null, "Plany na zegarek są wyłączone na platformie.");
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var conn = await db.GarminConnections.FirstOrDefaultAsync(c => c.TenantId == tenant.Id && c.TenantClientId == clientId && c.DisconnectedAt == null);
+        if (conn is null) return new(null, null, "Klient nie ma połączonego zegarka Garmin.");
+        if (conn.IsTest)
+        {
+            // Tryb testowy z panelu: udajemy Garmina, żeby sprawdzić cały przepływ w aplikacji studia.
+            var fake = 900_000_000L + Random.Shared.Next(1, 99_999_999);
+            return new(fake, fake + 1, null);
+        }
+        var token = await AccessTokenAsync(conn);
+        await db.SaveChangesAsync(); // odświeżony token
+        if (token is null) return new(null, null, "Połączenie z Garminem wygasło — klient musi połączyć zegarek ponownie.");
+
+        try
+        {
+            if (replaceWorkoutId is long old) await SendAsync(HttpMethod.Delete, WorkoutUrl + old, token, null); // brak (404) też jest w porządku
+
+            using var created = await SendAsync(HttpMethod.Post, WorkoutCreateUrl, token, workout.GetRawText());
+            var createdText = await created.Content.ReadAsStringAsync();
+            if (!created.IsSuccessStatusCode) return new(null, null, Explain(created.StatusCode, createdText));
+            var workoutId = ReadId(createdText, "workoutId");
+            if (workoutId is null) return new(null, null, "Garmin nie zwrócił numeru treningu.");
+
+            using var scheduled = await SendAsync(HttpMethod.Post, ScheduleUrl, token,
+                JsonSerializer.Serialize(new { workoutId, date = date.ToString("yyyy-MM-dd") }));
+            var scheduleText = await scheduled.Content.ReadAsStringAsync();
+            if (!scheduled.IsSuccessStatusCode)
+                return new(workoutId, null, "Trening jest w Garmin Connect, ale nie udało się go zaplanować: " + Explain(scheduled.StatusCode, scheduleText));
+            return new(workoutId, ReadId(scheduleText, "scheduleId"), null);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            logger.LogWarning(ex, "Wysyłka treningu do Garmina (studio {Slug}, klient {Client}) nie powiodła się.", tenant.Slug, clientId);
+            return new(null, null, "Garmin nie odpowiedział — spróbuj za chwilę.");
+        }
+    }
+
+    /// <summary>Usuwa trening z konta Garmin klienta (razem z jego zaplanowaniem).</summary>
+    public async Task<string?> DeleteWorkoutAsync(Tenant tenant, int clientId, long workoutId)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var conn = await db.GarminConnections.FirstOrDefaultAsync(c => c.TenantId == tenant.Id && c.TenantClientId == clientId && c.DisconnectedAt == null);
+        if (conn is null || conn.IsTest) return null;
+        var token = await AccessTokenAsync(conn);
+        await db.SaveChangesAsync();
+        if (token is null) return "Połączenie z Garminem wygasło.";
+        try
+        {
+            using var resp = await SendAsync(HttpMethod.Delete, WorkoutUrl + workoutId, token, null);
+            return resp.IsSuccessStatusCode || resp.StatusCode == System.Net.HttpStatusCode.NotFound ? null : Explain(resp.StatusCode, "");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException) { return "Garmin nie odpowiedział."; }
+    }
+
+    private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string url, string token, string? json)
+    {
+        var req = new HttpRequestMessage(method, url);
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        if (json is not null) req.Content = new StringContent(json, Encoding.UTF8, "application/json");
+        return await TrainingHttp.SendAsync(req, CancellationToken.None);
+    }
+
+    /// <summary>Kody z dokumentacji Training API → zrozumiały komunikat dla trenera.</summary>
+    public static string Explain(System.Net.HttpStatusCode code, string body) => (int)code switch
+    {
+        412 => "Klient nie zezwolił na import treningów. W aplikacji Garmin Connect: Ustawienia → Połączone aplikacje → Hantly → włącz treningi (albo połącz zegarek ponownie).",
+        401 => "Połączenie z Garminem wygasło — klient musi połączyć zegarek ponownie.",
+        403 => "Garmin nie pozwolił na tę operację — sprawdź, czy Training API jest włączone w aplikacji Garmina.",
+        429 => "Limit wysyłek do Garmina na teraz został wyczerpany — spróbuj za kilka minut.",
+        400 => "Garmin odrzucił trening" + (string.IsNullOrWhiteSpace(body) ? "." : $": {body[..Math.Min(200, body.Length)]}"),
+        _ => $"Garmin odpowiedział błędem ({(int)code})."
+    };
+
+    /// <summary>Numer z odpowiedzi: sama liczba albo pole obiektu.</summary>
+    public static long? ReadId(string text, string field)
+    {
+        if (long.TryParse(text.Trim(), out var plain)) return plain;
+        try
+        {
+            using var doc = JsonDocument.Parse(text);
+            return doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty(field, out var v) && v.TryGetInt64(out var id) ? id : null;
+        }
+        catch (JsonException) { return null; }
+    }
+
+    // ── Dane z Garmina (push) ──
+
+    /// <summary>Zapis paczki od Garmina. False — zły klucz w adresie (nie przyjmujemy).</summary>
+    public async Task<bool> ReceiveAsync(string key, string payload)
+    {
+        var cfg = await ConfigAsync();
+        if (cfg.PushKey.Length == 0 || !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(key), Encoding.UTF8.GetBytes(cfg.PushKey)))
+            return false;
+        await EnqueueAsync(payload);
+        return true;
+    }
+
+    /// <summary>Rodzaje danych, które przyjmujemy. Inne (np. „activityDetails” z próbkami GPS) odrzucamy od razu, zanim cokolwiek zapiszemy.</summary>
+    public static readonly string[] Accepted = ["dailies", "sleeps", "hrv", "activities", "deregistrations", "userPermissionsChange"];
+
+    /// <summary>Zostawia w paczce tylko obsługiwane rodzaje danych. Null — nic do zapisania (nieczytelna albo same nieobsługiwane).</summary>
+    public static (string? Payload, string Kinds) Filter(string payload)
+    {
+        try
+        {
+            if (System.Text.Json.Nodes.JsonNode.Parse(payload) is not System.Text.Json.Nodes.JsonObject root) return (null, "");
+            var kept = new System.Text.Json.Nodes.JsonObject();
+            foreach (var (name, value) in root.ToList())
+                if (Accepted.Contains(name, StringComparer.Ordinal) && value is not null)
+                {
+                    root.Remove(name);
+                    kept[name] = value;
+                }
+            return kept.Count == 0 ? (null, "") : (kept.ToJsonString(), string.Join(", ", kept.Select(p => p.Key)));
+        }
+        catch (JsonException) { return (null, ""); }
+    }
+
+    public async Task EnqueueAsync(string payload)
+    {
+        var (filtered, kinds) = Filter(payload);
+        if (filtered is null) return;
+        await using var db = await dbFactory.CreateDbContextAsync();
+        db.GarminInbox.Add(new GarminInboxItem { Payload = filtered, Kinds = kinds.Length > 200 ? kinds[..200] : kinds });
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>Przekazanie zaległych paczek do studiów. Paczka, której studio nie przyjęło, czeka na kolejną próbę.</summary>
+    public async Task<int> ProcessInboxAsync(CancellationToken ct = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        // Najdłużej 7 dni — także paczki, których nie udało się przekazać (polityka prywatności obiecuje ten termin).
+        await db.GarminInbox.Where(i => i.ReceivedAt < DateTime.UtcNow.AddDays(-7)).ExecuteDeleteAsync(ct);
+        var items = await db.GarminInbox.Where(i => i.ProcessedAt == null && i.Attempts < 12).OrderBy(i => i.Id).Take(25).ToListAsync(ct);
+        if (items.Count > 0 && !(await ConfigAsync()).On)
+        {
+            // Garmin wyłączony globalnie: nie przekazujemy danych do studiów (klienci nie widzą Garmina).
+            foreach (var item in items) { item.ProcessedAt = DateTime.UtcNow; item.Error = "Garmin wyłączony — dane pominięte."; }
+            await db.SaveChangesAsync(ct);
+            return 0;
+        }
+        var done = 0;
+        foreach (var item in items)
+        {
+            // Ponawianie z odstępem: 1, 2, 4… minut (do ok. godziny).
+            if (item.Attempts > 0 && item.ReceivedAt.AddMinutes(Math.Pow(2, Math.Min(item.Attempts, 6))) > DateTime.UtcNow) continue;
+            item.Attempts++;
+            try
+            {
+                var (error, summary) = await ForwardAsync(db, item.Payload, ct);
+                item.Error = error;
+                if (summary.Length > 0) item.Kinds = summary.Length > 200 ? summary[..200] : summary;
+                if (item.Error is null) { item.ProcessedAt = DateTime.UtcNow; done++; }
+            }
+            catch (Exception ex) { item.Error = ex.Message.Length > 500 ? ex.Message[..500] : ex.Message; }
+            await db.SaveChangesAsync(ct);
+        }
+        return done;
+    }
+
+    /// <summary>
+    /// Jedna paczka → studia. Błąd null — wszystko przekazane (albo nie było komu); tekst — błąd do ponowienia.
+    /// Podsumowanie: ile rekordów każdego rodzaju studio zapisało (np. „dailies: 1, sleeps: 0”) — do diagnozy w panelu.
+    /// </summary>
+    private async Task<(string? Error, string Summary)> ForwardAsync(PortalDbContext db, string payload, CancellationToken ct)
+    {
+        using var doc = JsonDocument.Parse(payload);
+        if (doc.RootElement.ValueKind != JsonValueKind.Object) return (null, "");
+        var conns = await db.GarminConnections.Include(c => c.Tenant).Where(c => c.DisconnectedAt == null).ToListAsync(ct);
+        var byUser = conns.ToDictionary(c => c.GarminUserId);
+        var errors = new List<string>();
+        var saved = new Dictionary<string, int>();
+
+        foreach (var prop in doc.RootElement.EnumerateObject())
+        {
+            if (prop.Value.ValueKind != JsonValueKind.Array) continue;
+            if (prop.Name is "deregistrations" or "userPermissionsChange")
+            {
+                foreach (var r in prop.Value.EnumerateArray())
+                {
+                    if (UserOf(r) is not { } uid || !byUser.TryGetValue(uid, out var c)) continue;
+                    var perms = r.TryGetProperty("permissions", out var p) && p.ValueKind == JsonValueKind.Array
+                        ? p.EnumerateArray().Select(x => x.GetString()).Where(x => x is not null).ToList() : null;
+                    if (prop.Name == "userPermissionsChange" && perms is { Count: > 0 }) { c.Permissions = string.Join(",", perms); continue; }
+                    // Odłączenie w Garmin Connect (albo odebranie wszystkich uprawnień) = koniec przekazywania danych.
+                    c.DisconnectedAt = DateTime.UtcNow;
+                    c.AccessTokenProtected = c.RefreshTokenProtected = null;
+                    if (c.Tenant is { } t) await NotifyLinkAsync(t, c.TenantClientId, false);
+                }
+                continue;
+            }
+            if (!ForwardKinds.Contains(prop.Name)) continue;
+            saved.TryAdd(prop.Name, 0);
+            foreach (var group in prop.Value.EnumerateArray().Where(r => UserOf(r) is { } u && byUser.ContainsKey(u)).GroupBy(r => UserOf(r)!))
+            {
+                var c = byUser[group.Key];
+                if (c.Tenant is null) continue;
+                // Tryb „Ping”: Garmin przysyła tylko adres, z którego trzeba pobrać dane (tokenem użytkownika).
+                var records = await ExpandPingsAsync(c, group.ToList(), ct);
+                if (records.Count == 0) continue;
+                var count = await PostToTenantAsync(c.Tenant, "/internal/garmin/data",
+                    new { clientId = c.TenantClientId, kind = prop.Name, records }, ct);
+                if (count is int n) { c.LastDataAt = DateTime.UtcNow; saved[prop.Name] += n; }
+                else errors.Add($"{c.Tenant.Slug}: {prop.Name}");
+            }
+        }
+        await db.SaveChangesAsync(ct);
+        var summary = string.Join(", ", saved.Select(s => $"{s.Key}: {s.Value}"));
+        return (errors.Count == 0 ? null : "Studio nie przyjęło: " + string.Join(", ", errors.Distinct().Take(5)), summary);
+    }
+
+    /// <summary>Host, z którego wolno pobierać dane po powiadomieniu „Ping” (token użytkownika nie poleci gdzie indziej).</summary>
+    public const string PingHost = "apis.garmin.com";
+
+    public static bool IsPingUrl(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var u) && u.Scheme == Uri.UriSchemeHttps && u.Host.Equals(PingHost, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Rekordy z „callbackURL” zastępuje danymi pobranymi z Garmina; zwykłe rekordy zostawia bez zmian.</summary>
+    private async Task<List<JsonElement>> ExpandPingsAsync(GarminConnection c, List<JsonElement> records, CancellationToken ct)
+    {
+        var result = new List<JsonElement>();
+        string? token = null;
+        foreach (var r in records)
+        {
+            if (!r.TryGetProperty("callbackURL", out var cb) || cb.ValueKind != JsonValueKind.String) { result.Add(r); continue; }
+            var url = cb.GetString();
+            if (!IsPingUrl(url) || c.IsTest) continue;
+            token ??= await AccessTokenAsync(c);
+            if (token is null) continue;
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                using var resp = await TrainingHttp.SendAsync(req, ct);
+                if (!resp.IsSuccessStatusCode) { logger.LogWarning("Garmin ping {Url}: {Status}", url, (int)resp.StatusCode); continue; }
+                using var data = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+                if (data.RootElement.ValueKind == JsonValueKind.Array)
+                    result.AddRange(data.RootElement.EnumerateArray().Select(e => e.Clone()));
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+            {
+                logger.LogWarning(ex, "Pobranie danych Garmina po powiadomieniu nie powiodło się.");
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Nazwy pól (bez wartości) w pierwszym rekordzie każdego rodzaju — do diagnozy w panelu, gdy jakiś rodzaj danych
+    /// przychodzi, ale nic się nie zapisuje. Żadnych danych o zdrowiu, tylko nazwy kluczy.
+    /// </summary>
+    public static IReadOnlyList<(string Kind, string Fields)> FieldNames(string payload)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return [];
+            return doc.RootElement.EnumerateObject()
+                .Where(p => p.Value.ValueKind == JsonValueKind.Array && p.Value.GetArrayLength() > 0 && p.Value[0].ValueKind == JsonValueKind.Object)
+                .Select(p => (p.Name, string.Join(", ", p.Value[0].EnumerateObject().Select(f => f.Name))))
+                .ToList();
+        }
+        catch (JsonException) { return []; }
+    }
+
+    private static string? UserOf(JsonElement r) =>
+        r.ValueKind == JsonValueKind.Object && r.TryGetProperty("userId", out var u)
+            ? u.ValueKind == JsonValueKind.String ? u.GetString() : u.GetRawText() : null;
+
+    private async Task NotifyLinkAsync(Tenant tenant, int clientId, bool connected) =>
+        await PostToTenantAsync(tenant, "/internal/garmin/link", new { clientId, connected }, default);
+
+    /// <summary>Zapis w aplikacji studia. Liczba zapisanych rekordów (z odpowiedzi studia) albo null, gdy studio nie przyjęło.</summary>
+    private async Task<int?> PostToTenantAsync(Tenant tenant, string path, object body, CancellationToken ct)
+    {
+        var secret = TenantSecrets.For(tenant, config);
+        if (string.IsNullOrEmpty(secret)) return null;
+        try
+        {
+            var baseUrl = await TenantEndpoint.BaseUrlAsync(config, tenant);
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}{path}")
+            {
+                Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json")
+            };
+            req.Headers.Add("X-Internal-Secret", secret);
+            using var resp = await Http.SendAsync(req, ct);
+            if (!resp.IsSuccessStatusCode) return null;
+            try
+            {
+                using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+                return doc.RootElement.TryGetProperty("saved", out var s) && s.TryGetInt32(out var n) ? n : 0;
+            }
+            catch (JsonException) { return 0; }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Przekazanie danych Garmina do {Slug} nie powiodło się.", tenant.Slug);
+            return null;
+        }
+    }
+
+    // ── Tryb testowy (bez prawdziwego konta Garmin) ──
+
+    /// <summary>Połączenie testowe: klient studia „ma” zegarek, a dane przychodzą z przycisku w panelu.</summary>
+    public async Task<string> ConnectTestAsync(Tenant tenant, int clientId)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var userId = $"test-{tenant.Slug}-{clientId}";
+        var conn = await db.GarminConnections.FirstOrDefaultAsync(c => c.GarminUserId == userId);
+        if (conn is null) db.GarminConnections.Add(conn = new GarminConnection { GarminUserId = userId });
+        conn.TenantId = tenant.Id;
+        conn.TenantClientId = clientId;
+        conn.IsTest = true;
+        conn.ConnectedAt = DateTime.UtcNow;
+        conn.DisconnectedAt = null;
+        await db.SaveChangesAsync();
+        await NotifyLinkAsync(tenant, clientId, true);
+        return userId;
+    }
+
+    /// <summary>Przykładowe dane z ostatnich dni (sen, tętno, HRV, Body Battery, aktywności) w formacie Garmina — do kolejki.</summary>
+    public async Task EnqueueSampleAsync(string garminUserId, int days, DateOnly today)
+    {
+        var rnd = new Random(garminUserId.GetHashCode());
+        var dailies = new List<object>();
+        var sleeps = new List<object>();
+        var hrv = new List<object>();
+        var activities = new List<object>();
+        for (var i = days - 1; i >= 0; i--)
+        {
+            var d = today.AddDays(-i);
+            var tired = i == 0; // dziś gorsza noc — gotowość „niska/średnia” do sprawdzenia w aplikacji
+            var date = d.ToString("yyyy-MM-dd");
+            dailies.Add(new
+            {
+                userId = garminUserId, summaryId = $"d-{garminUserId}-{date}", calendarDate = date,
+                steps = rnd.Next(5000, 13000), restingHeartRateInBeatsPerMinute = tired ? 61 : rnd.Next(52, 56),
+                averageStressLevel = rnd.Next(20, 45), bodyBatteryHighestValue = tired ? 34 : rnd.Next(65, 95),
+                bodyBatteryLowestValue = rnd.Next(10, 30), activeKilocalories = rnd.Next(300, 900)
+            });
+            var total = tired ? 310 * 60 : rnd.Next(400, 500) * 60;
+            sleeps.Add(new
+            {
+                userId = garminUserId, summaryId = $"s-{garminUserId}-{date}", calendarDate = date, durationInSeconds = total,
+                deepSleepDurationInSeconds = total / 5, lightSleepDurationInSeconds = total / 2, remSleepInSeconds = total / 5,
+                awakeDurationInSeconds = total / 10, overallSleepScore = new { value = tired ? 52 : rnd.Next(70, 90) }
+            });
+            hrv.Add(new { userId = garminUserId, summaryId = $"h-{garminUserId}-{date}", calendarDate = date, lastNightAvg = tired ? 38 : rnd.Next(48, 58) });
+            if (i % 2 == 1)
+            {
+                var start = new DateTimeOffset(d.ToDateTime(new TimeOnly(7, 0)), TimeSpan.Zero).ToUnixTimeSeconds();
+                var run = i % 4 == 1;
+                activities.Add(new
+                {
+                    userId = garminUserId, summaryId = $"a-{garminUserId}-{date}", activityId = 1000 + i,
+                    activityName = run ? "Bieg poranny" : "Trening siłowy", activityType = run ? "RUNNING" : "STRENGTH_TRAINING",
+                    startTimeInSeconds = start, durationInSeconds = run ? 2400 : 3300,
+                    averageHeartRateInBeatsPerMinute = run ? 148 : 112, maxHeartRateInBeatsPerMinute = run ? 171 : 152,
+                    activeKilocalories = run ? 420 : 310, distanceInMeters = run ? 6200 : 0, deviceName = "Forerunner 265"
+                });
+            }
+        }
+        await EnqueueAsync(JsonSerializer.Serialize(new { dailies, sleeps, hrv, activities }));
+    }
+
+    // ── Pomocnicze ──
+
+    public static string Challenge(string verifier) => Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));
+
+    private static string NewKey(int length)
+    {
+        const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+        return string.Create(length, 0, (span, _) =>
+        {
+            for (var i = 0; i < span.Length; i++) span[i] = chars[RandomNumberGenerator.GetInt32(chars.Length)];
+        });
+    }
+
+    private static string Base64Url(byte[] data) => Convert.ToBase64String(data).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+    /// <summary>Tylko ścieżka w aplikacji studia (bez adresu) — powrót zawsze na adres tego studia.</summary>
+    public static string SafePath(string? path) =>
+        !string.IsNullOrWhiteSpace(path) && path.StartsWith('/') && !path.StartsWith("//") && !path.StartsWith("/\\") && path.Length <= 200
+            ? path : "/garmin";
+
+    private static string Append(string url, string query) => url + (url.Contains('?') ? "&" : "?") + query;
+}
+
+/// <summary>Przekazywanie danych z Garmina do studiów w tle (co 20 s).</summary>
+public sealed class GarminBackgroundService(IServiceScopeFactory scopes, ILogger<GarminBackgroundService> logger) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                using var scope = scopes.CreateScope();
+                await scope.ServiceProvider.GetRequiredService<GarminService>().ProcessInboxAsync(stoppingToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogWarning(ex, "Przekazywanie danych Garmina nie powiodło się."); }
+            await Task.Delay(TimeSpan.FromSeconds(20), stoppingToken);
+        }
+    }
+}

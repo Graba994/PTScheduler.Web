@@ -8,55 +8,72 @@
 @inject SignInManager<ApplicationUser> SignInManager
 @inject IdentityRedirectManager RedirectManager
 
-<PageTitle>Manage your passkeys</PageTitle>
+<AppTitle Page="Face ID i odcisk palca" />
 
-<h3>Manage your passkeys</h3>
+<div>
+    <h1 class="h4 fw-bold mb-1">Face ID i odcisk palca</h1>
+    <p class="text-muted small mb-0">Loguj się jednym dotknięciem — bez wpisywania hasła.</p>
+</div>
 
 <StatusMessage />
 
+@if (currentPasskeys is not { Count: > 0 })
+{
+    <section class="acct-promo">
+        <div class="acct-promo-icon"><i class="bi bi-fingerprint"></i></div>
+        <div class="flex-grow-1">
+            <div class="acct-promo-title">Szybciej i bezpieczniej niż hasło</div>
+            <div class="acct-promo-text">Telefon albo komputer potwierdzi, że to Ty — twarzą, odciskiem palca albo PIN-em urządzenia. Odcisk ani zdjęcie twarzy nie opuszczają urządzenia i nie trafiają do nas.</div>
+        </div>
+    </section>
+}
+
+<div class="acct-card">
+    <div class="fw-semibold mb-1">Włącz na tym urządzeniu</div>
+    <ol class="small text-muted ps-3 mb-3">
+        <li>Dotknij przycisku poniżej.</li>
+        <li>Potwierdź twarzą, odciskiem palca albo PIN-em — tak jak odblokowujesz telefon.</li>
+        <li>Przy następnym logowaniu wybierz „Zaloguj bez hasła”.</li>
+    </ol>
+    <form @formname="add-passkey" @onsubmit="AddPasskey" method="post">
+        <AntiforgeryToken />
+        @if (currentPasskeys is { Count: >= MaxPasskeyCount })
+        {
+            <p class="text-danger small mb-0">Osiągnięto limit kluczy. Usuń jeden, aby dodać nowy.</p>
+        }
+        else
+        {
+            <PasskeySubmit Operation="PasskeyOperation.Create" Name="Input" class="btn btn-primary btn-lg w-100"><i class="bi bi-fingerprint me-2"></i>Włącz Face ID / odcisk palca</PasskeySubmit>
+        }
+    </form>
+    <div class="small text-muted mt-2">Masz kilka urządzeń? Włącz na każdym z nich osobno. Hasło dalej działa jako zapas.</div>
+</div>
+
 @if (currentPasskeys is { Count: > 0 })
 {
-    <table class="table">
-        <tbody>
+    <div>
+        <h2 class="acct-group-title">Urządzenia z logowaniem bez hasła</h2>
+        <div class="acct-list">
             @foreach (var passkey in currentPasskeys)
             {
-                <tr>
-                    <td>@(passkey.Name ?? "Unnamed passkey")</td>
-                    <td>
-                        @{
-                            var credentialId = Base64Url.EncodeToString(passkey.CredentialId);
-                        }
-                        <form @formname="@($"update-passkey-{credentialId}")" @onsubmit="UpdatePasskey" method="post">
-                            <AntiforgeryToken />
-                            <div>
-                                <input type="hidden" name="CredentialId" value="@credentialId" />
-                                <button type="submit" name="Action" value="rename" class="btn btn-primary" title="Rename this passkey">Rename</button>
-                                <button type="submit" name="Action" value="delete" class="btn btn-danger" title="Remove this passkey from your account">Delete</button>
-                            </div>
-                        </form>
-                    </td>
-                </tr>
+                var credentialId = Base64Url.EncodeToString(passkey.CredentialId);
+                <div class="acct-row flex-wrap">
+                    <span class="acct-row-icon green"><i class="bi bi-fingerprint"></i></span>
+                    <span class="acct-row-main">
+                        <span class="acct-row-title d-block">@(passkey.Name ?? "Urządzenie bez nazwy")</span>
+                        <span class="acct-row-sub">Dodano @passkey.CreatedAt.LocalDateTime.ToString("d MMMM yyyy", new System.Globalization.CultureInfo("pl-PL"))</span>
+                    </span>
+                    <form @formname="@($"update-passkey-{credentialId}")" @onsubmit="UpdatePasskey" method="post" class="d-flex gap-2">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="CredentialId" value="@credentialId" />
+                        <button type="submit" name="Action" value="rename" class="btn btn-sm btn-outline-secondary">Zmień nazwę</button>
+                        <button type="submit" name="Action" value="delete" class="btn btn-sm btn-outline-danger">Usuń</button>
+                    </form>
+                </div>
             }
-        </tbody>
-    </table>
+        </div>
+    </div>
 }
-else
-{
-    <p>No passkeys are registered.</p>
-}
-
-<form @formname="add-passkey" @onsubmit="AddPasskey" method="post">
-    <AntiforgeryToken />
-    @if (currentPasskeys is { Count: >= MaxPasskeyCount })
-    {
-        <p class="text-danger">You have reached the maximum number of allowed passkeys. Please delete one before adding a new one.</p>
-    }
-    else
-    {
-        <PasskeySubmit Operation="PasskeyOperation.Create" Name="Input" class="btn btn-primary">Add a new passkey</PasskeySubmit>
-    }
-
-</form>
 
 @code {
     private const int MaxPasskeyCount = 100;
@@ -99,33 +116,33 @@ else
 
         if (!string.IsNullOrEmpty(Input.Error))
         {
-            RedirectManager.RedirectToCurrentPageWithStatus($"Error: {Input.Error}", HttpContext);
+            RedirectManager.RedirectToCurrentPageWithStatus($"Błąd: {Input.Error}", HttpContext);
             return;
         }
 
         if (string.IsNullOrEmpty(Input.CredentialJson))
         {
-            RedirectManager.RedirectToCurrentPageWithStatus("Error: The browser did not provide a passkey.", HttpContext);
+            RedirectManager.RedirectToCurrentPageWithStatus("Błąd: Przeglądarka nie przekazała klucza.", HttpContext);
             return;
         }
 
         if (currentPasskeys!.Count >= MaxPasskeyCount)
         {
-            RedirectManager.RedirectToCurrentPageWithStatus($"Error: You have reached the maximum number of allowed passkeys.", HttpContext);
+            RedirectManager.RedirectToCurrentPageWithStatus($"Błąd: Osiągnięto limit kluczy dostępu.", HttpContext);
             return;
         }
 
         var attestationResult = await SignInManager.PerformPasskeyAttestationAsync(Input.CredentialJson);
         if (!attestationResult.Succeeded)
         {
-            RedirectManager.RedirectToCurrentPageWithStatus($"Error: Could not add the passkey: {attestationResult.Failure.Message}", HttpContext);
+            RedirectManager.RedirectToCurrentPageWithStatus($"Błąd: Nie udało się dodać klucza: {attestationResult.Failure.Message}", HttpContext);
             return;
         }
 
         var addPasskeyResult = await UserManager.AddOrUpdatePasskeyAsync(user, attestationResult.Passkey);
         if (!addPasskeyResult.Succeeded)
         {
-            RedirectManager.RedirectToCurrentPageWithStatus("Error: The passkey could not be added to your account.", HttpContext);
+            RedirectManager.RedirectToCurrentPageWithStatus("Błąd: Nie udało się dodać klucza do konta.", HttpContext);
             return;
         }
 
@@ -145,7 +162,7 @@ else
                 await DeletePasskey();
                 break;
             default:
-                RedirectManager.RedirectToCurrentPageWithStatus($"Error: Unknown action '{Action}'.", HttpContext);
+                RedirectManager.RedirectToCurrentPageWithStatus($"Błąd: Nieznana akcja '{Action}'.", HttpContext);
                 break;
         }
     }
@@ -165,17 +182,17 @@ else
         }
         catch (FormatException)
         {
-            RedirectManager.RedirectToCurrentPageWithStatus("Error: The specified passkey ID had an invalid format.", HttpContext);
+            RedirectManager.RedirectToCurrentPageWithStatus("Błąd: Nieprawidłowy identyfikator klucza.", HttpContext);
             return;
         }
 
         var result = await UserManager.RemovePasskeyAsync(user, credentialId);
         if (!result.Succeeded)
         {
-            RedirectManager.RedirectToCurrentPageWithStatus("Error: The passkey could not be deleted.", HttpContext);
+            RedirectManager.RedirectToCurrentPageWithStatus("Błąd: Nie udało się usunąć klucza.", HttpContext);
             return;
         }
 
-        RedirectManager.RedirectToCurrentPageWithStatus("Passkey deleted successfully.", HttpContext);
+        RedirectManager.RedirectToCurrentPageWithStatus("Klucz dostępu usunięty.", HttpContext);
     }
 }

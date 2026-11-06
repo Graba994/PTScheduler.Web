@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PTScheduler Guardian</title>
+<style>
+:root {
+    --bg: #f4f5f8; --card: #fff; --line: #e6e8ee; --line-2: #f1f5f9;
+    --ink: #0f172a; --ink-2: #334155; --muted: #64748b;
+    --accent: #4f46e5; --accent-bg: #eef0ff;
+    --ok: #047857; --ok-bg: #ecfdf5; --ok-bd: #a7f3d0;
+    --warn: #b45309; --warn-bg: #fffbeb; --warn-bd: #fde68a;
+    --danger: #b91c1c; --danger-bg: #fef2f2; --danger-bd: #fecaca;
+    --info: #4338ca; --info-bg: #eef2ff; --info-bd: #c7d2fe;
+    --side: #14161b;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink-2); font: 14px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.bar { background: var(--side); color: #a1a7b3; display: flex; align-items: center; gap: .75rem; padding: .55rem 1.25rem; font-size: .8rem; }
+.bar strong { color: #fff; font-size: .95rem; }
+.bar .grow { flex: 1; }
+@media (max-width: 560px) { #uptime { display: none; } .bar { padding: .55rem .8rem; } }
+.bar button { background: transparent; border: 1px solid rgba(255,255,255,.15); color: #e5e7eb; padding: .25rem .7rem; border-radius: .5rem; cursor: pointer; font: inherit; }
+main { max-width: 980px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+h1 { font-size: 1.35rem; color: var(--ink); margin: 0; }
+.sub { color: var(--muted); font-size: .88rem; margin: .2rem 0 1.2rem; max-width: 70ch; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 1rem; padding: 1.1rem 1.25rem; margin-bottom: 1rem; }
+.card h2 { font-size: 1rem; color: var(--ink); margin: 0 0 .8rem; display: flex; align-items: center; gap: .5rem; }
+.hero { display: flex; gap: .9rem; align-items: flex-start; padding: 1rem 1.2rem; border-radius: 1rem; border: 1px solid var(--tbd); background: var(--tbg); margin-bottom: 1rem; }
+.hero .ico { width: 42px; height: 42px; border-radius: 12px; background: #fff; display: grid; place-items: center; font-size: 1.2rem; color: var(--t); flex-shrink: 0; }
+.hero .t { font-weight: 700; color: var(--ink); font-size: 1.02rem; }
+.hero .d { font-size: .88rem; color: #475569; }
+.ok { --t: var(--ok); --tbg: var(--ok-bg); --tbd: var(--ok-bd); }
+.warn { --t: var(--warn); --tbg: var(--warn-bg); --tbd: var(--warn-bd); }
+.danger { --t: var(--danger); --tbg: var(--danger-bg); --tbd: var(--danger-bd); }
+.info { --t: var(--info); --tbg: var(--info-bg); --tbd: var(--info-bd); }
+.muted { --t: var(--muted); --tbg: #f1f5f9; --tbd: #e2e8f0; }
+.chip { display: inline-flex; align-items: center; gap: .25rem; padding: .12rem .6rem; border-radius: 999px; font-size: .74rem; font-weight: 600; border: 1px solid var(--tbd); color: var(--t); background: var(--tbg); white-space: nowrap; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: .75rem; }
+.actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: .75rem; }
+.action { border: 1px solid var(--line); border-radius: .85rem; padding: .9rem 1rem; display: flex; flex-direction: column; gap: .5rem; }
+.action p { margin: 0; font-size: .84rem; color: var(--muted); flex: 1; }
+.action strong { color: var(--ink); }
+button.btn { border: 0; border-radius: .6rem; padding: .55rem .9rem; font: 600 .86rem system-ui, sans-serif; cursor: pointer; background: var(--accent); color: #fff; }
+button.btn.secondary { background: #fff; color: var(--ink-2); border: 1px solid #dfe3ea; }
+button.btn.warn-btn { background: #fff; color: var(--warn); border: 1px solid var(--warn-bd); }
+button.btn:disabled { opacity: .5; cursor: not-allowed; }
+button.btn:focus-visible, .hist:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.steps { display: flex; gap: .4rem; flex-wrap: wrap; margin: .2rem 0 .8rem; }
+.log { background: #0f172a; color: #cbd5e1; border-radius: .7rem; padding: .8rem 1rem; max-height: 380px; overflow: auto; font: .76rem/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+.log .ts { color: #64748b; margin-right: .5rem; }
+.log .stg { color: #818cf8; margin-right: .5rem; }
+.log .l-success { color: #6ee7b7; } .log .l-warn { color: #fcd34d; } .log .l-error { color: #fca5a5; }
+.tenants { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: .4rem; margin: .2rem 0 .8rem; }
+.tenant { border: 1px solid var(--tbd); background: var(--tbg); border-radius: .6rem; padding: .45rem .6rem; font-size: .8rem; }
+.tenant b { color: var(--ink); }
+.finding { display: flex; gap: .8rem; align-items: flex-start; padding: .8rem .9rem; border: 1px solid var(--tbd); background: var(--tbg); border-radius: .8rem; margin-bottom: .5rem; }
+.finding .fbody { flex: 1; min-width: 0; }
+.finding .ftitle { font-weight: 700; color: var(--ink); }
+.finding .fdetail { font-size: .84rem; color: #475569; white-space: pre-wrap; overflow-wrap: anywhere; margin-top: .15rem; max-height: 14em; overflow: auto; }
+.finding .fix { font-size: .78rem; color: var(--t); margin-top: .3rem; }
+.tenant small { display: block; color: var(--t); }
+.hist { width: 100%; display: flex; align-items: center; gap: .6rem; padding: .6rem .3rem; border: 0; background: none; border-top: 1px solid var(--line-2); cursor: pointer; text-align: left; font: inherit; color: inherit; border-radius: .5rem; }
+.hist:first-child { border-top: 0; }
+.hist:hover { background: #f8fafc; }
+.hist .w { flex: 1; min-width: 0; }
+.card h2 { flex-wrap: wrap; }
+.hist .w span { display: block; font-size: .78rem; color: var(--muted); }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: .25rem 1rem; font-size: .86rem; margin: 0; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
+details summary { cursor: pointer; font-weight: 600; color: var(--ink-2); }
+details ul { margin: .6rem 0 0; padding-left: 1.2rem; font-size: .86rem; }
+details li + li { margin-top: .3rem; }
+#auth { max-width: 380px; margin: 12vh auto; text-align: center; }
+#auth input { width: 100%; padding: .65rem .8rem; border: 1px solid #dfe3ea; border-radius: .6rem; font: inherit; margin: 1rem 0 .7rem; }
+#auth input:focus { outline: none; border-color: #a5b4fc; box-shadow: 0 0 0 .2rem rgba(99,102,241,.15); }
+#auth .err { color: var(--danger); min-height: 1.4em; font-size: .88rem; }
+#toast { position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); max-width: min(92vw, 560px); display: none; }
+.hidden { display: none !important; }
+@media (prefers-reduced-motion: no-preference) { .spin { display: inline-block; animation: spin 1.4s linear infinite; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div id="auth">
+    <h1>PTScheduler Guardian</h1>
+    <p class="sub" style="margin:.4rem auto 0">Awaryjny panel aktualizacji. Na co dzień wszystko robisz z Portalu → Aktualizacje.</p>
+    <form id="auth-form">
+        <input type="password" id="secret" placeholder="Sekret Guardiana (GUARDIAN_SECRET)" autocomplete="current-password" aria-label="Sekret Guardiana">
+        <button class="btn" type="submit" style="width:100%">Zaloguj</button>
+    </form>
+    <p class="err" id="auth-err" role="alert"></p>
+</div>
+
+<div id="app" class="hidden">
+    <div class="bar">
+        <strong>Guardian</strong>
+        <span id="ver" class="chip muted" style="background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.12);color:#cbd5e1"></span>
+        <span id="uptime"></span>
+        <span class="grow"></span>
+        <button type="button" id="logout">Wyloguj</button>
+    </div>
+    <main>
+        <h1>Panel Guardiana</h1>
+        <p class="sub">Guardian buduje nowe wersje i podmienia kontenery Portalu i trenerów. Wdrożenie u trenerów uruchamiasz z Portalu (zna listę instancji) — tu widzisz jego przebieg i możesz awaryjnie zaktualizować albo cofnąć Portal.</p>
+
+        <div id="hero"></div>
+
+        <section class="card hidden" id="job-card">
+            <h2 id="job-title"></h2>
+            <div class="steps" id="job-steps"></div>
+            <div class="tenants" id="job-tenants"></div>
+            <div id="job-result"></div>
+            <div class="log" id="job-log" aria-label="Log zadania"></div>
+        </section>
+
+        <section class="card" id="doctor-card">
+            <h2>Diagnostyka <span id="doctor-auto"></span>
+                <button class="btn secondary" type="button" id="doctor-refresh" style="margin-left:auto;padding:.3rem .7rem;font-size:.8rem">Sprawdź teraz</button>
+            </h2>
+            <p class="sub" style="margin:-.3rem 0 .8rem">Guardian przegląda kontenery platformy: czy Portal widzi bazę, czy coś nie stoi albo nie restartuje się w kółko, czy zostały śmieci po aktualizacjach. Naprawę wykonuje po Twoim potwierdzeniu.</p>
+            <div id="doctor-list">Sprawdzam…</div>
+        </section>
+
+        <section class="card" id="backup-card">
+            <h2>Kopie Portalu <span id="backup-chip"></span>
+                <button class="btn secondary" type="button" id="backup-create" style="margin-left:auto;padding:.3rem .7rem;font-size:.8rem">Zrób kopię teraz</button>
+            </h2>
+            <p class="sub" style="margin:-.3rem 0 .8rem">Kopie bazy Portalu (lista trenerów, ich domeny, plany, rachunki, ustawienia) i konfiguracji platformy. Robi je Portal, a Guardian dorabia własną, gdy Portal przestaje. Tu przywrócisz bazę Portalu, gdy Portal nie wstaje albo jego dane są zepsute — trenerów odtwarza potem Portal (Kopie zapasowe).</p>
+            <div id="backup-status"></div>
+            <div id="backup-list">Wczytywanie…</div>
+            <div class="action" style="margin-top:.8rem">
+                <strong>Wgraj plik kopii</strong>
+                <p>Kopia z innego serwera albo pobrana z Dysku Google (<code>portal_….tar</code> lub <code>.tar.enc</code>). Po wgraniu pojawi się na liście.</p>
+                <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
+                    <input type="file" id="backup-file" accept=".tar,.enc,.gz" aria-label="Plik kopii Portalu">
+                    <button class="btn secondary" type="button" id="backup-upload">Wgraj</button>
+                </div>
+            </div>
+        </section>
+
+        <section class="card">
+            <h2>Akcje awaryjne</h2>
+            <div class="actions">
+                <div class="action">
+                    <strong>Aktualizuj Portal</strong>
+                    <p>Pobiera kod, buduje nowy obraz, sprawdza go w kontenerze testowym i podmienia Portal. Przy błędzie wraca poprzednia wersja.</p>
+                    <button class="btn" type="button" data-action="portal">Aktualizuj Portal</button>
+                </div>
+                <div class="action">
+                    <strong>Zbuduj obraz aplikacji trenerów</strong>
+                    <p>Tylko obraz, bez wdrażania. Pełną nową wersję dla trenerów (budowa + wdrożenie na instancje) uruchom z Portalu.</p>
+                    <button class="btn secondary" type="button" data-action="tenant">Zbuduj obraz</button>
+                </div>
+                <div class="action">
+                    <strong>Przywróć poprzedni Portal</strong>
+                    <p>Gdy nowa wersja Portalu działa źle — wraca obraz sprzed ostatniej aktualizacji.</p>
+                    <button class="btn warn-btn" type="button" data-action="rollback">Przywróć poprzedni</button>
+                </div>
+            </div>
+        </section>
+
+        <div class="grid">
+            <section class="card">
+                <h2>Ta instancja Guardiana</h2>
+                <dl class="kv" id="info"></dl>
+            </section>
+            <section class="card">
+                <h2>Co nowego</h2>
+                <details open>
+                    <summary>Kopie Portalu</summary>
+                    <ul>
+                        <li>Guardian widzi kopie bazy Portalu i <b>przywraca Portal z kopii</b> — z zapisem obecnej bazy przed nadpisaniem.</li>
+                        <li>Gdy Portal nie zrobił kopii przez ponad dobę, Guardian robi własną (baza + konfiguracja platformy).</li>
+                        <li>E-mail do administratora, gdy Portal nie odpowiada dłużej niż 10 minut, i drugi, gdy wróci.</li>
+                        <li>Wgranie pliku kopii z innego serwera albo z Dysku Google — także zaszyfrowanej.</li>
+                    </ul>
+                </details>
+                <details>
+                    <summary>Wdrażanie u trenerów i zabezpieczenia</summary>
+                    <ul>
+                        <li>Nowa wersja dla trenerów w <b>jednym zadaniu</b>: budowa obrazu i od razu wdrożenie — koniec z „Guardian nie odpowiedział przy starcie wdrażania”.</li>
+                        <li>Stary kontener jest odkładany, a nie usuwany — gdy nowa wersja nie wstanie, wraca dokładnie on (z limitami pamięci i CPU), a w logu widać błąd aplikacji.</li>
+                        <li>Instancje sprawdzane pod adresem hosta, a zapasowo po starcie w logach.</li>
+                        <li>Token GitHuba tylko w pamięci, sekrety wycinane z logów, walidacja danych i audyt wywołań.</li>
+                        <li>Zadania przerwane restartem Guardiana są oznaczane jako nieudane.</li>
+                    </ul>
+                </details>
+            </section>
+        </div>
+
+        <section class="card">
+            <h2>Historia</h2>
+            <div id="history">Wczytywanie…</div>
+        </section>
+    </main>
+</div>
+
+<div id="toast" role="status"></div>
+
+<script>
+'use strict';
+// Sekret trzymamy tylko w pamięci karty — po zamknięciu trzeba go podać ponownie.
+let secret = '';
+let pollId = null;
+let shownJobId = null;
+
+const TARGET = { PortalRestore: 'Przywracanie bazy Portalu', Portal: 'Aktualizacja Portalu', Tenant: 'Obraz aplikacji trenerów', TenantRolling: 'Wdrażanie u trenerów', TenantRelease: 'Nowa wersja dla trenerów', Maintenance: 'Naprawa (diagnostyka)' };
+const STATUS = { Running: ['W toku', 'info'], Success: ['Zakończone', 'ok'], Failed: ['Nieudane', 'danger'], RolledBack: ['Wycofane', 'warn'], PartialSuccess: ['Częściowo', 'warn'] };
+const TSTATUS = { Pending: ['czeka', 'muted'], Updating: ['podmiana…', 'info'], HealthCheck: ['sprawdzanie…', 'info'], Success: ['nowa wersja', 'ok'], Failed: ['błąd', 'danger'], RolledBack: ['przywrócona', 'warn'], Skipped: ['pominięta', 'muted'] };
+const STAGES = { PortalRestore: ['Testing', 'Swapping', 'Verifying'], Portal: ['Pulling', 'Building', 'Testing', 'Swapping', 'Verifying'], Tenant: ['Pulling', 'Building'], TenantRolling: ['Swapping', 'Done'], TenantRelease: ['Pulling', 'Building', 'Swapping', 'Done'] };
+const STAGE_PL = { Queued: 'Kolejka', Pulling: 'Pobranie kodu', Building: 'Budowanie', Testing: 'Próba', Swapping: 'Podmiana', Verifying: 'Sprawdzenie', Done: 'Koniec' };
+
+// Wszystko, co przychodzi z serwera (w tym logi aplikacji), wstawiamy jako tekst — nigdy jako HTML.
+function el(tag, attrs, ...children) {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+        if (k === 'class') e.className = v; else if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v);
+    }
+    for (const c of children.flat()) if (c != null && c !== false) e.append(c instanceof Node ? c : String(c));
+    return e;
+}
+const chip = (text, tone) => el('span', { class: 'chip ' + tone }, text);
+const short = c => (c || '').slice(0, 7) || '—';
+const time = d => d ? new Date(d).toLocaleString('pl-PL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
+
+async function api(path, method, body) {
+    const headers = { 'X-Guardian-Secret': secret };
+    if (body) headers['Content-Type'] = 'application/json';
+    const r = await fetch(path, { method: method || 'GET', headers, cache: 'no-store', body: body ? JSON.stringify(body) : undefined });
+    let data = null;
+    try { data = await r.json(); } catch { /* brak JSON */ }
+    if (r.status === 401) throw Object.assign(new Error('Zły sekret.'), { auth: true });
+    if (!r.ok && !(data && ('started' in data || 'ok' in data))) throw new Error((data && (data.error || data.message)) || ('HTTP ' + r.status));
+    return data;
+}
+
+function toast(text, tone) {
+    const t = document.getElementById('toast');
+    t.replaceChildren(el('div', { class: 'hero ' + (tone || 'info'), style: 'margin:0;box-shadow:0 8px 24px rgba(15,23,42,.15)' }, el('div', { class: 'd' }, text)));
+    t.style.display = 'block';
+    clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = 'none', 6000);
+}
+
+document.getElementById('auth-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    secret = document.getElementById('secret').value;
+    document.getElementById('secret').value = '';
+    try {
+        await api('/api/status');
+        document.getElementById('auth').classList.add('hidden');
+        document.getElementById('app').classList.remove('hidden');
+        refresh();
+        pollId = setInterval(refresh, 4000);
+    } catch (err) {
+        secret = '';
+        document.getElementById('auth-err').textContent = err.auth ? 'Nieprawidłowy sekret.' : 'Guardian nie odpowiada: ' + err.message;
+    }
+});
+
+document.getElementById('logout').addEventListener('click', () => {
+    secret = ''; clearInterval(pollId); shownJobId = null;
+    document.getElementById('app').classList.add('hidden');
+    document.getElementById('auth').classList.remove('hidden');
+});
+
+async function refresh() {
+    try {
+        const s = await api('/api/status');
+        document.getElementById('ver').textContent = 'wersja ' + short(s.version);
+        document.getElementById('uptime').textContent = 'działa od ' + s.uptime;
+        renderInfo(s);
+        renderHero(s);
+        const busy = !!s.activeJob;
+        document.querySelectorAll('[data-action]').forEach(b => b.disabled = busy);
+        if (s.activeJob) { shownJobId = s.activeJob.id; renderJob(s.activeJob); }
+        else if (shownJobId) { const j = await api('/api/upgrade/jobs/' + encodeURIComponent(shownJobId)); if (j) renderJob(j); }
+        renderHistory(await api('/api/upgrade/history?limit=15'));
+        if (Date.now() - (refresh.lastDoctor || 0) > 30000) { refresh.lastDoctor = Date.now(); loadDoctor(); loadBackups(); }
+    } catch (err) {
+        if (err.auth) document.getElementById('logout').click();
+    }
+}
+
+function renderInfo(s) {
+    const rows = [
+        ['Wersja', short(s.version) + (s.buildTime && s.buildTime !== 'unknown' ? ' · zbudowana ' + time(s.buildTime) : '')],
+        ['Działa od', s.uptime],
+        ['Obraz trenerów', s.tenantImage || '—'],
+        ['Portal', s.portalHealthy ? 'odpowiada' : 'nie odpowiada'],
+        ['Ostatnie sprawdzenie', time(s.portalLastChecked)]
+    ];
+    document.getElementById('info').replaceChildren(...rows.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v)]));
+}
+
+function renderHero(s) {
+    let tone, icon, title, text;
+    if (s.activeJob) {
+        tone = 'info'; icon = '⟳'; title = 'Trwa: ' + (TARGET[s.activeJob.target] || s.activeJob.target).toLowerCase();
+        text = 'Etap: ' + (STAGE_PL[s.activeJob.stage] || s.activeJob.stage) + '. Możesz zamknąć stronę — Guardian dokończy sam.';
+    } else if (!s.portalHealthy) {
+        tone = 'danger'; icon = '!'; title = 'Portal nie odpowiada';
+        text = 'Jeśli to po aktualizacji — użyj „Przywróć poprzedni Portal” poniżej. Gdy to nie pomaga, a problem jest w bazie — przywróć ją z „Kopie Portalu”.';
+    } else {
+        tone = 'ok'; icon = '✓'; title = 'Wszystko w porządku';
+        text = 'Portal odpowiada, żadne zadanie nie trwa.';
+    }
+    document.getElementById('hero').replaceChildren(
+        el('section', { class: 'hero ' + tone, 'aria-live': 'polite' },
+            el('div', { class: 'ico' }, el('span', { class: s.activeJob ? 'spin' : '' }, icon)),
+            el('div', {}, el('div', { class: 't' }, title), el('div', { class: 'd' }, text))));
+}
+
+function renderJob(job) {
+    document.getElementById('job-card').classList.remove('hidden');
+    const [label, tone] = STATUS[job.status] || [job.status, 'muted'];
+    document.getElementById('job-title').replaceChildren(
+        TARGET[job.target] || job.target, ' ', chip(label, tone),
+        el('span', { style: 'margin-left:auto;font-size:.78rem;font-weight:400;color:var(--muted)' },
+            time(job.startedAt), job.requestedBy ? ' · z ' + job.requestedBy : ''));
+
+    const order = ['Queued', 'Pulling', 'Building', 'Testing', 'Swapping', 'Verifying', 'Done'];
+    const cur = order.indexOf(job.stage);
+    document.getElementById('job-steps').replaceChildren(...(STAGES[job.target] || []).map(st => {
+        const i = order.indexOf(st);
+        const state = job.status === 'Success' || i < cur ? 'ok' : i > cur ? 'muted'
+            : job.status === 'Running' ? 'info' : (job.status === 'Failed' || job.status === 'RolledBack') ? 'danger' : 'ok';
+        return chip((state === 'ok' ? '✓ ' : state === 'danger' ? '✕ ' : '') + (STAGE_PL[st] || st), state);
+    }));
+
+    document.getElementById('job-tenants').replaceChildren(...(job.tenantResults || []).map(t => {
+        const [tl, tt] = TSTATUS[t.status] || [t.status, 'muted'];
+        return el('div', { class: 'tenant ' + tt }, el('b', {}, t.slug), ' · ', tl, (t.error || t.detail) ? el('small', {}, t.error || t.detail) : null);
+    }));
+
+    const res = document.getElementById('job-result');
+    res.replaceChildren(job.status !== 'Running' && job.error ? el('div', { class: 'hero danger', style: 'padding:.7rem .9rem' }, el('div', { class: 'd' }, job.error)) : '');
+
+    const log = document.getElementById('job-log');
+    const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+    log.replaceChildren(...(job.log || []).map(e => el('div', { class: 'l-' + e.level },
+        el('span', { class: 'ts' }, new Date(e.timestamp).toLocaleTimeString('pl-PL')),
+        el('span', { class: 'stg' }, STAGE_PL[e.stage] || e.stage), e.message)));
+    if (atBottom) log.scrollTop = log.scrollHeight;
+}
+
+function renderHistory(jobs) {
+    const box = document.getElementById('history');
+    if (!jobs || !jobs.length) { box.textContent = 'Jeszcze nic się nie działo.'; return; }
+    box.replaceChildren(...jobs.map(j => {
+        const [label, tone] = STATUS[j.status] || [j.status, 'muted'];
+        const commits = j.commitBefore ? short(j.commitBefore) + ' → ' + short(j.commitAfter) : '';
+        const tenants = j.tenantsTotal ? ` · instancje: ${j.tenantsCompleted}/${j.tenantsTotal}` : '';
+        return el('button', { class: 'hist', type: 'button', onclick: async () => {
+                shownJobId = j.id;
+                try { renderJob(await api('/api/upgrade/jobs/' + encodeURIComponent(j.id))); document.getElementById('job-card').scrollIntoView({ behavior: 'smooth' }); } catch (err) { toast(err.message, 'danger'); }
+            } },
+            chip(label, tone),
+            el('span', { class: 'w' }, el('b', {}, TARGET[j.target] || j.target), el('span', {}, time(j.startedAt), commits ? ' · ' + commits : '', tenants, j.requestedBy ? ' · z ' + j.requestedBy : '')));
+    }));
+}
+
+async function loadDoctor() {
+    const box = document.getElementById('doctor-list');
+    try {
+        const r = await api('/api/doctor');
+        document.getElementById('doctor-auto').replaceChildren(
+            chip(r.autoHealEnabled ? 'samoleczenie włączone' : 'samoleczenie wyłączone', r.autoHealEnabled ? 'ok' : 'muted'), ' ',
+            chip(r.autoCleanupEnabled ? 'sprzątanie włączone' : 'sprzątanie wyłączone', r.autoCleanupEnabled ? 'ok' : 'muted'));
+        const cleanup = el('div', { class: 'fix', style: 'margin-top:.6rem' },
+            r.autoCleanupEnabled
+                ? 'Sprzątanie: po każdej udanej aktualizacji i codziennie o 4:00. ' + (r.lastCleanupAt ? 'Ostatnio ' + time(r.lastCleanupAt) + ' — ' + r.lastCleanup : 'Od startu Guardiana jeszcze nie sprzątało.')
+                : 'Automatyczne sprzątanie wyłączone (GUARDIAN_AUTO_CLEANUP=false).');
+        if (!r.findings.length) {
+            box.replaceChildren(el('div', { class: 'finding ok' }, el('div', { class: 'fbody' },
+                el('div', { class: 'ftitle' }, '✓ Nie widzę problemów'),
+                el('div', { class: 'fdetail' }, 'Sprawdzono ' + time(r.checkedAt) + '.'))), cleanup);
+            return;
+        }
+        box.replaceChildren(cleanup);
+        box.prepend(...r.findings.map(f => el('div', { class: 'finding ' + f.severity },
+            el('div', { class: 'fbody' },
+                el('div', { class: 'ftitle' }, f.title),
+                el('div', { class: 'fdetail' }, f.detail),
+                f.fixDescription ? el('div', { class: 'fix' }, 'Naprawa: ' + f.fixDescription + (f.autoFix ? ' (Guardian zrobi to sam, gdy Portal nie odpowiada)' : '')) : null),
+            f.fixLabel ? el('button', { class: 'btn' + (f.severity === 'info' ? ' secondary' : ''), type: 'button', onclick: async (e) => {
+                if (!confirm(f.fixLabel + '?\n\n' + (f.fixDescription || ''))) return;
+                e.target.disabled = true;
+                try {
+                    const res = await api('/api/doctor/fix', 'POST', { id: f.id });
+                    toast(res.message, res.ok ? 'ok' : 'warn');
+                    if (res.jobId) shownJobId = res.jobId;
+                } catch (err) { toast(err.message, 'danger'); }
+                refresh.lastDoctor = 0; refresh();
+            } }, f.fixLabel) : null)));
+    } catch (err) { box.textContent = 'Nie udało się sprawdzić: ' + err.message; }
+}
+document.getElementById('doctor-refresh').addEventListener('click', () => { document.getElementById('doctor-list').textContent = 'Sprawdzam…'; loadDoctor(); });
+
+const fmtSize = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+const SOURCE = { portal: ['od Portalu', 'info'], guardian: ['od Guardiana', 'muted'], 'przed-przywróceniem': ['przed przywróceniem', 'warn'], 'wgrana': ['wgrana', 'muted'] };
+let openRestore = null;
+
+async function loadBackups() {
+    const list = document.getElementById('backup-list');
+    try {
+        const r = await api('/api/backups');
+        const newest = r.files[0];
+        const ageH = newest ? (Date.now() - new Date(newest.createdAt)) / 3600000 : null;
+        document.getElementById('backup-chip').replaceChildren(
+            newest ? chip('najnowsza ' + time(newest.createdAt), ageH > r.maxAgeHours ? 'warn' : 'ok') : chip('brak kopii', 'danger'));
+        const notes = [];
+        if (!r.portalDbRunning) notes.push(el('div', { class: 'finding danger' }, el('div', { class: 'fbody' },
+            el('div', { class: 'ftitle' }, 'Baza Portalu (' + r.portalDbContainer + ') nie działa'),
+            el('div', { class: 'fdetail' }, 'Przywracanie sam ją uruchomi. Gdy kontenera w ogóle nie ma: docker compose -f docker-compose.prod.yml --env-file .env.prod up -d portal-db'))));
+        if (r.lastResult) notes.push(el('div', { class: 'fix', style: 'margin-bottom:.5rem' }, 'Ostatnia kopia Guardiana (' + time(r.lastAttemptAt) + '): ' + r.lastResult));
+        if (r.lastAlertError) notes.push(el('div', { class: 'fix', style: 'margin-bottom:.5rem;color:var(--warn)' }, 'Alarmy e-mail: ' + r.lastAlertError));
+        document.getElementById('backup-status').replaceChildren(...notes);
+        if (!r.files.length) { list.textContent = 'Nie ma jeszcze kopii w ' + r.dir + '/portal. Kliknij „Zrób kopię teraz” albo wgraj plik.'; return; }
+        list.replaceChildren(...r.files.map(f => {
+            const [sl, st] = SOURCE[f.source] || [f.source, 'muted'];
+            const row = el('div', { class: 'hist', style: 'cursor:default;flex-wrap:wrap' },
+                chip(sl, st),
+                el('span', { class: 'w' }, el('b', {}, time(f.createdAt)),
+                    el('span', {}, f.name + ' · ' + fmtSize(f.size) + (f.encrypted ? ' · zaszyfrowana' : '') + (f.hasEnv ? ' · z konfiguracją' : ''))),
+                el('button', { class: 'btn warn-btn', type: 'button', style: 'padding:.35rem .7rem;font-size:.8rem', onclick: () => { openRestore = openRestore === f.name ? null : f.name; loadBackups(); } }, 'Przywróć'));
+            if (openRestore !== f.name) return row;
+            const pass = el('input', { type: 'password', placeholder: 'Hasło szyfrowania kopii', autocomplete: 'off', style: 'padding:.45rem .6rem;border:1px solid #dfe3ea;border-radius:.5rem;font:inherit;min-width:220px' });
+            const skip = el('input', { type: 'checkbox', id: 'skip-safety' });
+            const go = el('button', { class: 'btn', type: 'button', onclick: async () => {
+                const word = prompt('Baza Portalu zostanie zastąpiona kopią z ' + time(f.createdAt) + '. Portal będzie niedostępny przez kilka minut.\n\nWpisz PRZYWRÓĆ, żeby potwierdzić.');
+                if ((word || '').trim().toUpperCase() !== 'PRZYWRÓĆ') return;
+                go.disabled = true;
+                try {
+                    const res = await api('/api/backups/restore', 'POST', { file: f.name, password: pass.value || null, skipSafetyBackup: skip.checked });
+                    if (res.started) { shownJobId = res.jobId; openRestore = null; toast('Przywracanie uruchomione — postęp widać wyżej.', 'ok'); refresh(); }
+                    else toast(res.error || 'Guardian nie przyjął zadania.', 'warn');
+                } catch (err) { toast(err.message, 'danger'); }
+                go.disabled = false;
+            } }, 'Przywróć bazę Portalu');
+            return el('div', {}, row, el('div', { class: 'finding warn', style: 'margin:.2rem 0 .6rem' }, el('div', { class: 'fbody' },
+                el('div', { class: 'ftitle' }, 'Przywrócenie bazy Portalu'),
+                el('div', { class: 'fdetail' }, 'Guardian zapisze kopię obecnej bazy, zatrzyma Portal, wgra wybraną kopię i uruchomi Portal. Trenerzy nie są ruszani — ich aplikacje działają dalej.'),
+                el('div', { style: 'display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin-top:.6rem' },
+                    f.encrypted ? pass : null,
+                    el('label', { for: 'skip-safety', style: 'font-size:.82rem;display:flex;gap:.3rem;align-items:center' }, skip, 'Pomiń kopię obecnej bazy (gdy baza jest uszkodzona)'),
+                    go))));
+        }));
+    } catch (err) { list.textContent = 'Nie udało się wczytać kopii: ' + err.message; }
+}
+
+document.getElementById('backup-create').addEventListener('click', async e => {
+    e.target.disabled = true;
+    try { const r = await api('/api/backups/create', 'POST'); toast(r.message, r.ok ? 'ok' : 'warn'); }
+    catch (err) { toast(err.message, 'danger'); }
+    e.target.disabled = false;
+    loadBackups();
+});
+
+document.getElementById('backup-upload').addEventListener('click', async e => {
+    const file = document.getElementById('backup-file').files[0];
+    if (!file) { toast('Wybierz plik kopii.', 'warn'); return; }
+    e.target.disabled = true;
+    try {
+        const r = await fetch('/api/backups/upload?name=' + encodeURIComponent(file.name), { method: 'POST', headers: { 'X-Guardian-Secret': secret, 'Content-Type': 'application/octet-stream' }, body: file });
+        const data = await r.json().catch(() => ({}));
+        toast(data.message || ('HTTP ' + r.status), r.ok ? 'ok' : 'warn');
+    } catch (err) { toast(err.message, 'danger'); }
+    e.target.disabled = false;
+    loadBackups();
+});
+
+const ACTIONS = {
+    portal: ['Zaktualizować Portal? Panel Portalu zniknie na chwilę podczas podmiany.', '/api/upgrade/portal'],
+    tenant: ['Zbudować nowy obraz aplikacji trenerów (bez wdrażania na instancje)?', '/api/upgrade/tenant'],
+    rollback: ['Przywrócić poprzednią wersję Portalu?', '/api/rollback/portal']
+};
+document.querySelectorAll('[data-action]').forEach(b => b.addEventListener('click', async () => {
+    const [question, path] = ACTIONS[b.dataset.action];
+    if (!confirm(question)) return;
+    b.disabled = true;
+    try {
+        const r = await api(path, 'POST');
+        if (r && r.started) { shownJobId = r.jobId; toast('Zadanie uruchomione.', 'ok'); refresh(); }
+        else toast((r && r.error) || 'Guardian nie przyjął zadania.', 'warn');
+    } catch (err) { toast(err.message, 'danger'); }
+    finally { b.disabled = false; }
+}));
+</script>
+</body>
+</html>

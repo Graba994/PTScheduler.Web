@@ -1,0 +1,87 @@
+@inject InviteService Invites
+@inject IJSRuntime JS
+
+@* Udostępnianie kodu zaproszenia: duży kod QR do zeskanowania telefonem, link do skopiowania i wysyłka e-mailem. *@
+<div class="pp-sheet-backdrop" @onclick="Close"></div>
+<div class="pp-sheet" role="dialog" aria-modal="true" aria-labelledby="invite-share-title">
+    <div class="pp-sheet-head">
+        <div>
+            <div class="pp-sheet-eyebrow">Zaproszenie@(Invite.ExtraTrialDays > 0 ? $" · +{Invite.ExtraTrialDays} dni za darmo" : "")</div>
+            <h2 id="invite-share-title" class="pp-sheet-title font-monospace">@Invite.Code</h2>
+        </div>
+        <button type="button" class="btn-close" aria-label="Zamknij" @onclick="Close"></button>
+    </div>
+
+    <div class="pp-qr" aria-label="Kod QR z linkiem do kreatora">@((MarkupString)_svg)</div>
+    <p class="small text-muted text-center mb-3">Trener skanuje aparatem telefonu — kreator otwiera się z wpisanym kodem.</p>
+
+    <div class="input-group input-group-sm mb-2">
+        <input class="form-control font-monospace" readonly value="@Link" aria-label="Link z kodem" />
+        <button class="btn btn-outline-secondary" @onclick="CopyAsync"><i class="bi @(_copied ? "bi-check2" : "bi-clipboard")"></i></button>
+    </div>
+    <div class="d-flex gap-2 flex-wrap mb-3">
+        <a class="btn btn-sm btn-outline-secondary" href="@SvgDataUri" download="@($"zaproszenie-{Invite.Code}.svg")"><i class="bi bi-download me-1"></i>Pobierz QR</a>
+        <a class="btn btn-sm btn-outline-success" href="@($"https://wa.me/?text={Uri.EscapeDataString($"Twoja aplikacja dla trenera — zaproszenie: {Link}")}")" target="_blank" rel="noopener"><i class="bi bi-whatsapp me-1"></i>WhatsApp</a>
+        <a class="btn btn-sm btn-outline-secondary" href="@($"sms:?&body={Uri.EscapeDataString($"Zaproszenie do aplikacji dla trenerów: {Link}")}")"><i class="bi bi-chat-dots me-1"></i>SMS</a>
+    </div>
+
+    <div class="pp-sheet-section">
+        <label class="form-label small fw-semibold" for="invite-email">Wyślij e-mailem</label>
+        <input id="invite-email" type="email" class="form-control form-control-sm mb-2" placeholder="adres e-mail trenera" @bind="_email" autocomplete="off" />
+        <input class="form-control form-control-sm mb-2" placeholder="imię (opcjonalnie)" @bind="_name" maxlength="60" />
+        <button class="btn btn-primary btn-sm w-100" @onclick="SendAsync" disabled="@_sending">
+            @if (_sending) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-send me-1"></i> }
+            Wyślij zaproszenie
+        </button>
+        @if (_status is not null)
+        {
+            <div class="small mt-2 @(_statusOk ? "text-success" : "text-danger")">@_status</div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public InviteCode Invite { get; set; } = default!;
+    [Parameter, EditorRequired] public string Link { get; set; } = "";
+    [Parameter] public string? DefaultEmail { get; set; }
+    [Parameter] public string? DefaultName { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    /// <summary>Po wysłaniu e-maila (np. żeby zapisać to w notatce ze spotkania).</summary>
+    [Parameter] public EventCallback<string> OnSent { get; set; }
+
+    private string _svg = "";
+    private string? _email;
+    private string? _name;
+    private bool _sending;
+    private bool _copied;
+    private string? _status;
+    private bool _statusOk;
+
+    private string SvgDataUri => "data:image/svg+xml;charset=utf-8," + Uri.EscapeDataString(_svg);
+
+    protected override void OnParametersSet()
+    {
+        _svg = InviteService.QrSvg(Link);
+        _email ??= DefaultEmail;
+        _name ??= DefaultName;
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private async Task CopyAsync()
+    {
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", Link); _copied = true; }
+        catch (JSException) { _copied = false; }
+    }
+
+    private async Task SendAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_email)) { _status = "Wpisz adres e-mail."; _statusOk = false; return; }
+        _sending = true;
+        var (ok, error) = await Invites.SendAsync(Invite, _email, _name, Link);
+        _sending = false;
+        _statusOk = ok;
+        _status = ok ? $"Wysłano na {_email!.Trim()}." : $"Nie udało się wysłać: {error}";
+        if (ok) await OnSent.InvokeAsync(_email!.Trim());
+    }
+}

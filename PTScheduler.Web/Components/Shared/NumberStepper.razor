@@ -1,0 +1,57 @@
+@using System.Globalization
+@* Duże pole liczby z przyciskami −/+ (wygodne kciukiem na telefonie). Wpisanie też działa. *@
+<div class="stepper stepper-@Mode.ToString().ToLowerInvariant() @(Disabled ? "is-disabled" : "")">
+    <button type="button" class="stepper-btn" tabindex="-1" disabled="@Disabled" aria-label="@($"{Label}: mniej")" @onclick="() => Change(-Step)"><i class="bi bi-dash-lg"></i></button>
+    <input class="stepper-input" type="text" inputmode="@InputMode" value="@Text" aria-label="@Label" disabled="@Disabled"
+           onfocus="this.select()" @onchange="OnInput" />
+    <button type="button" class="stepper-btn" tabindex="-1" disabled="@Disabled" aria-label="@($"{Label}: więcej")" @onclick="() => Change(Step)"><i class="bi bi-plus-lg"></i></button>
+</div>
+
+@code {
+    public enum Kind { Integer, Decimal, Duration }
+
+    private static readonly CultureInfo Pl = CultureInfo.GetCultureInfo("pl-PL");
+
+    [Parameter] public decimal Value { get; set; }
+    [Parameter] public EventCallback<decimal> ValueChanged { get; set; }
+    [Parameter] public decimal Step { get; set; } = 1;
+    [Parameter] public decimal Min { get; set; }
+    [Parameter] public decimal Max { get; set; } = 99999;
+    [Parameter] public Kind Mode { get; set; } = Kind.Integer;
+    [Parameter] public string Label { get; set; } = "";
+    [Parameter] public bool Disabled { get; set; }
+
+    private string InputMode => Mode switch { Kind.Integer => "numeric", Kind.Decimal => "decimal", _ => "text" };
+
+    private string Text => Mode switch
+    {
+        Kind.Duration => $"{(int)Value / 60}:{(int)Value % 60:00}",
+        Kind.Integer => Value.ToString("0", Pl),
+        _ => Value.ToString("0.##", Pl)
+    };
+
+    public static decimal? ParseValue(string? raw, Kind mode)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return 0;
+        if (mode == Kind.Duration) return DurationInput.Parse(raw) is int s ? s : null;
+        return decimal.TryParse(raw.Trim().Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out var v) ? v : null;
+    }
+
+    private Task Change(decimal delta)
+    {
+        // Przy kroku 2,5 zaokrąglamy do najbliższej wielokrotności, żeby nie zostać przy 41,3 kg.
+        var next = Math.Round((Value + delta) / Step, MidpointRounding.AwayFromZero) * Step;
+        return Set(next);
+    }
+
+    private Task OnInput(ChangeEventArgs e) =>
+        ParseValue(e.Value?.ToString(), Mode) is decimal v ? Set(v) : Set(Value);
+
+    private async Task Set(decimal v)
+    {
+        v = Math.Clamp(v, Min, Max);
+        if (Mode != Kind.Decimal) v = Math.Round(v);
+        Value = v;
+        await ValueChanged.InvokeAsync(v);
+    }
+}

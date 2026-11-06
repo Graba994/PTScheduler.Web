@@ -1,0 +1,67 @@
+@using PTScheduler.Domain.Rules
+@inject PTScheduler.Web.Services.MedalService MedalSvc
+
+@* Pulpit klienta: ostatnio zdobyte medale, najbliższy do zdobycia i gratulacje za nowe. *@
+@if (_settings is { Enabled: true } && _items.Count > 0)
+{
+    var earned = _items.Where(i => i.EarnedAt is not null).OrderByDescending(i => i.EarnedAt).ToList();
+    var next = _items.Where(i => i.EarnedAt is null).OrderByDescending(i => i.Progress).FirstOrDefault();
+    <section class="medal-card">
+        <div class="medal-card-head">
+            <h3 class="medal-card-title"><i class="bi bi-award"></i>@(Preview ? "Medale" : "Twoje medale")</h3>
+            <a href="/medale" class="medal-card-link">@earned.Count z @_items.Count · Gablota <i class="bi bi-chevron-right"></i></a>
+        </div>
+        @if (earned.Count > 0)
+        {
+            <div class="medal-row">
+                @foreach (var i in earned.Take(5))
+                {
+                    <MedalImage Medal="i.Medal" Style="@_settings.Style" Palette="_settings.Palette" Size="64" />
+                }
+            </div>
+        }
+        @if (next is not null)
+        {
+            <div class="medal-next">
+                <MedalImage Medal="next.Medal" Style="@_settings.Style" Palette="_settings.Palette" Locked="true" Size="44" />
+                <div class="flex-grow-1 min-w-0">
+                    <div class="small fw-semibold">Następny: @next.Medal.Name</div>
+                    <div class="medal-bar" role="progressbar" aria-valuenow="@((int)(next.Progress * 100))" aria-valuemin="0" aria-valuemax="100" aria-label="Postęp do medalu"><i style="width:@((int)(next.Progress * 100))%"></i></div>
+                    <div class="small text-muted">@next.Current z @next.Medal.Target</div>
+                </div>
+            </div>
+        }
+    </section>
+    @if (!Preview)
+    {
+        <NewMedalModal Medals="_unseen" Settings="_settings" OnDone="SeenAsync" />
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public int ClientId { get; set; }
+    /// <summary>Podgląd trenera (pulpit klienta oczami trenera) — bez synchronizacji i gratulacji.</summary>
+    [Parameter] public bool Preview { get; set; }
+
+    private PTScheduler.Web.Services.MedalService.Settings? _settings;
+    private List<PTScheduler.Web.Services.MedalService.Item> _items = [];
+    private List<MedalRules.Medal> _unseen = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _settings = await MedalSvc.GetSettingsAsync();
+        if (!_settings.Enabled) return;
+        if (!Preview)
+        {
+            await MedalSvc.SyncAsync(ClientId);
+            _unseen = await MedalSvc.UnseenAsync(ClientId);
+        }
+        _items = await MedalSvc.CabinetAsync(ClientId);
+    }
+
+    private async Task SeenAsync()
+    {
+        _unseen = [];
+        await MedalSvc.MarkSeenAsync(ClientId);
+    }
+}

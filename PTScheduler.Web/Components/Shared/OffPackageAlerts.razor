@@ -1,0 +1,40 @@
+@* Na dashboardzie trenera/administratora: prośby o termin i treningi do rozliczenia u trenera. *@
+@using PTScheduler.Application.Interfaces
+@inject IOffPackageService OffPackage
+
+@if (_counts is { } c && (c.Requests > 0 || c.UnpaidAtTrainer > 0))
+{
+    <div class="opa">
+        @if (c.Requests > 0)
+        {
+            <a href="/sessions" class="opa-item req">
+                <i class="bi bi-hand-index-thumb"></i>
+                <span><b>@c.Requests @Pl(c.Requests, "prośba", "prośby", "próśb") o termin</b><small>Klienci bez pakietu chcą zapłacić u Ciebie — zaakceptuj albo odrzuć.</small></span>
+                <i class="bi bi-chevron-right ms-auto"></i>
+            </a>
+        }
+        @if (c.UnpaidAtTrainer > 0)
+        {
+            <a href="/sessions" class="opa-item unpaid">
+                <i class="bi bi-cash-coin"></i>
+                <span><b>@c.UnpaidAtTrainer @Pl(c.UnpaidAtTrainer, "trening", "treningi", "treningów") do rozliczenia</b><small>Płatność u Ciebie — odhacz w wizycie, gdy dostaniesz pieniądze.</small></span>
+                <i class="bi bi-chevron-right ms-auto"></i>
+            </a>
+        }
+    </div>
+}
+
+@code {
+    /// <summary>Trener, którego wizyty liczymy; null = wszyscy (administrator).</summary>
+    [Parameter] public string? TrainerUserId { get; set; }
+
+    private OffPackageCountsDto? _counts;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try { _counts = await OffPackage.GetCountsAsync(TrainerUserId); } catch { _counts = null; }
+    }
+
+    private static string Pl(int n, string one, string few, string many) =>
+        n == 1 ? one : n % 10 is >= 2 and <= 4 && n % 100 is < 12 or > 14 ? few : many;
+}

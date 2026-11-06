@@ -1,0 +1,166 @@
+@page "/admin/reviews"
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.Marketing
+@using PTScheduler.Domain.Constants
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
+@inject IReviewService ReviewService
+@inject IMarketingSettingsService MarketingSettings
+@inject AuthenticationStateProvider AuthState
+@inject IAppClock Clock
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Opinie klientów" />
+
+<div class="page-header mb-3">
+    <h4 class="page-title mb-0"><i class="bi bi-star-half me-2" style="color:var(--c-primary)"></i>Opinie klientów</h4>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    <div class="row g-3">
+        <div class="col-lg-4">
+            @if (_isAdmin)
+            {
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="revOn" @bind="_s.ReviewsEnabled" />
+                            <label class="form-check-label fw-semibold" for="revOn">Proś klientów o opinię</label>
+                        </div>
+                        <label class="form-label small">Po ilu odbytych wizytach zapytać</label>
+                        <input type="number" class="form-control form-control-sm mb-3" min="1" max="100" @bind="_s.ReviewAskAfterSessions" />
+
+                        <label class="form-label small">Link do opinii w Google (opcjonalnie)</label>
+                        <input class="form-control form-control-sm" placeholder="https://g.page/r/…/review" @bind="_s.GoogleReviewUrl" />
+                        <div class="form-text mb-3">
+                            Profil Firmy w Google → „Poproś o opinie” → skopiuj link. Klient zobaczy przycisk po wysłaniu opinii
+                            — niezależnie od oceny (Google zabrania zachęcania tylko zadowolonych klientów).
+                        </div>
+
+                        @if (_saved) { <div class="text-success small mb-2"><i class="bi bi-check2 me-1"></i>Zapisano.</div> }
+                        <button class="btn btn-primary btn-sm" @onclick="SaveAsync">Zapisz</button>
+                    </div>
+                </div>
+            }
+
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex align-items-baseline gap-2">
+                        <span class="display-6 fw-semibold">@(_list.Count == 0 ? "–" : _list.Average(r => r.Rating).ToString("0.0"))</span>
+                        <span class="review-stars-static">★</span>
+                        <span class="text-muted small">średnia z @_list.Count opinii</span>
+                    </div>
+                    <div class="small text-muted mt-1">
+                        Na stronie: @_list.Count(r => r.IsPublished) · kliknięcia „Dodaj w Google”: @_list.Count(r => r.ClickedGoogle)
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-8">
+            @if (_list.Count == 0)
+            {
+                <div class="empty-state">
+                    <div class="empty-state-icon">⭐</div>
+                    <div class="empty-state-title">Brak opinii</div>
+                    <div class="empty-state-desc">
+                        @(_s.ReviewsEnabled ? $"Klienci zobaczą prośbę o opinię po {_s.ReviewAskAfterSessions} odbytych wizytach." : "Włącz prośby o opinię, aby klienci mogli Cię ocenić.")
+                    </div>
+                </div>
+            }
+            @foreach (var r in _list)
+            {
+                <div class="card mb-2">
+                    <div class="card-body py-2">
+                        <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+                            <div>
+                                <a href="/clients/@r.ClientId" class="fw-semibold text-decoration-none">@r.ClientName</a>
+                                <span class="review-stars-static ms-1" aria-label="Ocena @r.Rating z 5">@(new string('★', r.Rating))<span class="text-muted">@(new string('☆', 5 - r.Rating))</span></span>
+                                <div class="small text-muted">@Clock.ToWallClock(r.UpdatedAt).ToString("d MMM yyyy")</div>
+                            </div>
+                            <div class="d-flex align-items-center gap-2">
+                                @if (r.PublishConsent && !string.IsNullOrWhiteSpace(r.Text))
+                                {
+                                    <div class="form-check form-switch mb-0">
+                                        <input class="form-check-input" type="checkbox" id="pub@(r.Id)" checked="@r.IsPublished"
+                                               @onchange="e => TogglePublishAsync(r, (bool)(e.Value ?? false))" />
+                                        <label class="form-check-label small" for="pub@(r.Id)">Na stronie</label>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-light text-muted border" title="Klient nie zgodził się na publikację albo nie dodał treści">Tylko dla Ciebie</span>
+                                }
+                                @if (_confirmDelete == r.Id)
+                                {
+                                    <button class="btn btn-sm btn-danger" @onclick="() => DeleteAsync(r.Id)">Usuń</button>
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmDelete = null">Nie</button>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-sm btn-link text-danger p-0" @onclick="() => _confirmDelete = r.Id" title="Usuń opinię"><i class="bi bi-trash"></i></button>
+                                }
+                            </div>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(r.Text)) { <p class="mb-0 mt-1 small">@r.Text</p> }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private bool _isAdmin;
+    private bool _saved;
+    private string? _trainerFilter;
+    private int? _confirmDelete;
+    private MarketingSettingsDto _s = new();
+    private List<ClientReviewDto> _list = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _isAdmin = auth.User.IsInRole(Roles.Admin);
+        _trainerFilter = _isAdmin ? null : auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        _s = await MarketingSettings.GetAsync();
+        _list = await ReviewService.GetAllAsync(_trainerFilter);
+        _loading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (!_isAdmin) return;
+        // Tylko pola opinii — ustawienia programu poleceń bierzemy z bazy.
+        var current = await MarketingSettings.GetAsync();
+        current.ReviewsEnabled = _s.ReviewsEnabled;
+        current.GoogleReviewUrl = _s.GoogleReviewUrl;
+        current.ReviewAskAfterSessions = _s.ReviewAskAfterSessions;
+        await MarketingSettings.SaveAsync(current);
+        _s = await MarketingSettings.GetAsync();
+        _saved = true;
+    }
+
+    private async Task TogglePublishAsync(ClientReviewDto r, bool published)
+    {
+        if (!Owns(r.Id)) return;
+        await ReviewService.SetPublishedAsync(r.Id, published);
+        _list = await ReviewService.GetAllAsync(_trainerFilter);
+    }
+
+    private async Task DeleteAsync(int id)
+    {
+        if (!Owns(id)) return;
+        await ReviewService.DeleteAsync(id);
+        _confirmDelete = null;
+        _list = await ReviewService.GetAllAsync(_trainerFilter);
+    }
+
+    // Trener działa tylko na opiniach swoich klientów (lista jest już przefiltrowana).
+    private bool Owns(int reviewId) => _list.Any(r => r.Id == reviewId);
+}

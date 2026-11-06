@@ -1,0 +1,52 @@
+@* Dokąd prowadzi przycisk: gotowe cele (rezerwacja, pakiety, sekcje strony) albo własny adres. *@
+
+<div class="sb-link">
+    <select class="form-select form-select-sm" value="@Choice" @onchange="OnChoice">
+        @foreach (var (url, name) in Targets)
+        {
+            <option value="@url">@name</option>
+        }
+        <option value="__custom">Własny adres…</option>
+    </select>
+    @if (Choice == "__custom")
+    {
+        <input class="form-control form-control-sm mt-1" placeholder="https://… albo /strona" value="@Value" @onchange="e => SetAsync(e.Value?.ToString())" />
+    }
+</div>
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    private bool _custom;
+
+    public static readonly (string Url, string Name)[] Targets =
+    [
+        ("/book", "Rezerwacja pierwszego treningu"),
+        ("/packages", "Sklep z pakietami"),
+        ("/courses", "Kursy online"),
+        ("/Account/Login", "Logowanie do aplikacji"),
+        ("#cennik", "Sekcja: Cennik"),
+        ("#o-mnie", "Sekcja: O mnie"),
+        ("#opinie", "Sekcja: Opinie"),
+        ("#metamorfozy", "Sekcja: Metamorfozy"),
+        ("#terminy", "Sekcja: Wolne terminy"),
+        ("#kontakt", "Sekcja: Kontakt"),
+    ];
+
+    private string Choice => _custom || (!string.IsNullOrEmpty(Value) && Targets.All(t => t.Url != Value)) ? "__custom" : Value ?? "/book";
+
+    private async Task OnChoice(ChangeEventArgs e)
+    {
+        var v = e.Value?.ToString();
+        if (v == "__custom") { _custom = true; return; }
+        _custom = false;
+        await SetAsync(v);
+    }
+
+    private async Task SetAsync(string? v)
+    {
+        Value = v;
+        await ValueChanged.InvokeAsync(v);
+    }
+}

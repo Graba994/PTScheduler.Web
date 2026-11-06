@@ -1,0 +1,193 @@
+@inject PTScheduler.Web.Services.WearableService Wearables
+@inject IAppClock Clock
+@inject PTScheduler.Web.Services.WearableInsightsService Insights
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Rules
+
+@* Zakładka „Garmin” w karcie klienta: gotowość na dziś (reguły — podpowiedź, decyduje trener), ostatnie 14 dni
+   (sen, tętno spoczynkowe, HRV, Body Battery, kroki) i aktywności z zegarka, z dopięciem do wizyty. *@
+
+@if (_s is null)
+{
+    <div class="text-center py-4"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    <div class="wr">
+        <section class="wr-ready wr-@Css(_s.Readiness.Level)">
+            <div class="wr-ready-head">
+                <span class="wr-ready-ic"><i class="bi @Icon(_s.Readiness.Level)"></i></span>
+                <div>
+                    <small>Gotowość na dziś</small>
+                    <b>@ReadinessRules.Label(_s.Readiness.Level)@(_s.Readiness.Level == ReadinessRules.Level.Unknown ? "" : $" · {_s.Readiness.Score}/100")</b>
+                    <small class="wr-src">@Src · @PTScheduler.Web.Services.WearableService.DerivedNote</small>
+                </div>
+            </div>
+            @if (_s.Readiness.Reasons.Count > 0)
+            {
+                <ul class="wr-reasons">
+                    @foreach (var r in _s.Readiness.Reasons)
+                    {
+                        <li>@r</li>
+                    }
+                </ul>
+            }
+            <p class="wr-tip"><i class="bi bi-lightbulb"></i>@_s.Readiness.Suggestion</p>
+        </section>
+
+        @if (_s.Link is { IsConnected: false })
+        {
+            <div class="alert alert-secondary py-2 small mb-0"><i class="bi bi-plug me-1"></i>Klient odłączył zegarek@(_s.Link.DisconnectedAt is { } off ? $" ({off.ToLocalTime():dd.MM.yyyy})" : "") — nowe dane nie przychodzą.</div>
+        }
+
+        @if (_week is { HasData: true } w)
+        {
+            <section class="wr-card">
+                <div class="wr-card-head"><b>Ostatni tydzień</b><small>@Src · @w.From.ToString("d.MM", Pl)–@w.To.ToString("d.MM", Pl) · w nawiasie zmiana do tygodnia wcześniej</small></div>
+                <p class="mb-0 small">@WearableWeekRules.Text(w)@(w.SessionsWithWatch > 0 ? $" · na wizytach z zegarkiem: {w.SessionsWithWatch}" : "")</p>
+            </section>
+        }
+
+        @if (_s.Load is { HasData: true } ld)
+        {
+            var maxUnits = Math.Max(1, ld.Weeks.Max(x => x.Units));
+            <section class="wr-card">
+                <div class="wr-card-head"><b>Obciążenie treningowe</b><small>@Src · ostatnie 7 dni · intensywność z tętna (maks. ok. @ld.EstimatedMaxHr) · @PTScheduler.Web.Services.WearableService.DerivedNote</small></div>
+                <div class="wr-load">
+                    <div class="wr-load-stats">
+                        <div><b>@ReadinessRules.Duration(ld.Minutes)</b><small>@ld.Sessions @(ld.Sessions == 1 ? "aktywność" : "aktywności")</small></div>
+                        <div><b>@ReadinessRules.Duration(ld.HardMinutes)</b><small>intensywnie (≥ 70% rezerwy tętna)</small></div>
+                        <div class="@(ld.ChangePercent is >= 50 ? "warn" : ld.ChangePercent is <= -50 ? "low" : "")">
+                            <b>@(ld.ChangePercent is int ch ? (ch > 0 ? $"+{ch}%" : $"{ch}%") : "—")</b>
+                            <small>@(ld.ChangePercent is null ? "porównanie po 2 tygodniach danych" : "względem zwykłego tygodnia")</small>
+                        </div>
+                    </div>
+                    @if (ld.Warning is not null)
+                    {
+                        <p class="wr-load-warn"><i class="bi bi-exclamation-triangle"></i>@(char.ToUpper(ld.Warning[0]) + ld.Warning[1..]) — porozmawiaj z klientem o regeneracji.</p>
+                    }
+                    <div class="wr-load-bars" role="img" aria-label="Obciążenie w ostatnich 6 tygodniach">
+                        @foreach (var wk in ld.Weeks)
+                        {
+                            <div class="wr-load-bar" title="@($"Tydzień od {wk.From:dd.MM}: {ReadinessRules.Duration(wk.Minutes)}, obciążenie {wk.Units}")">
+                                <span style="height:@(Math.Max(wk.Units > 0 ? 4 : 0, (int)Math.Round(100.0 * wk.Units / maxUnits)))%"></span>
+                                <small>@wk.From.ToString("dd.MM")</small>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </section>
+        }
+
+        <section class="wr-card">
+            <div class="wr-card-head"><b>Ostatnie 14 dni</b><small>@Src · norma = średnia z 28 dni</small></div>
+            @if (_s.Days.Count == 0)
+            {
+                <p class="text-muted small mb-0">Czekamy na pierwsze dane — Garmin wysyła je po synchronizacji zegarka z telefonem.</p>
+            }
+            else
+            {
+                <div class="wr-table-wrap">
+                    <table class="wr-table">
+                        <thead><tr><th>Dzień</th><th>Sen</th><th>Tętno spocz.</th><th>HRV</th><th>Body Battery</th><th>Kroki</th></tr></thead>
+                        <tbody>
+                            @foreach (var d in _s.Days.Take(14))
+                            {
+                                <tr>
+                                    <td class="text-nowrap">@d.Date.ToString("ddd d.MM", Pl)</td>
+                                    @if (!(_sleepsWithWatch && d.SleepMinutes is not > 0 && d.HrvLastNight is not > 0))
+                                    {
+                                        <td class="@(d.SleepMinutes is < 360 ? "bad" : "")">@(d.SleepMinutes is int m and > 0 ? ReadinessRules.Duration(m) : "—")@(d.SleepScore is int sc and > 0 ? $" · {sc}" : "")</td>
+                                    }
+                                    else
+                                    {
+                                        <td><span class="wr-miss" title="Zegarek nie zmierzył tej nocy — prawdopodobnie był zdjęty. Tego dnia nie liczymy gotowości.">brak odczytu</span></td>
+                                    }
+                                    <td class="@(d.RestingHeartRate is int r and > 0 && _rhrBase is double rb && r - rb >= 5 ? "bad" : "")">@(d.RestingHeartRate is > 0 ? d.RestingHeartRate.ToString() : "—")</td>
+                                    <td class="@(d.HrvLastNight is int h && _hrvBase is double hb && h <= hb * .85 ? "bad" : "")">@(d.HrvLastNight is int hv ? $"{hv} ms" : "—")</td>
+                                    <td class="@(d.BodyBatteryHigh is > 0 and < 40 ? "bad" : "")">@(d.BodyBatteryHigh is > 0 ? d.BodyBatteryHigh.ToString() : "—")</td>
+                                    <td>@(d.Steps?.ToString("N0", Pl) ?? "—")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+
+        <section class="wr-card">
+            <div class="wr-card-head"><b>Aktywności z zegarka</b><small>@Src</small></div>
+            @if (_s.Activities.Count == 0)
+            {
+                <p class="text-muted small mb-0">Brak aktywności od połączenia zegarka.</p>
+            }
+            else
+            {
+                <ul class="wr-acts">
+                    @foreach (var a in _s.Activities)
+                    {
+                        var start = Clock.ToWallClock(a.StartUtc);
+                        <li>
+                            <span class="wr-act-ic"><i class="bi @ActIcon(a.Type)"></i></span>
+                            <span class="wr-act-main">
+                                <b>@a.Name</b>
+                                <small>@start.ToString("ddd d.MM, HH:mm", Pl) · @(a.DurationSeconds / 60) min@(a.DistanceMeters is > 0 ? $" · {a.DistanceMeters / 1000.0:0.0} km" : "")@(a.AverageHeartRate is int hr ? $" · śr. tętno {hr}" : "")@(a.MaxHeartRate is int mx ? $" (maks. {mx})" : "")@(a.Kilocalories is int kc ? $" · {kc} kcal" : "")</small>
+                            </span>
+                            @if (a.SessionId is int sid)
+                            {
+                                <span class="wr-act-session" title="Pokrywa się z wizytą w aplikacji"><i class="bi bi-link-45deg"></i>wizyta</span>
+                            }
+                        </li>
+                    }
+                </ul>
+            }
+        </section>
+
+        <div class="wr-attr">Gotowość liczona z reguł, to podpowiedź — o treningu decydujesz Ty.</div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public int ClientId { get; set; }
+
+    private static readonly System.Globalization.CultureInfo Pl = System.Globalization.CultureInfo.GetCultureInfo("pl-PL");
+    private PTScheduler.Web.Services.WearableService.Summary? _s;
+    private double? _rhrBase, _hrvBase;
+    private bool _sleepsWithWatch;
+    private WearableWeekRules.Week? _week;
+    private string Src => PTScheduler.Web.Services.WearableService.Attribution(_s?.Link?.DeviceName);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _s = await Wearables.SummaryAsync(ClientId);
+        _rhrBase = Avg(_s.Days.Select(d => d.RestingHeartRate));
+        _hrvBase = Avg(_s.Days.Select(d => d.HrvLastNight));
+        _sleepsWithWatch = _s.Days.Any(d => d.SleepMinutes is > 0 || d.HrvLastNight is > 0);
+        _week = await Insights.WeekAsync(ClientId);
+    }
+
+    private static double? Avg(IEnumerable<int?> v)
+    {
+        var list = v.Where(x => x is > 0).Select(x => (double)x!.Value).ToList();
+        return list.Count >= 3 ? list.Average() : null;
+    }
+
+    private static string Css(ReadinessRules.Level l) => l switch
+    {
+        ReadinessRules.Level.Good => "good", ReadinessRules.Level.Ok => "ok", ReadinessRules.Level.Low => "low", _ => "none"
+    };
+
+    private static string Icon(ReadinessRules.Level l) => l switch
+    {
+        ReadinessRules.Level.Good => "bi-battery-full", ReadinessRules.Level.Ok => "bi-battery-half", ReadinessRules.Level.Low => "bi-battery", _ => "pt-ico-watch"
+    };
+
+    private static string ActIcon(string type) => type.ToUpperInvariant() switch
+    {
+        var t when t.Contains("RUN") => "bi-person-walking",
+        var t when t.Contains("CYCL") || t.Contains("BIK") => "bi-bicycle",
+        var t when t.Contains("SWIM") => "bi-water",
+        var t when t.Contains("STRENGTH") => "pt-ico-dumbbell",
+        _ => "bi-activity"
+    };
+}

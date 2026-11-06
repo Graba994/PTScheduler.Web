@@ -1,0 +1,164 @@
+@page "/lab/miesnie"
+@rendermode PTScheduler.Web.RenderModes.Server
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Enums
+@using PTScheduler.Domain.Rules
+@using PTScheduler.Infrastructure.Data
+@attribute [Authorize(Roles = Roles.Admin + "," + Roles.Trainer)]
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+@* Laboratorium (strona testowa, bez linku w menu): mapa mięśni przy ćwiczeniach z katalogu.
+   Na start 10 ćwiczeń na 10 różnych partii; „Wylosuj inne” bierze 10 losowych z całego katalogu. *@
+
+<AppTitle Page="Mapa mięśni — laboratorium" />
+
+<div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+    <h4 class="page-title mb-0"><i class="bi bi-person-arms-up me-2" style="color:var(--c-primary)"></i>Mapa mięśni <span class="ml-badge">laboratorium</span></h4>
+    <div class="d-flex flex-wrap gap-2">
+        <MuscleViewToggle Detailed="@_detailed" DetailedChanged="v => _detailed = v" />
+        <div class="ml-seg" role="group" aria-label="Sylwetka">
+            <button type="button" class="@(_female ? "" : "active")" aria-pressed="@(_female ? "false" : "true")" @onclick="() => _female = false"><i class="bi bi-gender-male me-1"></i>Mężczyzna</button>
+            <button type="button" class="@(_female ? "active" : "")" aria-pressed="@(_female ? "true" : "false")" @onclick="() => _female = true"><i class="bi bi-gender-female me-1"></i>Kobieta</button>
+        </div>
+        <button class="btn btn-sm btn-outline-primary" @onclick="ShuffleAsync" disabled="@_busy"><i class="bi bi-shuffle me-1"></i>Wylosuj inne</button>
+    </div>
+</div>
+
+@if (_items.Count == 0)
+{
+    <div class="text-center text-muted py-5"><span class="spinner-border spinner-border-sm me-2"></span>Wczytuję ćwiczenia…</div>
+}
+else
+{
+    var sel = Selected;
+    <div class="ml-grid">
+        <section class="ml-stage card">
+            <div class="card-body">
+                @if (sel is not null)
+                {
+                    <div class="ml-stage-head">
+                        <div class="min-w-0">
+                            <div class="ml-eyebrow">@(_picked is { } pm ? $"Partia: {Muscles.Label(pm)}" : "Ćwiczenie")</div>
+                            <h5 class="ml-title">@sel.NamePl</h5>
+                            @if (sel.NamePl != sel.NameEn) { <div class="ml-en">@sel.NameEn</div> }
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(sel.Equipment)) { <span class="ml-chip"><i class="bi bi-tools me-1"></i>@ExerciseLabels.Equipment(sel.Equipment)</span> }
+                    </div>
+                }
+                <div class="ml-figure" @key="@($"{sel?.Key}-{_female}")">
+                    <MuscleMap Primary="@(sel?.Primary ?? [])" Secondary="@(sel?.Secondary ?? [])" Detailed="@_detailed" NameEn="@sel?.NameEn"
+                               Female="@_female" Picked="@_picked" OnPick="Pick" OnPickDetail="d => Pick(MuscleDetails.Group(d))" />
+                </div>
+                <div class="ml-legend">
+                    @foreach (var fam in PTScheduler.Web.Services.MuscleColors.Families)
+                    {
+                        <span><i class="ml-dot" style="background:@fam.Color"></i>@fam.Label</span>
+                    }
+                    <span class="text-muted small w-100 text-center">Pełny kolor — partia główna, jasny — pomocnicza.</span>
+                    <span class="text-muted small">Kliknij partię na postaci, żeby zobaczyć ćwiczenia, które ją angażują.</span>
+                </div>
+                @if (sel is not null)
+                {
+                    <div class="ml-muscles">
+                        @foreach (var m in sel.Primary)
+                        {
+                            <button type="button" class="ml-mchip p @(_picked == m ? "on" : "")" @onclick="() => Pick(m)">@Muscles.Label(m)</button>
+                        }
+                        @foreach (var m in sel.Secondary)
+                        {
+                            <button type="button" class="ml-mchip s @(_picked == m ? "on" : "")" @onclick="() => Pick(m)">@Muscles.Label(m)</button>
+                        }
+                    </div>
+                }
+                @if (_picked is { } pk)
+                {
+                    var uses = _items.Where(i => i.Primary.Contains(pk) || i.Secondary.Contains(pk)).ToList();
+                    <div class="ml-uses">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <b>@Muscles.Label(pk)</b>
+                            <button type="button" class="btn btn-link btn-sm p-0" @onclick="() => _picked = null">Wyczyść</button>
+                        </div>
+                        @if (uses.Count == 0)
+                        {
+                            <div class="small text-muted">Żadne z tych 10 ćwiczeń nie angażuje tej partii — wylosuj inne.</div>
+                        }
+                        else
+                        {
+                            <div class="small text-muted">@uses.Count z @_items.Count ćwiczeń: @string.Join(", ", uses.Select(u => $"{u.NamePl}{(u.Primary.Contains(pk) ? " (główna)" : "")}"))</div>
+                        }
+                    </div>
+                }
+            </div>
+        </section>
+
+        <section class="ml-list" aria-label="Ćwiczenia">
+            @foreach (var it in _items)
+            {
+                var on = it.Key == _selectedKey;
+                var dim = _picked is { } pf && !it.Primary.Contains(pf) && !it.Secondary.Contains(pf);
+                <button type="button" class="ml-card @(on ? "on" : "") @(dim ? "dim" : "")" @onclick="() => SelectExercise(it.Key)" @key="it.Key">
+                    <span class="ml-card-fig"><MuscleMap Primary="@it.Primary" Secondary="@it.Secondary" Detailed="@_detailed" NameEn="@it.NameEn" Female="@_female" Compact="true" /></span>
+                    <span class="ml-card-text">
+                        <span class="ml-card-name">@it.NamePl</span>
+                        <span class="ml-card-muscle"><i class="ml-dot p"></i>@string.Join(", ", it.Primary.Select(Muscles.Label))</span>
+                        @if (it.Secondary.Count > 0)
+                        {
+                            <span class="ml-card-muscle"><i class="ml-dot s"></i>@string.Join(", ", it.Secondary.Select(Muscles.Label))</span>
+                        }
+                    </span>
+                </button>
+            }
+        </section>
+    </div>
+}
+
+@code {
+    private sealed record Item(string Key, string NamePl, string NameEn, string? Equipment, IReadOnlyList<MuscleGroup> Primary, IReadOnlyList<MuscleGroup> Secondary);
+
+    // 10 ćwiczeń na 10 różnych głównych partii (id z Free Exercise DB).
+    private static readonly string[] Starter =
+    [
+        "Barbell_Bench_Press_-_Medium_Grip", "Wide-Grip_Lat_Pulldown", "Barbell_Full_Squat", "Romanian_Deadlift", "Barbell_Hip_Thrust",
+        "Arnold_Dumbbell_Press", "Barbell_Curl", "Triceps_Pushdown", "Ab_Roller", "Standing_Calf_Raises"
+    ];
+
+    private List<Item> _items = [];
+    private string? _selectedKey;
+    private MuscleGroup? _picked;
+    private bool _female, _busy, _detailed = true;
+
+    private Item? Selected => _items.FirstOrDefault(i => i.Key == _selectedKey) ?? _items.FirstOrDefault();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var rows = await db.Exercises.AsNoTracking().Where(e => e.SourceKey != null && Starter.Contains(e.SourceKey)).ToListAsync();
+        _items = Starter.Select(k => rows.FirstOrDefault(r => r.SourceKey == k)).Where(r => r is not null).Select(r => ToItem(r!)).ToList();
+        _selectedKey = _items.FirstOrDefault()?.Key;
+    }
+
+    private static Item ToItem(PTScheduler.Domain.Entities.Exercise e) =>
+        new(e.SourceKey ?? e.Id.ToString(), e.NamePl, e.NameEn, e.Equipment, Muscles.Parse(e.PrimaryMuscles), Muscles.Parse(e.SecondaryMuscles));
+
+    /// <summary>10 losowych ćwiczeń z katalogu, każde na inną główną partię.</summary>
+    private async Task ShuffleAsync()
+    {
+        _busy = true;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var all = await db.Exercises.AsNoTracking().Where(e => e.OwnerTrainerUserId == null && e.PrimaryMuscles != "").ToListAsync();
+        _items = all.Select(ToItem).Where(i => i.Primary.Count > 0)
+            .GroupBy(i => i.Primary[0])
+            .OrderBy(_ => Random.Shared.Next()).Take(10)
+            .Select(g => g.ElementAt(Random.Shared.Next(g.Count())))
+            .ToList();
+        _selectedKey = _items.FirstOrDefault()?.Key;
+        _picked = null;
+        _busy = false;
+    }
+
+    private void SelectExercise(string key) => _selectedKey = key;
+
+    private void Pick(MuscleGroup m) => _picked = _picked == m ? null : m;
+}

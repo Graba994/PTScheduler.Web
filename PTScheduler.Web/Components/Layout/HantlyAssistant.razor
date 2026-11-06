@@ -1,0 +1,305 @@
+@inject AuthenticationStateProvider AuthState
+@inject IJSRuntime JS
+@inject PTScheduler.Web.Services.PlatformAssistantService Platform
+@inject PTScheduler.Web.Services.AssistantTipsService Tips
+@inject PTScheduler.Application.Interfaces.IAppClock Clock
+@inject NavigationManager Nav
+@rendermode PTScheduler.Web.RenderModes.Server
+
+@* Asystent-maskotka (domyślnie „Hantly”) dla trenera: sam podpowiada, bez pisania do niego.
+   Co pokazać, liczy AssistantTipsService; wygląd, imię i teksty od AI przychodzą z Portalu. *@
+@if (_config is not null && _visible)
+{
+    var tip = Current;
+    <div class="hantly layout-@_config.Layout @(_open ? "is-open" : "") @(_muted ? "is-muted" : "") @(Live ? "is-live" : "")">
+        @if (_open && tip is not null)
+        {
+            <div class="hantly-bubble" role="status" aria-live="polite">
+                <div class="hantly-bubble-head">
+                    <b>@_config.Name</b>
+                    @if (_tips.Count > 1)
+                    {
+                        <span class="hantly-count">@(_index + 1) z @_tips.Count</span>
+                    }
+                    <button type="button" class="hantly-x" aria-label="Zamknij tę podpowiedź" title="Nie pokazuj jej dziś" @onclick="DismissAsync"><i class="bi bi-x-lg"></i></button>
+                </div>
+                @if (tip.Quiet)
+                {
+                    <span class="hantly-idea"><i class="bi bi-lightbulb"></i>Pomysł — możesz go pominąć</span>
+                }
+                <p class="hantly-text">@(_text ?? "…")</p>
+                <div class="hantly-actions">
+                    @if (tip.ActionHref is not null)
+                    {
+                        <a class="btn btn-sm btn-primary" href="@tip.ActionHref" @onclick="() => _open = false">@tip.ActionLabel</a>
+                    }
+                    @if (_index < _tips.Count - 1)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="NextAsync">Dalej <i class="bi bi-chevron-right"></i></button>
+                    }
+                    <button type="button" class="btn btn-sm btn-link hantly-mute" @onclick="ToggleMuteAsync">@(_muted ? "Włącz podpowiedzi" : "Wycisz")</button>
+                </div>
+                @if (tip.Quiet)
+                {
+                    <button type="button" class="hantly-never" @onclick="MuteKindAsync"><i class="bi bi-bell-slash me-1"></i>Nie proponuj tego</button>
+                }
+                @if (_note is not null) { <div class="hantly-note">@_note</div> }
+            </div>
+        }
+        <button type="button" class="hantly-btn" aria-label="@($"{_config.Name} — podpowiedzi")" aria-expanded="@(_open ? "true" : "false")" @onclick="ToggleAsync">
+            @if (Live)
+            {
+                <span class="hm-fx" @ref="_fx" data-hm-motion="@EffectiveMotion" data-hm-fx="@_config.EffectList"><span class="hm-live hm-mascot-live st-@_stage md-@Mood">@((MarkupString)_config.AnimatedSvg!)</span></span>
+            }
+            else
+            {
+                <img class="hm-mascot @(_muted ? "" : $"hm-anim-{(_config.Animation == "live" ? "bounce" : _config.Animation)}")" src="@Icon" alt="" width="64" height="64" />
+            }
+            @if (!_open && !_muted && Unseen > 0)
+            {
+                <span class="hantly-dot">@Unseen</span>
+            }
+        </button>
+    </div>
+}
+
+@code {
+    private sealed class Prefs
+    {
+        public bool Muted { get; set; }
+        /// <summary>Klucz podpowiedzi → dzień zamknięcia (yyyy-MM-dd) albo „once” (zamknięta na stałe).</summary>
+        public Dictionary<string, string> Dismissed { get; set; } = new();
+        /// <summary>Klucz podpowiedzi → „dzień:podpis treści” — przeczytana dziś w tej wersji (znika z licznika).</summary>
+        public Dictionary<string, string> Seen { get; set; } = new();
+        /// <summary>Ruch maskotki wybrany przez trenera: „” (jak w Portalu), „calm” albo „off”.</summary>
+        public string Motion { get; set; } = "";
+    }
+
+    private ElementReference _fx;
+    // Ruch maskotki ustawia się w „Asystent i AI” (i w Pierwszych ustawieniach) — w dymku tylko podpowiedzi.
+    private string MotionPref => _prefs.Motion is "calm" or "off" ? _prefs.Motion : "";
+    /// <summary>Trener może tylko przyciszyć ruch ustawiony w Portalu, nie podkręcić go.</summary>
+    private string EffectiveMotion => MotionPref switch { "off" => "off", "calm" => "calm", _ => _config?.Motion ?? "normal" };
+
+    /// <summary>Jednorazowa sztuczka maskotki (mówienie, konfetti…) — tylko gdy efekt jest włączony w Portalu.</summary>
+    private async Task TrickAsync(string name, string? effect = null)
+    {
+        if (!Live || _muted || (effect is not null && _config?.Has(effect) != true)) return;
+        try { await JS.InvokeVoidAsync("PTHmMotion.trick", _fx, name); }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException) { }
+    }
+
+    private PTScheduler.Web.Services.PlatformAssistantService.Config? _config;
+    private List<PTScheduler.Web.Services.AssistantTipsService.Tip> _tips = [];
+    private Prefs _prefs = new();
+    private int _index;
+    private bool _visible;
+    private bool _open;
+    private bool _muted;
+    private string? _text;
+
+    private PTScheduler.Web.Services.AssistantTipsService.Tip? Current => _index < _tips.Count ? _tips[_index] : null;
+
+    // Animowany hantelek z Portalu (animacja „Żywy” i wbudowane ikony): scena i nastrój to klasy nad SVG.
+    private bool Live => _config?.AnimatedSvg is { Length: > 0 };
+    private string _stage = "enter";
+    private int _stageVersion;
+    private string Mood => _muted ? "sleep" : Current?.Mood ?? "happy";
+
+    /// <summary>Ustawia scenę; po <paramref name="thenIdleMs"/> wraca do spoczynku (albo snu, gdy wyciszony).</summary>
+    private async Task StageAsync(string stage, int thenIdleMs = 0)
+    {
+        if (!Live) return;
+        var version = ++_stageVersion;
+        _stage = stage;
+        StateHasChanged();
+        if (thenIdleMs <= 0) return;
+        await Task.Delay(thenIdleMs);
+        if (version != _stageVersion) return;
+        _stage = _muted ? "sleep" : "idle";
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Na pulpicie podpowiedzi są w karcie „Na dziś”, a w „Pierwszych ustawieniach” Hantly mówi w kreatorze —
+    /// tam dymek sam się nie otwiera.
+    /// </summary>
+    private bool OnDashboard => Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].TrimEnd('/') is "app" or "" or "witaj";
+
+    private string Icon
+    {
+        get
+        {
+            var mood = _muted ? "sleep" : Current?.Mood ?? "happy";
+            return _config!.Icons.TryGetValue(mood, out var uri) ? uri : _config.Icons.Values.FirstOrDefault() ?? "";
+        }
+    }
+
+    private string Today => Clock.Today.ToString("yyyy-MM-dd");
+
+    /// <summary>Ile podpowiedzi jeszcze nie przeczytano — to pokazuje cyfra przy maskotce. Ciche propozycje się nie liczą.</summary>
+    private int Unseen => _tips.Count(t => !t.Quiet && !IsSeen(t));
+    private string? _note;
+
+    // Podpis treści: gdy zmienią się liczby (np. więcej nieopłaconych), podpowiedź znów liczy się jako nowa.
+    private string SeenMark(PTScheduler.Web.Services.AssistantTipsService.Tip tip) =>
+        $"{Today}:{Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(tip.Fallback)))[..10]}";
+
+    private bool IsSeen(PTScheduler.Web.Services.AssistantTipsService.Tip tip) =>
+        _prefs.Seen.TryGetValue(tip.Key, out var mark) && mark == SeenMark(tip);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var user = (await AuthState.GetAuthenticationStateAsync()).User;
+            var isAdmin = user.IsInRole(PTScheduler.Domain.Constants.Roles.Admin);
+            if (!isAdmin && !user.IsInRole(PTScheduler.Domain.Constants.Roles.Trainer)) return;
+            _config = await Platform.GetConfigAsync();
+            if (_config is not { Enabled: true } || _config.Icons.Count == 0) return;
+
+            _prefs = LoadPrefs(await JS.InvokeAsync<string>("PTHantly.load"));
+            _muted = _prefs.Muted;
+            var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+            _tips = (await Tips.GetTipsAsync(userId, isAdmin)).Where(t => !IsDismissed(t)).ToList();
+
+            // Maskotka wchodzi chwilę po załadowaniu strony; dymek otwiera się sam tylko, gdy nie jest wyciszona
+            // i ma coś nowego (przeczytane podpowiedzi nie wyskakują ponownie przy każdym przejściu między stronami).
+            await Task.Delay(1200);
+            _visible = true;
+            _stage = "enter";
+            StateHasChanged();
+            if (Live && _config.Has("enter") && EffectiveMotion != "off")
+            {
+                // Wchodzi podskokami, ląduje z przysiadem, potem oddycha (albo od razu zasypia, gdy wyciszony).
+                await Task.Delay(1500);
+                await StageAsync("land");
+                await Task.Delay(550);
+                await StageAsync(_muted ? "sleep" : "idle");
+            }
+            else if (Live)
+            {
+                await StageAsync(_muted ? "sleep" : "idle");
+            }
+            if (!_muted && Unseen > 0 && !OnDashboard)
+            {
+                _index = _tips.FindIndex(t => !t.Quiet && !IsSeen(t));
+                await PhraseCurrentAsync();
+                _open = true;
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException or InvalidOperationException)
+        {
+            // Asystent jest dodatkiem — gdy coś się nie uda, po prostu się nie pokazuje.
+        }
+    }
+
+    private bool IsDismissed(PTScheduler.Web.Services.AssistantTipsService.Tip tip) =>
+        _prefs.Dismissed.TryGetValue(tip.Key, out var when) && (when == "once" || when == Today);
+
+    private async Task PhraseCurrentAsync()
+    {
+        if (Current is not { } tip || _config is null) return;
+        _text = null;
+        var text = await Platform.PhraseAsync(tip.Key, tip.Kind, tip.Facts, tip.Fallback, _config.Ai);
+        foreach (var (placeholder, value) in tip.Placeholders ?? [])
+            text = text.Replace(placeholder, value);
+        _text = text;
+        StateHasChanged();
+        // Mówi, gdy pokazuje podpowiedź, i reaguje na jej treść: „stonks” przy wzroście przychodu, puchar przy rekordzie,
+        // monety przy płatnościach… (każda reakcja raz — przy pokazaniu podpowiedzi, nie w kółko).
+        await TrickAsync("talk", "talk");
+        if (PTScheduler.Web.Services.PlatformAssistantService.ReactionFor(tip.Kind) is { } reaction)
+            await TrickAsync(reaction, reaction == "party" ? "party" : "react");
+        else if (tip.Mood == "celebrate")
+            await TrickAsync("party", "party");
+        if (tip.Key != "idle" && !IsSeen(tip))
+        {
+            _prefs.Seen[tip.Key] = SeenMark(tip);
+            await SavePrefsAsync();
+        }
+    }
+
+    private async Task ToggleAsync()
+    {
+        if (_open) { _open = false; return; }
+        if (!_muted) _ = StageAsync("excited", 1000);
+        if (_tips.Count == 0)
+        {
+            _tips = [new("idle", "brak", "happy", 0, "Wszystko ogarnięte — nie mam teraz żadnych podpowiedzi. 💪", [], null, null)];
+            _index = 0;
+        }
+        _open = true;
+        await PhraseCurrentAsync();
+    }
+
+    private async Task NextAsync()
+    {
+        if (_index >= _tips.Count - 1) return;
+        _note = null;
+        _index++;
+        if (!_muted) _ = StageAsync("excited", 1000);
+        await PhraseCurrentAsync();
+    }
+
+    private async Task DismissAsync()
+    {
+        if (Current is { } tip && tip.Key != "idle")
+        {
+            _prefs.Dismissed[tip.Key] = tip.Once ? "once" : Today;
+            await SavePrefsAsync();
+            _tips.RemoveAt(_index);
+            if (_index >= _tips.Count) _index = Math.Max(0, _tips.Count - 1);
+        }
+        _open = false;
+    }
+
+    /// <summary>„Nie proponuj tego” — wyłącza ten rodzaj propozycji na stałe (wraca w Moje konto → Powiadomienia).</summary>
+    private async Task MuteKindAsync()
+    {
+        if (Current is not { Quiet: true } tip) return;
+        try
+        {
+            var user = (await AuthState.GetAuthenticationStateAsync()).User;
+            var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+            await Tips.SetMutedAsync(userId, tip.Kind, true);
+        }
+        catch { /* najwyżej pokaże się jeszcze raz */ }
+        _tips.RemoveAll(t => t.Kind == tip.Kind);
+        if (_index >= _tips.Count) _index = Math.Max(0, _tips.Count - 1);
+        _note = "Dobrze, nie będę tego proponować. Włączysz to z powrotem w Moje konto → Powiadomienia.";
+        if (_tips.Count == 0) { _open = false; return; }
+        await PhraseCurrentAsync();
+    }
+
+    private async Task ToggleMuteAsync()
+    {
+        _muted = !_muted;
+        _prefs.Muted = _muted;
+        await SavePrefsAsync();
+        if (_muted) _open = false;
+        _ = _muted ? StageAsync("sleep") : StageAsync("land", 550);
+    }
+
+    private async Task SavePrefsAsync()
+    {
+        // Wpisy „na dziś” z poprzednich dni są już bez znaczenia; zamknięte na stałe trzymamy (najwyżej 200).
+        _prefs.Dismissed = _prefs.Dismissed.Where(d => d.Value == "once" || d.Value == Today)
+            .TakeLast(200).ToDictionary(d => d.Key, d => d.Value);
+        _prefs.Seen = _prefs.Seen.Where(d => d.Value.StartsWith(Today + ":")).ToDictionary(d => d.Key, d => d.Value);
+        // Ruch mógł się zmienić na stronie „Asystent i AI” — zostawiamy zapisany, nie ten sprzed wczytania.
+        try { _prefs.Motion = LoadPrefs(await JS.InvokeAsync<string>("PTHantly.load")).Motion; }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException) { }
+        try { await JS.InvokeVoidAsync("PTHantly.save", System.Text.Json.JsonSerializer.Serialize(_prefs)); }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException) { }
+    }
+
+    private static Prefs LoadPrefs(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new();
+        try { return System.Text.Json.JsonSerializer.Deserialize<Prefs>(json) ?? new(); }
+        catch (System.Text.Json.JsonException) { return new(); }
+    }
+}

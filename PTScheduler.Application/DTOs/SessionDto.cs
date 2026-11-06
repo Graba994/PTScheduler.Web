@@ -18,6 +18,41 @@ public class SessionDto
     public SessionStatus Status { get; set; }
     public string? Notes { get; set; }
     public string? CancellationReason { get; set; }
+    public bool IsLateCancellation { get; set; }
+    public string? MeetingUrl { get; set; }
+
+    // ── Trening w parze ──
+    public Guid? PairGroupId { get; set; }
+    /// <summary>Wizyta drugiej osoby z pary (ten sam trening).</summary>
+    public int? PartnerSessionId { get; set; }
+    public int? PartnerClientId { get; set; }
+    public string? PartnerName { get; set; }
+    public SessionStatus? PartnerStatus { get; set; }
+    /// <summary>
+    /// Druga wizyta tego samego treningu — w kalendarzu trenera pokazujemy trening raz
+    /// (na wizycie prowadzącej), a tę pomijamy.
+    /// </summary>
+    public bool IsPairFollower { get; set; }
+    /// <summary>Wizyta korzysta ze wspólnego pakietu, który za ten trening pobrała druga osoba.</summary>
+    public bool SharesPackageSlot { get; set; }
+
+    // Rezerwacja poza pakietem
+    public string? OffPackagePayment { get; set; }
+    public bool AwaitingApproval { get; set; }
+    public DateTime? HoldUntil { get; set; }
+    public DateTime? PaidAt { get; set; }
+    public string? PaidVia { get; set; }
+    /// <summary>Trening poza pakietem do rozliczenia u trenera (potwierdzony, jeszcze nieopłacony).</summary>
+    public bool UnpaidAtTrainer => OffPackagePayment == "trainer" && PaidAt is null && !AwaitingApproval
+        && Status is not SessionStatus.Cancelled;
+    /// <summary>Trening rozliczany ze wspólnego pakietu pary (1 za trening).</summary>
+    public bool PackageShared { get; set; }
+    public bool IsPair => PairGroupId.HasValue;
+    /// <summary>Partner nadal jest na treningu (nie odwołał).</summary>
+    public bool PartnerActive => PartnerStatus is not null and not SessionStatus.Cancelled;
+    /// <summary>„Ola + Piotr” dla treningu w parze, gdy obie osoby są zapisane.</summary>
+    public string DisplayName => PartnerName is not null && PartnerActive && Status != SessionStatus.Cancelled
+        ? $"{ClientName} + {PartnerName}" : ClientName;
 }
 
 public class CreateSessionDto
@@ -36,8 +71,13 @@ public class SessionTypeDto
     public int DurationMinutes { get; set; }
     public bool IsGroup { get; set; }
     public int? MaxParticipants { get; set; }
+    public bool IsPair { get; set; }
     public bool IsActive { get; set; } = true;
     public int SessionCount { get; set; }
+    /// <summary>Cena pojedynczego treningu online (poza pakietem). Null = nie można kupić pojedynczo.</summary>
+    public decimal? SinglePrice { get; set; }
+    /// <summary>Tylko z pakietem.</summary>
+    public bool RequiresPackage { get; set; }
 }
 
 public class CreateSessionTypeDto
@@ -46,6 +86,9 @@ public class CreateSessionTypeDto
     public int DurationMinutes { get; set; } = 60;
     public bool IsGroup { get; set; }
     public int? MaxParticipants { get; set; }
+    public bool IsPair { get; set; }
+    public decimal? SinglePrice { get; set; }
+    public bool RequiresPackage { get; set; }
 }
 
 public class ClientSummaryDto

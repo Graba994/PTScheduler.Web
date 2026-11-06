@@ -1,3 +1,5 @@
+using PTScheduler.Domain.Enums;
+
 namespace PTScheduler.Domain.Entities;
 
 public class AuditLog
@@ -11,4 +13,5 @@ public class AuditLog
     public string EntityType { get; set; } = string.Empty;
     public string? EntityId { get; set; }
     public string? Details { get; set; }
+    public AuditSeverity Severity { get; set; } = AuditSeverity.Info;
 }

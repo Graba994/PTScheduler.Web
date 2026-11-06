@@ -1,0 +1,65 @@
+@* Stan płatności w Finansach i w profilu klienta. Automatyczne (bramka, voucher, nagroda, karnet) — z kłódką,
+   bez edycji. Ręczne (gotówka, przelew, karta) — z wyraźnym „Edytuj”, nieopłacone — z „Oznacz wpłatę”. *@
+@if (AutoSource is { } src)
+{
+    <span class="pay-chip auto" title="@AutoTitle(src)"><i class="bi bi-lock-fill"></i>@AutoLabel(src)</span>
+    @if (ShowDate && PaidAt is { } a)
+    {
+        <span class="pay-date">@a.ToLocalTime().ToString("dd.MM.yyyy")</span>
+    }
+}
+else if (IsPaid)
+{
+    <span class="pay-cell">
+        <span class="pay-chip paid"><i class="bi bi-check-circle-fill"></i>Opłacony@(string.IsNullOrWhiteSpace(Via) ? "" : $" · {Via}")</span>
+        @if (ShowDate && PaidAt is { } a)
+        {
+            <span class="pay-date">@a.ToLocalTime().ToString("dd.MM.yyyy")</span>
+        }
+        @if (OnEdit.HasDelegate)
+        {
+            <button type="button" class="pay-btn" title="Zmień sposób, datę albo cofnij wpłatę" @onclick="OnEdit"><i class="bi bi-pencil"></i>Edytuj</button>
+        }
+    </span>
+}
+else if (Cancelled)
+{
+    <span class="text-muted">—</span>
+}
+else
+{
+    <span class="pay-cell">
+        <span class="pay-chip unpaid"><i class="bi bi-hourglass-split"></i>Nieopłacony</span>
+        @if (OnEdit.HasDelegate)
+        {
+            <button type="button" class="pay-btn primary" title="Zapisz wpłatę: gotówka, przelew albo karta" @onclick="OnEdit"><i class="bi bi-cash-coin"></i>Oznacz wpłatę</button>
+        }
+    </span>
+}
+
+@code {
+    [Parameter] public bool IsPaid { get; set; }
+    [Parameter] public string? Via { get; set; }
+    [Parameter] public DateTime? PaidAt { get; set; }
+    /// <summary>„online”, „voucher”, „nagroda”, „karnet” — płatność automatyczna; null = wpis ręczny.</summary>
+    [Parameter] public string? AutoSource { get; set; }
+    [Parameter] public bool Cancelled { get; set; }
+    [Parameter] public bool ShowDate { get; set; } = true;
+    [Parameter] public EventCallback OnEdit { get; set; }
+
+    private static string AutoLabel(string src) => src switch
+    {
+        "voucher" => "Voucher",
+        "nagroda" => "Nagroda za polecenie",
+        "karnet" => "Karnet",
+        _ => "Online"
+    };
+
+    private static string AutoTitle(string src) => src switch
+    {
+        "voucher" => "Opłacone voucherem — automatycznie, bez edycji.",
+        "nagroda" => "Nagroda za polecenie — bez płatności, bez edycji.",
+        "karnet" => "Pakiet z karnetu — płatność zmienisz w Karnetach.",
+        _ => "Opłacone online przez bramkę płatności — automatycznie, bez edycji."
+    };
+}

@@ -1,0 +1,132 @@
+@page "/Account/EnablePasskey"
+@layout PTScheduler.Web.Components.Layout.AuthLayout
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+
+@using Microsoft.AspNetCore.Identity
+@using PTScheduler.Web.Components.Account
+
+@inject UserManager<ApplicationUser> UserManager
+@inject SignInManager<ApplicationUser> SignInManager
+@inject IdentityRedirectManager RedirectManager
+@inject NavigationManager NavigationManager
+@inject ILogger<EnablePasskey> Logger
+
+<PageTitle>Logowanie odciskiem palca</PageTitle>
+
+<div class="card" style="border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,0.10)">
+    <div class="card-body p-4">
+        @if (_done)
+        {
+            @* Znacznik dla js/auth-forms.js: to urządzenie ma klucz → logowanie pokaże najpierw odcisk palca. *@
+            <div data-passkey-enrolled hidden></div>
+            <div class="text-center">
+                <div class="mb-2" style="font-size:2.5rem;color:var(--c-success,#16A34A)"><i class="bi bi-check-circle-fill"></i></div>
+                <h5 class="fw-bold mb-2">Gotowe!</h5>
+                <p class="text-muted small mb-4">
+                    Następnym razem zalogujesz się na tym urządzeniu jednym dotknięciem — odciskiem palca, Face ID albo PIN-em telefonu.
+                </p>
+                <a href="@_target" class="btn btn-primary w-100 py-2 fw-semibold">Przejdź dalej</a>
+            </div>
+        }
+        else
+        {
+            <div class="text-center mb-3">
+                <div class="mx-auto mb-2 d-flex align-items-center justify-content-center"
+                     style="width:72px;height:72px;border-radius:20px;background:var(--c-primary-light);color:var(--c-primary);font-size:2.4rem">
+                    <i class="bi bi-fingerprint"></i>
+                </div>
+                <h5 class="fw-bold mb-1">Loguj się jednym dotknięciem</h5>
+                <p class="text-muted small mb-0">Włącz logowanie odciskiem palca lub Face ID na tym urządzeniu.</p>
+            </div>
+
+            <ul class="list-unstyled small mb-4 d-flex flex-column gap-2">
+                <li><i class="bi bi-lightning-charge-fill text-primary me-2"></i>Bez wpisywania hasła — szybciej na telefonie.</li>
+                <li><i class="bi bi-shield-check text-primary me-2"></i>Bezpieczniej niż hasło: nie da się go podejrzeć ani wyłudzić.</li>
+                <li><i class="bi bi-phone text-primary me-2"></i>Działa na tym urządzeniu; hasło nadal działa wszędzie.</li>
+            </ul>
+
+            <StatusMessage Message="@_error" />
+
+            <form @formname="enable-passkey" @onsubmit="AddPasskeyAsync" method="post">
+                <AntiforgeryToken />
+                <PasskeySubmit Operation="PasskeyOperation.Create" Name="Input" class="btn btn-primary w-100 py-2 fw-semibold">
+                    <i class="bi bi-fingerprint me-1"></i>Włącz na tym urządzeniu
+                </PasskeySubmit>
+            </form>
+            <div class="text-center mt-2">
+                <a href="@_target" class="btn btn-link btn-sm text-muted" data-passkey-dismiss>Nie teraz</a>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private bool _done;
+    private string? _error;
+    private string _target = LoginSupport.DefaultLanding;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    [SupplyParameterFromForm(FormName = "enable-passkey")]
+    private PasskeyInputModel Input { get; set; } = default!;
+
+    protected override void OnInitialized()
+    {
+        Input ??= new();
+        _target = LoginSupport.SafeReturnUrl(ReturnUrl, NavigationManager.BaseUri);
+    }
+
+    private async Task AddPasskeyAsync()
+    {
+        var user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(Input.Error))
+        {
+            _error = $"Błąd: {Input.Error}";
+            return;
+        }
+        if (string.IsNullOrEmpty(Input.CredentialJson))
+        {
+            _error = "Błąd: Urządzenie nie utworzyło klucza. Spróbuj ponownie.";
+            return;
+        }
+
+        var attestation = await SignInManager.PerformPasskeyAttestationAsync(Input.CredentialJson);
+        if (!attestation.Succeeded)
+        {
+            _error = $"Błąd: Nie udało się włączyć logowania: {attestation.Failure.Message}";
+            return;
+        }
+
+        attestation.Passkey.Name = DeviceName(HttpContext.Request.Headers.UserAgent.ToString());
+        var result = await UserManager.AddOrUpdatePasskeyAsync(user, attestation.Passkey);
+        if (!result.Succeeded)
+        {
+            _error = "Błąd: Nie udało się zapisać klucza na koncie.";
+            return;
+        }
+
+        Logger.LogInformation("User {UserId} enabled a passkey.", user.Id);
+        _done = true;
+    }
+
+    // Czytelna nazwa na liście kluczy (Konto → Klucze dostępu); można ją potem zmienić.
+    private static string DeviceName(string ua)
+    {
+        if (ua.Contains("iPhone")) return "iPhone";
+        if (ua.Contains("iPad")) return "iPad";
+        if (ua.Contains("Android")) return "Telefon z Androidem";
+        if (ua.Contains("Macintosh")) return "Mac";
+        if (ua.Contains("Windows")) return "Komputer z Windows";
+        return "To urządzenie";
+    }
+}

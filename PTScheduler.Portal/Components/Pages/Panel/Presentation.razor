@@ -1,0 +1,298 @@
+@page "/panel/spotkania/prezentacja"
+@layout BareLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject AssistantService Assistant
+@inject SiteSettingsService Settings
+@inject IJSRuntime JS
+@implements IDisposable
+@rendermode InteractiveServer
+
+@* Prezentacja aplikacji na spotkaniu z trenerem — prowadzi ją Hantly (animowany SVG z MascotArt, reakcje z hantly-motion.js).
+   Slajdy: MeetingPlaybook.Slides; wizualizacje to te same animowane sceny co na hantly.pl (HomeScene, landing.js) i prawdziwe
+   ekrany aplikacji klienta. Skróty: ← → spacja, F — pełny ekran, N — notatki prowadzącego, S — gwiazdka (zapis do notatek spotkania). *@
+
+<PageTitle>Prezentacja Hantly</PageTitle>
+
+<div class="ld pr" tabindex="0" @ref="_root" @onkeydown="OnKey" aria-roledescription="prezentacja">
+    <header class="pr-top">
+        <img class="pr-logo" src="/brand/hantly-logo.svg" alt="Hantly" width="110" height="36" />
+        <nav class="pr-chapters" aria-label="Rozdziały">
+            @foreach (var (key, label) in MeetingPlaybook.Chapters)
+            {
+                <button type="button" class="@(Current.Chapter == key ? "on" : "")" @onclick="() => GoChapter(key)">@label</button>
+            }
+        </nav>
+        <div class="pr-tools">
+            <button type="button" class="pr-tool @(_auto ? "on" : "")" title="Pokaz automatyczny" @onclick="ToggleAuto"><i class="bi @(_auto ? "bi-pause-fill" : "bi-play-fill")"></i></button>
+            <button type="button" class="pr-tool @(_notes ? "on" : "")" title="Notatki prowadzącego (N)" @onclick="() => _notes = !_notes"><i class="bi bi-person-video3"></i></button>
+            <button type="button" class="pr-tool" title="Pełny ekran (F)" @onclick="FullAsync"><i class="bi bi-fullscreen"></i></button>
+        </div>
+    </header>
+    <div class="pr-progress" aria-hidden="true">
+        @for (var i = 0; i < _slides.Count; i++)
+        {
+            var at = i;
+            <i class="@(at < _index ? "done" : at == _index ? "now" : "")" @onclick="() => Go(at)"></i>
+        }
+    </div>
+
+    <main class="pr-stage">
+        <aside class="pr-host">
+            <div class="pr-mascot">
+                @if (_look.AnimatedSvg is { } svg)
+                {
+                    <span class="hm-fx" @ref="_mascot" data-hm-motion="lively" data-hm-fx="look,tricks,hover"><span class="hm-live st-idle md-@Current.Mood">@((MarkupString)svg)</span></span>
+                }
+                else
+                {
+                    <img src="@_look.IconUrl(Current.Mood)" alt="" />
+                }
+            </div>
+            <div class="pr-bubble" @key="@($"b{_index}")">
+                <h1 class="pr-title"><i class="bi @Current.Icon"></i>@TitleOf(Current)</h1>
+                <p class="pr-line">
+                    @foreach (var (word, wi) in LineOf(Current).Split(' ').Select((w, wi) => (w, wi)))
+                    {
+                        <span style="--w:@wi">@(word + " ")</span>
+                    }
+                </p>
+            </div>
+            <ul class="pr-points" @key="@($"p{_index}")">
+                @foreach (var (point, pi) in Current.Points.Select((p, pi) => (p, pi)))
+                {
+                    <li style="--p:@pi"><i class="bi bi-check2-circle"></i>@point</li>
+                }
+            </ul>
+        </aside>
+
+        <section class="pr-visual" aria-live="polite">
+            @for (var i = 0; i < _slides.Count; i++)
+            {
+                var s = _slides[i];
+                <div class="pr-slide @(i == _index ? "is-active" : "")" data-ld-stage>
+                    @if (s.Scene is not null)
+                    {
+                        <div class="pr-scene"><HomeScene Name="@s.Scene" Alt="@s.Title" AssistantName="@_look.Name" Mascot="Mascot" /></div>
+                    }
+                    else if (s.Image == "video")
+                    {
+                        <figure class="ld-phone pr-phone">
+                            <video src="/img/lp/film-klient-aplikacja.mp4" poster="/img/lp/film-klient-aplikacja.webp" muted loop playsinline autoplay aria-label="Aplikacja klienta"></video>
+                        </figure>
+                    }
+                    else if (s.Image is not null)
+                    {
+                        <figure class="ld-phone pr-phone">
+                            <img src="/img/lp/@(s.Image).webp" srcset="/img/lp/@(s.Image).webp 1x, /img/lp/@(s.Image)@@3x.webp 3x" alt="@s.Title" loading="lazy" />
+                        </figure>
+                    }
+                    else if (s.Key == "intro")
+                    {
+                        <div class="pr-intro">
+                            <div class="pr-float f1"><i class="bi bi-calendar-check"></i><span><b>Nowa rezerwacja</b>Czw 18:00 · Ania K.</span></div>
+                            <div class="pr-float f2"><i class="bi bi-cash-coin"></i><span><b>Wpłata 450 zł</b>Pakiet 10 treningów</span></div>
+                            <div class="pr-float f3"><i class="bi bi-trophy"></i><span><b>Medal!</b>Hubert — 50 treningów</span></div>
+                            <div class="pr-float f4"><i class="bi bi-stars"></i><span><b>@_look.Name</b>3 osoby trenują zwykle o 16:00</span></div>
+                            <div class="pr-intro-logo"><img src="/brand/hantly-logo.svg" alt="" width="180" height="58" /></div>
+                        </div>
+                    }
+                    else if (s.Key == "garmin")
+                    {
+                        <div class="pr-garmin">
+                            <div class="pr-g-head"><b>Gotowość przed treningiem</b><small>Garmin Forerunner 265</small></div>
+                            <div class="pr-g-score"><span>82</span><em>dobra</em></div>
+                            <div class="pr-g-rows">
+                                <div><i class="bi bi-moon-stars"></i>Sen<b>7 h 40 min</b></div>
+                                <div><i class="bi bi-heart-pulse"></i>HRV<b>54 ms</b></div>
+                                <div><i class="bi bi-battery-charging"></i>Body Battery<b>78</b></div>
+                            </div>
+                            <p class="pr-g-note">Wnioski częściowo z danych z urządzenia Garmin</p>
+                        </div>
+                    }
+                    else if (s.Key == "outro")
+                    {
+                        <div class="pr-plans">
+                            @foreach (var (p, pi) in _plans.Select((p, pi) => (p, pi)))
+                            {
+                                <div class="pr-plan @(p.IsFeatured ? "featured" : "")" style="--p:@pi">
+                                    @if (p.IsFeatured) { <span class="pr-plan-badge">Najczęściej wybierany</span> }
+                                    <b>@p.Name</b>
+                                    <span class="pr-plan-price">@(p.MonthlyPrice <= 0 ? "0 zł" : $"{p.MonthlyPrice:0} zł")<small>@(p.MonthlyPrice > 0 ? " / mies." : "")</small></span>
+                                    <small>@(p.MaxClients >= 9999 ? "bez limitu klientów" : $"do {p.MaxClients} klientów")</small>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </section>
+    </main>
+
+    <footer class="pr-nav">
+        <button type="button" class="pr-arrow" disabled="@(_index == 0)" @onclick="Prev" aria-label="Poprzedni slajd"><i class="bi bi-arrow-left"></i></button>
+        <span class="pr-count">@(_index + 1) / @_slides.Count</span>
+        @if (_index < _slides.Count - 1)
+        {
+            <button type="button" class="pr-next" @onclick="Next">Dalej: @_slides[_index + 1].Title<i class="bi bi-arrow-right"></i></button>
+        }
+        else if (MeetingId is int id)
+        {
+            <a class="pr-next" href="@($"/panel/spotkania?m={id}")">Wróć do notatek<i class="bi bi-journal-check"></i></a>
+        }
+        else
+        {
+            <button type="button" class="pr-next" @onclick="() => Go(0)">Od początku<i class="bi bi-arrow-counterclockwise"></i></button>
+        }
+    </footer>
+
+    @if (_notes)
+    {
+        <div class="pr-notes" role="complementary" aria-label="Notatki prowadzącego">
+            <div class="pr-notes-head"><i class="bi bi-person-video3"></i>Dla prowadzącego<button type="button" class="btn-close btn-close-sm ms-auto" aria-label="Zamknij" @onclick="() => _notes = false"></button></div>
+            <p><b>Zapytaj:</b> @Current.Ask</p>
+            @if (Current.Chapter is "trener" or "klient")
+            {
+                <button type="button" class="pr-star @(_starred.Contains(Current.Key) ? "on" : "")" @onclick="ToggleStarAsync">
+                    <i class="bi @(_starred.Contains(Current.Key) ? "bi-star-fill" : "bi-star")"></i>@(_starred.Contains(Current.Key) ? "Interesuje trenera" : "Zaznacz: interesuje trenera (S)")
+                </button>
+                @if (MeetingId is null) { <small>Otwórz prezentację z notatek spotkania, żeby gwiazdki trafiały do notatek.</small> }
+            }
+            <small class="pr-keys">← → slajdy · F pełny ekran · N notatki · S gwiazdka</small>
+        </div>
+    }
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "spotkanie")] public int? MeetingId { get; set; }
+    [SupplyParameterFromQuery(Name = "trener")] public string? TrainerName { get; set; }
+
+    private List<MeetingPlaybook.Slide> _slides = MeetingPlaybook.Slides.Where(s => s.Key != "garmin").ToList();
+    private List<Plan> _plans = [];
+    private AssistantService.PublicLook _look = new(AssistantService.DefaultName, "live", null, m => $"/assistant/mascot/{m}.png");
+    private readonly HashSet<string> _starred = [];
+    private int _index;
+    private bool _notes, _auto, _started;
+    private int _rendered = -1;
+    private ElementReference _root, _mascot;
+    private CancellationTokenSource? _autoCts;
+
+    private MeetingPlaybook.Slide Current => _slides[Math.Clamp(_index, 0, _slides.Count - 1)];
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _look = await Assistant.GetPublicLookAsync(); }
+        catch (InvalidOperationException) { }
+        var garmin = await Settings.GetAsync(SiteSettingsService.Keys.GarminEnabled) == "true";
+        _slides = MeetingPlaybook.Slides.Where(s => garmin || s.Key != "garmin").ToList();
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _plans = await db.Plans.AsNoTracking().Where(p => p.IsActive).OrderBy(p => p.SortOrder).ToListAsync();
+        if (MeetingId is int id && await db.TrainerMeetings.AsNoTracking().FirstOrDefaultAsync(m => m.Id == id) is { } meeting)
+            foreach (var k in (meeting.InterestedFeatures ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)) _starred.Add(k.Trim());
+    }
+
+    private string? FirstName => string.IsNullOrWhiteSpace(TrainerName) ? null : TrainerName.Trim().Split(' ')[0];
+
+    private string TitleOf(MeetingPlaybook.Slide s) => s.Key == "intro" && FirstName is { } n ? $"Cześć, {n}!" : s.Title;
+    private string LineOf(MeetingPlaybook.Slide s) => s.Line.Replace("Jestem Hantly", $"Jestem {_look.Name}");
+
+    private RenderFragment Mascot(string mood) => __builder =>
+    {
+        if (_look.AnimatedSvg is { } svg)
+        {
+            <span class="hm-fx" data-hm-motion="normal" data-hm-fx="tricks"><span class="hm-live st-idle md-@mood">@((MarkupString)svg)</span></span>
+        }
+        else
+        {
+            <img src="@_look.IconUrl(mood)" alt="" loading="lazy" />
+        }
+    };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Sceny (landing.js) i fokus dla skrótów — po renderze interaktywnym, bo prerender zastępuje DOM.
+            try { await JS.InvokeVoidAsync("PTLanding.init"); await JS.InvokeVoidAsync("PTLanding.focus", _root); }
+            catch (JSException) { }
+            _started = true;
+        }
+        if (_started && _rendered != _index)
+        {
+            _rendered = _index;
+            // Fokus wraca na scenę — inaczej spacja „kliknęłaby” ostatni przycisk i przeskoczyła dwa slajdy.
+            try { await JS.InvokeVoidAsync("PTLanding.focus", _root); await JS.InvokeVoidAsync("PTHmMotion.trick", _mascot, Current.Trick); }
+            catch (Exception ex) when (ex is JSException or InvalidOperationException) { }
+        }
+    }
+
+    private void Go(int i)
+    {
+        _index = Math.Clamp(i, 0, _slides.Count - 1);
+    }
+
+    private void Next() => Go(_index + 1);
+    private void Prev() => Go(_index - 1);
+
+    private void GoChapter(string chapter)
+    {
+        var i = _slides.FindIndex(s => s.Chapter == chapter);
+        if (i >= 0) Go(i);
+    }
+
+    private async Task OnKey(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "ArrowRight" or "PageDown" or " ": Next(); break;
+            case "ArrowLeft" or "PageUp" or "Backspace": Prev(); break;
+            case "Home": Go(0); break;
+            case "End": Go(_slides.Count - 1); break;
+            case "f" or "F": await FullAsync(); break;
+            case "n" or "N": _notes = !_notes; break;
+            case "s" or "S": await ToggleStarAsync(); break;
+        }
+    }
+
+    private async Task FullAsync()
+    {
+        try { await JS.InvokeVoidAsync("PTLanding.full"); } catch (JSException) { }
+    }
+
+    private void ToggleAuto()
+    {
+        _auto = !_auto;
+        _autoCts?.Cancel();
+        if (!_auto) return;
+        _autoCts = new CancellationTokenSource();
+        var token = _autoCts.Token;
+        _ = Task.Run(async () =>
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try { await Task.Delay(TimeSpan.FromSeconds(12), token); } catch (TaskCanceledException) { return; }
+                await InvokeAsync(() =>
+                {
+                    if (_index >= _slides.Count - 1) { _auto = false; _autoCts?.Cancel(); }
+                    else Next();
+                    StateHasChanged();
+                });
+            }
+        }, token);
+    }
+
+    /// <summary>Gwiazdka przy slajdzie — od razu do notatek spotkania (pole „co zainteresowało”).</summary>
+    private async Task ToggleStarAsync()
+    {
+        if (Current.Chapter is not ("trener" or "klient")) return;
+        if (!_starred.Remove(Current.Key)) _starred.Add(Current.Key);
+        if (MeetingId is not int id) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        if (await db.TrainerMeetings.FirstOrDefaultAsync(m => m.Id == id) is not { } meeting) return;
+        meeting.InterestedFeatures = _starred.Count == 0 ? null : string.Join(",", _starred);
+        meeting.Presented = true;
+        await db.SaveChangesAsync();
+    }
+
+    public void Dispose() => _autoCts?.Cancel();
+}

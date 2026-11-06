@@ -4,9 +4,25 @@
 @using PTScheduler.Application.Interfaces
 @inject IEmailTemplateService TemplateService
 @inject IBrandingService BrandingService
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@inject EntitlementService Entitlements
+@rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Szablony email" />
+
+@if (!Entitlements.IsAllowed("CustomEmailTemplates"))
+{
+    <div class="page-header">
+        <h4 class="page-title"><i class="bi bi-file-earmark-richtext-fill me-2" style="color:var(--c-primary)"></i>Szablony email</h4>
+    </div>
+    <FeatureGate Flag="CustomEmailTemplates" RequiredPlan="Pro"
+                 Title="Własne szablony email są dostępne w planie Pro">
+        <Description>
+            Personalizuj treść wiadomości wysyłanych do klientów (potwierdzenia rezerwacji, przypomnienia, faktury). Odblokuj w planie <strong>Pro</strong> lub wyższym.
+        </Description>
+    </FeatureGate>
+}
+else
+{
 
 <div class="cal-shell">
     <div class="cal-topbar">
@@ -42,7 +58,7 @@
                     <div class="col-12 col-md-4">
                         <div class="card card-body p-2 h-100">
                             <div class="fw-semibold small"><i class="bi bi-image me-1 text-info"></i>Logo i branding</div>
-                            <div class="text-body-secondary" style="font-size:.8rem">Logo aplikacji (z ustawień Wyglądu) jest automatycznie dodawane do nagłówka emaila. Zmienna <code>@("{{Logo}}")</code> zawiera ścieżkę do loga.</div>
+                            <div class="text-body-secondary" style="font-size:.8rem">Logo aplikacji (z ustawień Wyglądu) trafia do nagłówka emaila jako obrazek w samej wiadomości — widać je od razu, bez pobierania z sieci. Logo w SVG skrzynki pocztowe pomijają, więc wtedy w nagłówku jest nazwa studia (do maili najlepiej PNG). Zmienna <code>@("{{Logo}}")</code> to pełny adres pliku z logo.</div>
                         </div>
                     </div>
                 </div>
@@ -230,6 +246,8 @@
     </div>
 </div>
 
+}
+
 @code {
     private List<EmailTemplateDto>? templates;
     private EmailTemplateDto? selected;
@@ -389,12 +407,17 @@
         ["ExpiresRow"] = "<tr><td style=\"padding:8px 0;color:#6b7280;font-size:14px\">Ważny do</td><td style=\"padding:8px 0;font-size:14px;font-weight:600\">31.12.2025</td></tr>",
         ["Price"] = "<strong>150,00 zł</strong>",
         ["SetPasswordLink"] = "#",
+        ["InviteLink"] = "#",
+        ["Remaining"] = "2 treningi",
+        ["ShopLink"] = "#",
+        ["ShopButton"] = "Kup kolejny pakiet",
+        ["ValidDays"] = "7",
         ["AccentColor"] = t.AccentColor,
         ["UserName"] = "Jan Kowalski",
         ["ResetLink"] = "#",
         ["ResetCode"] = "847291",
         ["ConfirmLink"] = "#",
-        ["CompanyName"] = "PTScheduler",
+        ["CompanyName"] = "Twoje studio",
         ["ClientEmail"] = "jan@kowalski.pl",
         ["ClientPhone"] = "+48 123 456 789",
         ["PhoneRow"] = "<p style=\"margin:6px 0\"><strong>Telefon:</strong> +48 123 456 789</p>",

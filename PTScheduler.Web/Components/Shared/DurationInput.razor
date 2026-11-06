@@ -1,0 +1,36 @@
+@* Czas jako „m:ss” (np. 1:30), same sekundy („45”) albo z jednostką („5 min”, „30 s”). *@
+<input type="text" inputmode="numeric" class="@CssClass" value="@Text" placeholder="@Placeholder"
+       aria-label="@AriaLabel" @onchange="OnChange" />
+
+@code {
+    [Parameter] public int? Value { get; set; }
+    [Parameter] public EventCallback<int?> ValueChanged { get; set; }
+    [Parameter] public string CssClass { get; set; } = "form-control form-control-sm";
+    [Parameter] public string Placeholder { get; set; } = "m:ss";
+    [Parameter] public string? AriaLabel { get; set; }
+
+    private string Text => Value is int s && s > 0 ? (s >= 60 ? $"{s / 60}:{s % 60:00}" : s.ToString()) : "";
+
+    public static int? Parse(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        var t = raw.Trim().ToLowerInvariant().Replace(" ", "");
+        if (t.Contains(':'))
+        {
+            var p = t.Split(':');
+            if (p.Length == 2 && int.TryParse(p[0], out var m) && int.TryParse(p[1], out var sec)) return m * 60 + sec;
+            if (p.Length == 3 && int.TryParse(p[0], out var h) && int.TryParse(p[1], out var mm) && int.TryParse(p[2], out var ss)) return h * 3600 + mm * 60 + ss;
+            return null;
+        }
+        if (t.EndsWith("min") && int.TryParse(t[..^3], out var mins)) return mins * 60;
+        if (t.EndsWith("s") && int.TryParse(t[..^1], out var secs)) return secs;
+        return int.TryParse(t, out var plain) ? plain : null;
+    }
+
+    private async Task OnChange(ChangeEventArgs e)
+    {
+        var v = Parse(e.Value?.ToString());
+        Value = v is > 0 ? v : null;
+        await ValueChanged.InvokeAsync(Value);
+    }
+}

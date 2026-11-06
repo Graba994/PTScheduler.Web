@@ -1,0 +1,130 @@
+@page "/zaleglosci"
+@using Microsoft.AspNetCore.Authorization
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@attribute [Authorize(Roles = Roles.Admin + "," + Roles.Trainer + "," + Roles.Subordinate)]
+@inject PTScheduler.Infrastructure.Services.DebtService DebtSvc
+@inject IOffPackageService OffPackage
+@inject ISessionPackageService Packages
+@inject IAppClock Clock
+@inject AuthenticationStateProvider AuthState
+@rendermode PTScheduler.Web.RenderModes.Server
+
+@* „Kto mi zalega”: wszystkie nieopłacone treningi i pakiety w jednym miejscu. Przy każdej osobie
+   „Przypomnij” — uprzejma wiadomość w stylu trenera (asystent albo szablon), wysyłana czatem, WhatsAppem lub SMS-em. *@
+
+<AppTitle Page="Zaległości" />
+
+<div class="dbt">
+    <AttentionTabs Current="debts" />
+    <header class="dbt-head">
+        <h4 class="mb-0 fw-bold"><i class="bi bi-wallet2 me-2"></i>Zaległości</h4>
+        @if (!_loading && _list.Count > 0)
+        {
+            <div class="dbt-total">
+                <b>@_list.Sum(d => d.Total).ToString("N0") zł</b>
+                <span>do odebrania od @_list.Count @AssistantTipsService.Plural(_list.Count, "osoby", "osób", "osób")@(_list.Any(d => d.HasUnknownAmount) ? " (część bez ceny)" : "")</span>
+            </div>
+        }
+    </header>
+
+    @if (_loading)
+    {
+        <div class="text-center text-muted py-5"><div class="spinner-border"></div></div>
+    }
+    else if (_list.Count == 0)
+    {
+        <div class="dbt-empty">
+            <i class="bi bi-emoji-smile"></i>
+            <b>Nikt nic nie zalega</b>
+            <span>Wszystkie odbyte treningi i pakiety są opłacone.</span>
+        </div>
+    }
+    else
+    {
+        <ul class="dbt-list">
+            @foreach (var d in _list)
+            {
+                var days = (Clock.LocalNow.Date - d.Oldest.Date).Days;
+                <li class="dbt-card @(days >= 14 ? "is-old" : "")">
+                    <div class="dbt-card-head">
+                        <a class="dbt-name" href="@($"/clients/{d.ClientId}?tab=packages")">@d.Name</a>
+                        <span class="dbt-age">@(days <= 0 ? "od dziś" : days == 1 ? "od wczoraj" : $"od {days} dni")</span>
+                        <span class="dbt-sum">@(d.Total > 0 ? d.Total.ToString("N0") + " zł" : "—")</span>
+                    </div>
+                    <ul class="dbt-items">
+                        @foreach (var i in d.Items)
+                        {
+                            <li>
+                                <i class="bi @(i.Kind == "package" ? "bi-box-seam" : "bi-calendar-check")"></i>
+                                <span class="dbt-item-label">@i.Label</span>
+                                <span class="dbt-item-amount">@(i.Amount is { } a ? a.ToString("N0") + " zł" : "bez ceny")</span>
+                                @if (i.Kind == "session")
+                                {
+                                    <PaidButtons Busy="_busy" OnPaid="c => MarkSessionAsync(i.Id, c)" />
+                                }
+                                else
+                                {
+                                    <PaidButtons Busy="_busy" OnPaid="c => MarkPackageAsync(i.Id, c)" />
+                                }
+                            </li>
+                        }
+                    </ul>
+                    @if (_remind == d.ClientId)
+                    {
+                        <MessageDraftBox ClientId="d.ClientId" Phone="@d.Phone" Purpose="PTScheduler.Domain.Rules.DraftPurpose.Payment" Fixed="true" AutoDraft="true" />
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-primary dbt-remind" @onclick="() => _remind = d.ClientId">
+                            <i class="bi bi-stars me-1"></i>Przypomnij uprzejmie
+                        </button>
+                    }
+                </li>
+            }
+        </ul>
+    }
+    @if (_status is not null) { <div class="alert alert-success small mt-3">@_status</div> }
+    @if (_error is not null) { <div class="alert alert-danger small mt-3">@_error</div> }
+</div>
+
+@code {
+    private List<PTScheduler.Infrastructure.Services.DebtService.ClientDebt> _list = [];
+    private bool _loading = true, _busy, _isAdmin;
+    private string _userId = "";
+    private int? _remind;
+    private string? _status, _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        _userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        _isAdmin = user.IsInRole(Roles.Admin);
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try { _list = await DebtSvc.GetAsync(_userId, _isAdmin); }
+        catch { _error = "Nie udało się wczytać zaległości."; _list = []; }
+        _loading = false;
+    }
+
+    private async Task MarkSessionAsync(int sessionId, PaidButtons.Choice c)
+    {
+        _busy = true; _error = null; _status = null;
+        try { await OffPackage.MarkPaidAsync(sessionId, _userId, c.Via, c.Hidden); _status = $"Zapisano: {c.Via}, {c.Where}."; await LoadAsync(); }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+        catch { _error = "Nie udało się zapisać płatności."; }
+        finally { _busy = false; }
+    }
+
+    private async Task MarkPackageAsync(int packageId, PaidButtons.Choice c)
+    {
+        _busy = true; _error = null; _status = null;
+        try { await Packages.MarkPaidAsync(packageId, c.Via, c.Hidden); _status = $"Pakiet opłacony: {c.Via}, {c.Where}."; await LoadAsync(); }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+        catch { _error = "Nie udało się zapisać płatności."; }
+        finally { _busy = false; }
+    }
+}

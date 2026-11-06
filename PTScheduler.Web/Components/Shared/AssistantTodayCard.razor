@@ -1,0 +1,207 @@
+@inject AuthenticationStateProvider AuthState
+@inject PTScheduler.Web.Services.PlatformAssistantService Platform
+@inject PTScheduler.Web.Services.AssistantTipsService Tips
+@inject IJSRuntime JS
+
+@* Pulpit trenera: „Na dziś od asystenta” — wszystkie dzisiejsze podpowiedzi naraz, z akcjami. Na pulpicie
+   dymek maskotki sam się nie otwiera (te same sprawy są tutaj). Kartę można zwinąć — wybór zapamiętuje przeglądarka. *@
+@if (_config is not null && _loaded)
+{
+    <section class="atc @(_folded ? "is-folded" : "")" aria-label="@($"Na dziś od {_config.Name}")">
+        <div class="atc-head">
+            <span class="atc-mascot" aria-hidden="true">
+                @if (_config.AnimatedSvg is { Length: > 0 } svg)
+                {
+                    <span class="hm-fx" data-hm-motion="@_config.Motion" data-hm-fx="@PTScheduler.Web.Services.PlatformAssistantService.PageFx(_config)" data-hm-react="@Reaction"><span class="hm-live st-idle md-@Mood">@((MarkupString)svg)</span></span>
+                }
+                else if (_config.Icons.TryGetValue(Mood, out var icon))
+                {
+                    <img src="@icon" alt="" width="52" height="52" />
+                }
+            </span>
+            <div class="flex-grow-1 min-w-0">
+                <div class="atc-title">Na dziś od @_config.Name</div>
+                <div class="atc-sub">
+                    @if (_tips.Count == 0)
+                    {
+                        <span>Wszystko ogarnięte — dziś nic na Ciebie nie czeka. 💪</span>
+                    }
+                    else
+                    {
+                        <span>@Summary</span>
+                    }
+                </div>
+            </div>
+            @if (_tips.Count > 0)
+            {
+                <button type="button" class="ai-fold" @onclick="ToggleFoldAsync" aria-expanded="@(_folded ? "false" : "true")" title="@(_folded ? "Rozwiń" : "Zwiń — aplikacja to zapamięta")">
+                    <i class="bi @(_folded ? "bi-chevron-down" : "bi-chevron-up")"></i><span>@(_folded ? "Rozwiń" : "Zwiń")</span>
+                </button>
+            }
+        </div>
+        @if (!_folded && _tips.Count > 0)
+        {
+            <ul class="atc-list">
+                @foreach (var t in _showAll ? _tips : _tips.Take(4))
+                {
+                    <li class="atc-item mood-@t.Mood">
+                        <i class="bi @MoodIcon(t.Mood)" aria-hidden="true"></i>
+                        <span class="atc-text">@Text(t)</span>
+                        @if (t.ActionHref is not null)
+                        {
+                            <a class="btn btn-sm btn-outline-primary atc-act" href="@t.ActionHref">@t.ActionLabel</a>
+                        }
+                        @if (t.Quiet)
+                        {
+                            <button type="button" class="atc-x" title="Nie proponuj tego" aria-label="Nie proponuj tego" @onclick="() => MuteAsync(t)"><i class="bi bi-bell-slash"></i></button>
+                        }
+                        @if (t.Mood != "remind")
+                        {
+                            <button type="button" class="atc-x" title="Ukryj — już wiem" aria-label="Ukryj" @onclick="() => HideAsync(t)"><i class="bi bi-x-lg"></i></button>
+                        }
+                    </li>
+                }
+            </ul>
+            @if (_tips.Count > 4)
+            {
+                <button type="button" class="btn btn-link btn-sm px-0 atc-more" @onclick="() => _showAll = !_showAll">
+                    @(_showAll ? "Pokaż mniej" : $"Pokaż wszystkie ({_tips.Count})")
+                </button>
+            }
+        }
+    </section>
+}
+
+@code {
+    private PTScheduler.Web.Services.PlatformAssistantService.Config? _config;
+    private List<PTScheduler.Web.Services.AssistantTipsService.Tip> _tips = [];
+    private bool _loaded;
+    private bool _showAll;
+    private const string FoldKey = "pt-ai-today-folded";
+    private bool _folded;
+
+    private string Mood => _tips.FirstOrDefault()?.Mood ?? "happy";
+    /// <summary>Reakcja maskotki na najważniejszą sprawę dnia (raz dziennie — pilnuje tego hantly-motion.js).</summary>
+    private string? Reaction => _tips.Select(t => PTScheduler.Web.Services.PlatformAssistantService.ReactionFor(t.Kind)).FirstOrDefault(r => r is not null);
+
+    /// <summary>„2 do załatwienia · 1 powód do dumy · 3 sugestie” — bez zer.</summary>
+    private string Summary
+    {
+        get
+        {
+            var todo = _tips.Count(t => t.Mood == "remind");
+            var praise = _tips.Count(t => t.Mood == "celebrate");
+            var ideas = _tips.Count - todo - praise;
+            var parts = new List<string>();
+            if (todo > 0) parts.Add($"{todo} do załatwienia");
+            if (praise > 0) parts.Add($"{praise} {PTScheduler.Web.Services.AssistantTipsService.Plural(praise, "powód", "powody", "powodów")} do dumy");
+            if (ideas > 0) parts.Add($"{ideas} {PTScheduler.Web.Services.AssistantTipsService.Plural(ideas, "sugestia", "sugestie", "sugestii")}");
+            return string.Join(" · ", parts);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var user = (await AuthState.GetAuthenticationStateAsync()).User;
+            var isAdmin = user.IsInRole(PTScheduler.Domain.Constants.Roles.Admin);
+            if (!isAdmin && !user.IsInRole(PTScheduler.Domain.Constants.Roles.Trainer)) return;
+            var config = await Platform.GetConfigAsync();
+            if (config is not { Enabled: true } || config.Icons.Count == 0) return;
+            var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+            var all = await Tips.GetTipsAsync(userId, isAdmin);
+            _seen = await LoadSeenAsync();
+            _tips = all.Where(t => !IsStale(t))
+                .OrderBy(t => t.Mood == "remind" ? 0 : t.Mood == "celebrate" ? 2 : 1).ThenByDescending(t => t.Priority).ToList();
+            await SaveSeenAsync();
+            _folded = await JS.InvokeAsync<string?>("localStorage.getItem", FoldKey) == "1";
+            _config = config;
+            _loaded = true;
+            StateHasChanged();
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException or InvalidOperationException)
+        {
+            // Karta jest dodatkiem — przy błędzie po prostu jej nie ma.
+        }
+    }
+
+    // Pochwały i ciekawostki pokazujemy raz: od pierwszego wyświetlenia mija doba i znikają (albo od razu po „×”).
+    // Sprawy do załatwienia zostają, dopóki są aktualne — liczą się z danych.
+    private const string SeenKey = "pt-ai-today-seen";
+    private Dictionary<string, string> _seen = [];
+
+    private bool IsStale(PTScheduler.Web.Services.AssistantTipsService.Tip t)
+    {
+        if (t.Mood == "remind") return false;
+        var now = DateTime.UtcNow;
+        if (!_seen.TryGetValue(t.Key, out var first)) { _seen[t.Key] = now.ToString("O"); return false; }
+        if (first == "x") return true;
+        return DateTime.TryParse(first, null, System.Globalization.DateTimeStyles.RoundtripKind, out var at) && now - at > TimeSpan.FromHours(20);
+    }
+
+    private async Task<Dictionary<string, string>> LoadSeenAsync()
+    {
+        try
+        {
+            var json = await JS.InvokeAsync<string?>("localStorage.getItem", SeenKey);
+            var map = string.IsNullOrEmpty(json) ? [] : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? [];
+            // Porządki: wpisy starsze niż 30 dni nie są już potrzebne.
+            var cutoff = DateTime.UtcNow.AddDays(-30);
+            return map.Where(kv => kv.Value == "x" || !DateTime.TryParse(kv.Value, null, System.Globalization.DateTimeStyles.RoundtripKind, out var d) || d > cutoff)
+                .Take(300).ToDictionary(kv => kv.Key, kv => kv.Value);
+        }
+        catch (Exception ex) when (ex is JSException or System.Text.Json.JsonException) { return []; }
+    }
+
+    private async Task SaveSeenAsync()
+    {
+        try { await JS.InvokeVoidAsync("localStorage.setItem", SeenKey, System.Text.Json.JsonSerializer.Serialize(_seen)); }
+        catch (JSException) { }
+    }
+
+    private async Task MuteAsync(PTScheduler.Web.Services.AssistantTipsService.Tip t)
+    {
+        try
+        {
+            var user = (await AuthState.GetAuthenticationStateAsync()).User;
+            await Tips.SetMutedAsync(user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "", t.Kind, true);
+        }
+        catch { }
+        _tips.RemoveAll(x => x.Kind == t.Kind);
+    }
+
+    private async Task HideAsync(PTScheduler.Web.Services.AssistantTipsService.Tip t)
+    {
+        _seen[t.Key] = "x";
+        _tips.Remove(t);
+        await SaveSeenAsync();
+    }
+
+    private static string Text(PTScheduler.Web.Services.AssistantTipsService.Tip t)
+    {
+        var text = t.Fallback;
+        foreach (var (placeholder, value) in t.Placeholders ?? []) text = text.Replace(placeholder, value);
+        return text;
+    }
+
+    private static string MoodIcon(string mood) => mood switch
+    {
+        "remind" => "bi-exclamation-circle-fill",
+        "celebrate" => "bi-trophy-fill",
+        "think" => "bi-lightbulb-fill",
+        _ => "bi-check-circle-fill",
+    };
+
+    private async Task ToggleFoldAsync()
+    {
+        _folded = !_folded;
+        try
+        {
+            if (_folded) await JS.InvokeVoidAsync("localStorage.setItem", FoldKey, "1");
+            else await JS.InvokeVoidAsync("localStorage.removeItem", FoldKey);
+        }
+        catch (JSException) { }
+    }
+}
