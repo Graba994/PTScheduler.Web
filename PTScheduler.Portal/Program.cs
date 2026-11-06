@@ -110,6 +110,8 @@ builder.Services.AddHostedService<ErrorAlertBackgroundService>();
 builder.Services.AddScoped<UptimeService>();
 builder.Services.AddScoped<TesterService>();
 builder.Services.AddHostedService<UptimeBackgroundService>();
+builder.Services.AddScoped<SuspensionReportService>();
+builder.Services.AddHostedService<SuspensionReportBackgroundService>();
 builder.Services.AddScoped<BackupService>();
 builder.Services.AddScoped<OffsiteBackupService>();
 builder.Services.AddScoped<BackupMaintenanceService>();

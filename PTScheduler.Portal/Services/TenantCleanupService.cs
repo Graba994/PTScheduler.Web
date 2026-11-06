@@ -83,7 +83,7 @@ public class TenantCleanupService(
                 logger.LogInformation("Suspending inactive tenant {Slug} — {Days} days inactive", t.Slug, inactiveDays);
                 try
                 {
-                    await tenantSvc.SuspendAsync(t.Id);
+                    await tenantSvc.SuspendAsync(t.Id, SuspensionReasons.Inactive(inactiveDays));
 
                     db.TenantEvents.Add(new TenantEvent
                     {

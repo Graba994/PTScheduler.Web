@@ -257,7 +257,8 @@ public class TenantService(
         return $"http://{ForwardHost}:{tenant.Port}";
     }
 
-    public async Task SuspendAsync(int tenantId)
+    /// <param name="reason">Dlaczego — trafia do historii studia i do porannego raportu zawieszeń.</param>
+    public async Task SuspendAsync(int tenantId, string? reason = null)
     {
         await using var db = dbFactory.CreateDbContext();
         var tenant = await db.Tenants.FindAsync(tenantId)
@@ -273,7 +274,8 @@ public class TenantService(
         db.TenantEvents.Add(new TenantEvent
         {
             TenantId = tenant.Id,
-            EventType = TenantEventTypes.Suspended
+            EventType = TenantEventTypes.Suspended,
+            Detail = string.IsNullOrWhiteSpace(reason) ? SuspensionReasons.Other : reason
         });
 
         await db.SaveChangesAsync();

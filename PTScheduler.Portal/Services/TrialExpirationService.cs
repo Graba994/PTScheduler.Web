@@ -150,7 +150,7 @@ public class TrialExpirationService(
             logger.LogInformation("Trial expired for tenant {Slug} — suspending", t.Slug);
             try
             {
-                await tenantSvc.SuspendAsync(t.Id);
+                await tenantSvc.SuspendAsync(t.Id, SuspensionReasons.TrialExpired);
                 t.BillingStatus = "trial_expired";
 
                 db.TenantEvents.Add(new TenantEvent

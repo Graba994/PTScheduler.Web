@@ -157,9 +157,7 @@ public class BillingService(
         {
             try
             {
-                await tenants.SuspendAsync(id);
-                db.TenantEvents.Add(new TenantEvent { TenantId = id, EventType = TenantEventTypes.Suspended, Detail = "Koniec subskrypcji po rezygnacji trenera" });
-                await db.SaveChangesAsync();
+                await tenants.SuspendAsync(id, SuspensionReasons.Cancelled);
             }
             catch (Exception ex) { logger.LogError(ex, "Nie zawieszono trenera #{Id} po rezygnacji.", id); }
         }

@@ -166,16 +166,9 @@ public class StripeService(
             addon.CancelledAt = now;
         }
 
-        db.TenantEvents.Add(new TenantEvent
-        {
-            TenantId = tenant.Id,
-            EventType = TenantEventTypes.Suspended,
-            Detail = "Subskrypcja Stripe anulowana"
-        });
-
         await db.SaveChangesAsync();
 
-        try { await tenants.SuspendAsync(tenant.Id); } catch (Exception ex) { logger.LogError(ex, "Subskrypcja tenanta {TenantId} anulowana, ale automatyczne zawieszenie kontenerów się nie powiodło — wymaga ręcznej interwencji.", tenant.Id); }
+        try { await tenants.SuspendAsync(tenant.Id, SuspensionReasons.StripeCancelled); } catch (Exception ex) { logger.LogError(ex, "Subskrypcja tenanta {TenantId} anulowana, ale automatyczne zawieszenie kontenerów się nie powiodło — wymaga ręcznej interwencji.", tenant.Id); }
 
         var body = email.SuspensionEmailBody(tenant.OwnerName, "Subskrypcja została anulowana.");
         _ = email.SendAsync(tenant.OwnerEmail, "Twoje konto Hantly zostalo zawieszone", body);

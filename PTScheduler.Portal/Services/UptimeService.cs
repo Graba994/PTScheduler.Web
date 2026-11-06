@@ -163,11 +163,17 @@ public class UptimeService(
                 db.UptimeMonitors.Add(new UptimeMonitor { TenantId = t.Id, Name = string.IsNullOrWhiteSpace(t.CompanyName) ? t.Slug : t.CompanyName, Url = url, Keyword = null, SortOrder = 100 });
             else if (m.Url != url) m.Url = url;
         }
-        foreach (var m in monitors.Where(m => tenants.All(t => t.Id != m.TenantId) && !m.IsPaused))
+        // Studio usunięte — monitor wyłączony na stałe. Zawieszone obsługuje RunDueAsync (wznawia się samo po odwieszeniu).
+        var existing = await db.Tenants.AsNoTracking().Select(t => t.Id).ToListAsync(ct);
+        foreach (var m in monitors.Where(m => !existing.Contains(m.TenantId!.Value) && !m.IsPaused))
         {
             m.IsPaused = true;
             m.State = UptimeState.Paused;
         }
+        // Dawniej monitor zawieszonego studia był wyłączany na stałe i nie wracał po odwieszeniu — teraz pauzę trzyma RunDueAsync.
+        var suspended = await db.Tenants.AsNoTracking().Where(t => t.Status != TenantStatus.Active).Select(t => t.Id).ToListAsync(ct);
+        foreach (var m in monitors.Where(m => m.IsPaused && suspended.Contains(m.TenantId!.Value)))
+            m.IsPaused = false;
         if (!await db.UptimeMonitors.AnyAsync(m => m.TenantId == null, ct))
         {
             var main = (await settings.GetAsync(SiteSettingsService.Keys.MainDomain)).Trim();
@@ -182,7 +188,12 @@ public class UptimeService(
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var now = DateTime.UtcNow;
-        var due = (await db.UptimeMonitors.AsNoTracking().Where(m => !m.IsPaused).ToListAsync(ct))
+        var active = (await db.Tenants.AsNoTracking().Where(t => t.Status == TenantStatus.Active).Select(t => t.Id).ToListAsync(ct)).ToHashSet();
+        var all = await db.UptimeMonitors.AsNoTracking().Where(m => !m.IsPaused).ToListAsync(ct);
+        // Zawieszone (albo jeszcze nieuruchomione) studio ma zatrzymane kontenery — to nie awaria, nie sprawdzamy i nie alarmujemy.
+        var asleep = all.Where(m => m.TenantId is int tid && !active.Contains(tid)).ToList();
+        if (asleep.Any(m => m.State != UptimeState.Paused)) await MarkSuspendedAsync(asleep.Where(m => m.State != UptimeState.Paused).Select(m => m.Id).ToList(), now, ct);
+        var due = all.Except(asleep)
             .Where(m => m.LastCheckAt is null || m.LastCheckAt.Value.AddSeconds(Math.Max(20, m.IntervalSeconds) - 2) <= now)
             .ToList();
         using var gate = new SemaphoreSlim(8);
@@ -194,6 +205,24 @@ public class UptimeService(
             finally { gate.Release(); }
         }));
         return due.Count;
+    }
+
+    public const string SuspendedNote = "Studio zawieszone — bez sprawdzania i alarmów";
+
+    /// <summary>Monitory zawieszonych studiów: stan „wstrzymany”, otwarte awarie zamknięte bez e-maila.</summary>
+    private async Task MarkSuspendedAsync(List<int> ids, DateTime now, CancellationToken ct)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        foreach (var m in await db.UptimeMonitors.Where(m => ids.Contains(m.Id)).ToListAsync(ct))
+        {
+            m.State = UptimeState.Paused;
+            m.StateSince = now;
+            m.FailuresInRow = 0;
+            m.LastError = SuspendedNote;
+        }
+        await db.UptimeIncidents.Where(i => ids.Contains(i.MonitorId) && i.EndedAt == null)
+            .ExecuteUpdateAsync(u => u.SetProperty(i => i.EndedAt, now), ct);
+        await db.SaveChangesAsync(ct);
     }
 
     /// <summary>Jedno sprawdzenie monitora z zapisem wyniku, zmianą stanu i alarmem.</summary>
@@ -237,6 +266,8 @@ public class UptimeService(
     {
         // Aplikacja trenera, której awarię już zgłosił wewnętrzny monitor kontenerów — bez drugiego e-maila.
         if (m.TenantId is int tid && await db.Tenants.AnyAsync(x => x.Id == tid && x.IsHealthy == false && x.DownAlertSent)) return;
+        // Studio zawieszone w trakcie sprawdzania — to nie awaria (zawieszenia trafiają do porannego raportu).
+        if (m.TenantId is int sid && await db.Tenants.AnyAsync(x => x.Id == sid && x.Status != TenantStatus.Active)) return;
         var s = await settings.GetAllAsync(SiteSettingsService.Keys.AdminNotificationEmail, SiteSettingsService.Keys.AdminNotificationPhone);
         var to = s[SiteSettingsService.Keys.AdminNotificationEmail];
         var link = $"{PortalUrls.Public(config)}/panel/dostepnosc?m={m.Id}";
