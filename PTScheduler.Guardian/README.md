@@ -481,3 +481,20 @@ Guardian ma podpięty wolumen kopii (`portal-backups` → `/opt/ptscheduler/back
 | `GUARDIAN_ALERT_AFTER_MINUTES` | `10` |
 
 Trenerów odtwarza Portal (Kopie zapasowe), a cały serwer — `deploy/restore.sh` (opis w `DEPLOYMENT.md`).
+
+## Problem: „not a git repository” przy aktualizacji
+
+Guardian buduje z katalogu podpiętego jako `/opt/ptscheduler/repo`. Jeśli kontener działa bez tego wolumenu
+albo repozytorium na serwerze przeniesiono/usunięto, aktualizacja kończy się błędem „not a git repository”.
+
+```bash
+# 1. Co jest podpięte?
+docker inspect ptguardian -f '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}'
+# 2. Gdzie na serwerze jest repozytorium (z folderem .git)?
+find / -maxdepth 4 -type d -name .git -path '*PTScheduler*' 2>/dev/null
+# 3. Odtwórz Guardiana z właściwym repozytorium (skrypt podepnie je jako /opt/ptscheduler/repo):
+REPO_DIR=/sciezka/do/repo bash /sciezka/do/repo/deploy/update-guardian.sh
+```
+
+Pusty katalog repozytorium Guardian wypełnia sam (klonuje z GitHuba z dostępem z Portalu). Katalogu z plikami
+bez `.git` nie rusza — trzeba go przenieść i sklonować repozytorium od nowa.

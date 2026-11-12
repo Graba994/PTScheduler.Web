@@ -91,11 +91,7 @@ public sealed partial class UpgradeOrchestrator : IDisposable
     {
         // ── PRE-CHECK ───────────────────────────────────────────
         Log(job, "info", "Queued", "Sprawdzam warunki wstępne...");
-        if (!Directory.Exists(_repoDir))
-        {
-            Fail(job, "Queued", $"Katalog repo '{_repoDir}' nie istnieje.");
-            return;
-        }
+        if (!await EnsureRepoAsync(job)) return;
 
         ContainerInspectResponse inspect;
         try
@@ -280,11 +276,7 @@ public sealed partial class UpgradeOrchestrator : IDisposable
     private async Task ExecuteTenantUpgradeAsync(UpgradeJob job, TenantRollingRequest? rollout)
     {
         Log(job, "info", "Queued", "Sprawdzam warunki wstępne...");
-        if (!Directory.Exists(_repoDir))
-        {
-            Fail(job, "Queued", $"Katalog repo '{_repoDir}' nie istnieje.");
-            return;
-        }
+        if (!await EnsureRepoAsync(job)) return;
 
         job.CommitBefore = await HeadCommit();
 
@@ -905,6 +897,47 @@ public sealed partial class UpgradeOrchestrator : IDisposable
         });
     }
 
+    /// <summary>
+    /// Czy Guardian widzi repozytorium Git. Pusty katalog — pobiera kod z GitHuba (dostęp z Portalu).
+    /// Katalog z plikami, ale bez .git — niczego nie nadpisuje, tylko mówi, co sprawdzić na serwerze.
+    /// </summary>
+    private async Task<bool> EnsureRepoAsync(UpgradeJob job)
+    {
+        if (!Directory.Exists(_repoDir))
+        {
+            Fail(job, "Queued", $"Guardian nie widzi katalogu z kodem ({_repoDir}). {RepoHelp}");
+            return false;
+        }
+        if (Directory.Exists(Path.Combine(_repoDir, ".git")) || File.Exists(Path.Combine(_repoDir, ".git"))) return true;
+
+        if (Directory.EnumerateFileSystemEntries(_repoDir).Any())
+        {
+            Fail(job, "Queued", $"W katalogu z kodem ({_repoDir}) są pliki, ale nie ma repozytorium Git (brak folderu .git) — Guardian niczego nie nadpisał. {RepoHelp}");
+            return false;
+        }
+
+        Log(job, "warn", "Queued", "Katalog z kodem jest pusty — pobieram repozytorium z GitHuba...");
+        var (owner, repo) = await SyncGitCredentials(job);
+        if (owner is null || repo is null)
+        {
+            Fail(job, "Queued", $"Katalog z kodem jest pusty, a Portal nie podał repozytorium GitHuba (Konfiguracja → GitHub). {RepoHelp}");
+            return false;
+        }
+        var (ok, output) = await Git(["clone", "--branch", _branch, $"https://github.com/{owner}/{repo}.git", _repoDir]);
+        if (!ok)
+        {
+            Fail(job, "Queued", $"Nie udało się pobrać repozytorium z GitHuba: {TrimOutput(output)}");
+            return false;
+        }
+        Log(job, "success", "Queued", "Repozytorium pobrane z GitHuba.");
+        return true;
+    }
+
+    private const string RepoHelp =
+        "Najczęściej kontener Guardiana działa bez podpiętego katalogu repozytorium albo repozytorium na serwerze zostało przeniesione lub usunięte. " +
+        "Sprawdź na serwerze: docker inspect ptguardian -f '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}' — " +
+        "katalog podpięty jako /opt/ptscheduler/repo musi zawierać sklonowane repozytorium (z folderem .git).";
+
     private async Task<string> HeadCommit()
     {
         var (ok, output) = await Cli("git", ["rev-parse", "HEAD"], _repoDir);
@@ -944,38 +977,41 @@ public sealed partial class UpgradeOrchestrator : IDisposable
     /// (-c http.extraHeader) — nie trafia do .git/config ani do logów zadania.
     /// Stary adres z tokenem w URL (poprzednie wersje Guardiana) zastępujemy czystym.
     /// </summary>
-    private async Task SyncGitCredentials(UpgradeJob job)
+    private async Task<(string? Owner, string? Repo)> SyncGitCredentials(UpgradeJob job)
     {
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, $"{_portalUrl}/api/internal/git-config");
             req.Headers.Add("X-Guardian-Secret", _guardianSecret);
             using var resp = await _healthHttp.SendAsync(req);
-            if (!resp.IsSuccessStatusCode) return;
+            if (!resp.IsSuccessStatusCode) return (null, null);
 
             using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
             var token = doc.RootElement.TryGetProperty("token", out var t) ? t.GetString() : null;
             var owner = doc.RootElement.TryGetProperty("owner", out var o) ? o.GetString() : null;
             var repo = doc.RootElement.TryGetProperty("repo", out var r) ? r.GetString() : null;
 
-            if (string.IsNullOrWhiteSpace(owner) || string.IsNullOrWhiteSpace(repo)) return;
+            if (string.IsNullOrWhiteSpace(owner) || string.IsNullOrWhiteSpace(repo)) return (null, null);
             if (!SafeRef().IsMatch(owner) || !SafeRef().IsMatch(repo))
             {
                 Log(job, "warn", "Pulling", "Portal podał nieprawidłową nazwę repozytorium — pomijam synchronizację.");
-                return;
+                return (null, null);
             }
 
-            await Cli("git", ["remote", "set-url", "origin", $"https://github.com/{owner}/{repo}.git"], _repoDir);
+            if (Directory.Exists(Path.Combine(_repoDir, ".git")))
+                await Cli("git", ["remote", "set-url", "origin", $"https://github.com/{owner}/{repo}.git"], _repoDir);
             if (!string.IsNullOrWhiteSpace(token))
             {
                 _gitAuthHeader = "Authorization: Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes($"x-access-token:{token}"));
                 lock (_secretsToScrub) { _secretsToScrub.Add(token); }
             }
             Log(job, "info", "Pulling", "Dostęp do GitHuba pobrany z Portalu.");
+            return (owner, repo);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Nie pobrano dostępu do GitHuba z Portalu — używam ustawień repozytorium.");
+            return (null, null);
         }
     }
 

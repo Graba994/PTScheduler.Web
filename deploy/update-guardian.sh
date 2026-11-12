@@ -70,10 +70,16 @@ done < <(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAIN
 
 while IFS='|' read -r type src dst rw; do
     [[ -z "$dst" ]] && continue
+    [[ "$dst" == "$REPO_TARGET" ]] && continue   # repozytorium podpinamy niżej — zawsze to, z którego budujemy
     if [[ "$type" == "volume" ]]; then spec="$src:$dst"; else spec="$src:$dst"; fi
     [[ "$rw" == "false" ]] && spec="$spec:ro"
     ARGS+=(-v "$spec")
 done < <(docker inspect -f '{{range .Mounts}}{{.Type}}|{{if eq .Type "volume"}}{{.Name}}{{else}}{{.Source}}{{end}}|{{.Destination}}|{{.RW}}{{println}}{{end}}' "$CONTAINER")
+
+# Repozytorium: Guardian pobiera z niego zmiany i buduje Portal oraz aplikację trenerów.
+# Podpinamy katalog, z którego właśnie zbudowaliśmy obraz (naprawia też kontener uruchomiony bez tego wolumenu).
+ARGS+=(-v "$REPO_DIR:$REPO_TARGET")
+ok "Podpinam repozytorium: $REPO_DIR → $REPO_TARGET"
 
 # Kopie Portalu: Guardian potrzebuje tego samego katalogu kopii co Portal (robi zapasowe i przywraca Portal).
 PORTAL_CONTAINER="${PORTAL_CONTAINER:-ptportal}"
