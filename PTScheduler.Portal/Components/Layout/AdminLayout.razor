@@ -46,6 +46,13 @@
             <NavLink href="/panel/leo" class="portal-nav-item" title="Leo — analiza">
                 <i class="bi bi-graph-up-arrow"></i><span class="portal-label">Leo — analiza</span>
             </NavLink>
+            <NavLink href="/panel/instagram" class="portal-nav-item" title="Instagram">
+                <i class="bi bi-instagram"></i><span class="portal-label">Instagram</span>
+                @if (_igWaiting > 0)
+                {
+                    <span class="portal-dot" title="@($"Do akceptacji albo z błędem: {_igWaiting}")"></span>
+                }
+            </NavLink>
             <NavLink href="/panel/build" class="portal-nav-item" title="Zbuduj dla trenera">
                 <i class="bi bi-magic"></i><span class="portal-label">Zbuduj dla trenera</span>
             </NavLink>
@@ -164,7 +171,7 @@
     private int _mail;
     private int _bugs;
     private int _books;
-    private int _down;
+    private int _down, _igWaiting;
 
     // Zgłoszenia ze sklepu czekające na zespół (nowe, zaakceptowane, w realizacji).
     protected override async Task OnInitializedAsync()
@@ -206,5 +213,12 @@
                 m => m.State == PTScheduler.Portal.Entities.UptimeState.Down && !m.IsPaused);
         }
         catch { _down = 0; }
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            _igWaiting = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.CountAsync(db.InstagramPosts,
+                p => p.Status == PTScheduler.Portal.Entities.InstagramPostStatus.ToApprove || p.Status == PTScheduler.Portal.Entities.InstagramPostStatus.Failed);
+        }
+        catch { _igWaiting = 0; }
     }
 }

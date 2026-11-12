@@ -111,6 +111,10 @@ builder.Services.AddScoped<UptimeService>();
 builder.Services.AddScoped<TesterService>();
 builder.Services.AddHostedService<UptimeBackgroundService>();
 builder.Services.AddScoped<SuspensionReportService>();
+builder.Services.AddScoped<InstagramClient>();
+builder.Services.AddScoped<InstagramAi>();
+builder.Services.AddScoped<InstagramService>();
+builder.Services.AddHostedService<InstagramBackgroundService>();
 builder.Services.AddHostedService<SuspensionReportBackgroundService>();
 builder.Services.AddScoped<BackupService>();
 builder.Services.AddScoped<OffsiteBackupService>();
@@ -705,6 +709,22 @@ app.MapGet("/api/account/logout", async (SignInManager<IdentityUser> signIn) =>
 
 // Stripe webhook — Stripe posts events here as JSON with a signature
 // header. Return 200 quickly; Stripe will retry on any non-2xx.
+// ── Instagram marki ──
+// Powrót z logowania do Instagrama (tylko administrator — ten sam, który kliknął „Połącz”).
+app.MapGet("/panel/instagram/callback", async (string? code, string? state, string? error, InstagramService ig) =>
+{
+    var (ok, message) = await ig.CallbackAsync(code, state, error);
+    return Results.Redirect($"/panel/instagram?t=polaczenie&{(ok ? "ok" : "err")}={Uri.EscapeDataString(message)}");
+}).RequireAuthorization(p => p.RequireRole("Admin"));
+// Grafiki postów — Instagram pobiera je stąd przy publikacji (adres nieodgadniony, tylko JPEG).
+app.MapGet("/media/ig/{token}.jpg", async (string token, HttpContext ctx, InstagramService ig) =>
+{
+    var data = await ig.AssetBytesAsync(token);
+    if (data is null) return Results.NotFound();
+    ctx.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
+    return Results.File(data, "image/jpeg");
+});
+
 // ── Garmin Connect (plan Starter) ──
 // Powrót z logowania do Garmina → z powrotem do aplikacji studia (adres studia + zapamiętana ścieżka).
 app.MapGet("/garmin/callback", async (string? code, string? state, string? error, GarminService garmin) =>

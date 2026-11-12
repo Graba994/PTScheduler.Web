@@ -35,6 +35,12 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<UptimeMonitor> UptimeMonitors => Set<UptimeMonitor>();
     public DbSet<UptimeBeat> UptimeBeats => Set<UptimeBeat>();
     public DbSet<UptimeIncident> UptimeIncidents => Set<UptimeIncident>();
+    public DbSet<InstagramAccount> InstagramAccounts => Set<InstagramAccount>();
+    public DbSet<InstagramPost> InstagramPosts => Set<InstagramPost>();
+    public DbSet<InstagramAsset> InstagramAssets => Set<InstagramAsset>();
+    public DbSet<InstagramMedia> InstagramMedia => Set<InstagramMedia>();
+    public DbSet<InstagramDaily> InstagramDaily => Set<InstagramDaily>();
+    public DbSet<InstagramComment> InstagramComments => Set<InstagramComment>();
     public DbSet<TesterFeedback> TesterFeedback => Set<TesterFeedback>();
     public DbSet<TenantOfferItem> TenantOfferItems => Set<TenantOfferItem>();
     public DbSet<TenantSmsCounter> TenantSmsCounters => Set<TenantSmsCounter>();
@@ -504,6 +510,59 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
         {
             e.HasIndex(x => new { x.MonitorId, x.StartedAt });
             e.Property(x => x.Error).HasMaxLength(500);
+        });
+
+        b.Entity<InstagramAccount>(e =>
+        {
+            e.Property(x => x.IgUserId).HasMaxLength(64);
+            e.Property(x => x.Username).HasMaxLength(64);
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.PictureUrl).HasMaxLength(2000);
+            e.Property(x => x.LastError).HasMaxLength(500);
+        });
+        b.Entity<InstagramPost>(e =>
+        {
+            e.HasIndex(x => new { x.Status, x.ScheduledAt });
+            e.Property(x => x.Title).HasMaxLength(200);
+            e.Property(x => x.Caption).HasMaxLength(2200);
+            e.Property(x => x.Pillar).HasMaxLength(32);
+            e.Property(x => x.Source).HasMaxLength(16);
+            e.Property(x => x.ContainerId).HasMaxLength(64);
+            e.Property(x => x.IgMediaId).HasMaxLength(64);
+            e.Property(x => x.Permalink).HasMaxLength(500);
+            e.Property(x => x.Error).HasMaxLength(1000);
+            e.HasMany(x => x.Assets).WithOne(x => x.Post).HasForeignKey(x => x.PostId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<InstagramAsset>(e =>
+        {
+            e.HasIndex(x => x.Token).IsUnique();
+            e.HasIndex(x => new { x.PostId, x.Order });
+            e.Property(x => x.Kind).HasMaxLength(8);
+            e.Property(x => x.Token).HasMaxLength(32);
+            e.Property(x => x.ExternalUrl).HasMaxLength(2000);
+        });
+        b.Entity<InstagramMedia>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasMaxLength(64);
+            e.HasIndex(x => x.PostedAt);
+            e.Property(x => x.MediaType).HasMaxLength(32);
+            e.Property(x => x.ProductType).HasMaxLength(32);
+            e.Property(x => x.Permalink).HasMaxLength(500);
+            e.Property(x => x.ThumbnailUrl).HasMaxLength(2000);
+        });
+        b.Entity<InstagramDaily>(e => e.HasKey(x => x.Day));
+        b.Entity<InstagramComment>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasMaxLength(64);
+            e.Property(x => x.MediaId).HasMaxLength(64);
+            e.Property(x => x.ParentId).HasMaxLength(64);
+            e.Property(x => x.Username).HasMaxLength(64);
+            e.Property(x => x.Text).HasMaxLength(2200);
+            e.Property(x => x.Suggestion).HasMaxLength(1000);
+            e.HasIndex(x => new { x.Done, x.At });
+            e.HasIndex(x => x.MediaId);
         });
 
         b.Entity<PlanChangeLog>(e =>

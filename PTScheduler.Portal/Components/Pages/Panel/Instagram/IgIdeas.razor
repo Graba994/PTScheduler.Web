@@ -1,0 +1,125 @@
+@inject InstagramService Ig
+@inject InstagramAi Ai
+
+@* Pomysły: AI wymyśla gotowe posty (slajdy + opis + hashtagi); bez AI — wbudowany bank. Jeden klik = szkic z grafikami. *@
+
+<PanelCard Title="Wymyśl posty" Icon="bi-stars" IconClass="pp-tone-info"
+           Subtitle="@(_aiOff is null ? "AI przygotuje temat, teksty na grafiki, opis i hashtagi. Ty wybierasz, co trafi do planu." : $"{_aiOff} Pomysły biorą się z gotowego banku.")">
+    <div class="row g-2 align-items-end">
+        <div class="col-sm-6 col-lg-3">
+            <label class="form-label small fw-semibold" for="ig-ipillar">Filar</label>
+            <select id="ig-ipillar" class="form-select form-select-sm" @bind="_pillar">
+                <option value="">Różne (wg autopilota)</option>
+                @foreach (var p in InstagramRules.Pillars) { <option value="@p.Key">@p.Label</option> }
+            </select>
+        </div>
+        <div class="col-sm-6 col-lg-3">
+            <label class="form-label small fw-semibold" for="ig-iformat">Format</label>
+            <select id="ig-iformat" class="form-select form-select-sm" @bind="_format">
+                <option value="mix">Karuzele i grafiki</option>
+                <option value="carousel">Karuzele</option>
+                <option value="image">Pojedyncze grafiki</option>
+            </select>
+        </div>
+        <div class="col-sm-4 col-lg-2">
+            <label class="form-label small fw-semibold" for="ig-icount">Ile</label>
+            <select id="ig-icount" class="form-select form-select-sm" @bind="_count">
+                <option value="1">1</option><option value="3">3</option><option value="5">5</option>
+            </select>
+        </div>
+        <div class="col-sm-8 col-lg-4">
+            <label class="form-label small fw-semibold" for="ig-ibrief">Temat (opcjonalnie)</label>
+            <input id="ig-ibrief" class="form-control form-control-sm" @bind="_brief" placeholder="np. nowa mapa mięśni, święta, styczniowe postanowienia" disabled="@(_aiOff is not null)" />
+        </div>
+    </div>
+    <div class="d-flex gap-2 align-items-center mt-3 flex-wrap">
+        <button class="btn btn-primary btn-sm" @onclick="GenerateAsync" disabled="@_busy">
+            @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-stars me-1"></i> }
+            @(_aiOff is null ? "Wymyśl" : "Pokaż pomysły z banku")
+        </button>
+        @if (_busy && _aiOff is null) { <span class="small text-muted">AI pisze — zwykle 10–30 sekund…</span> }
+        @if (_note is not null) { <span class="small text-muted"><i class="bi bi-info-circle me-1"></i>@_note</span> }
+    </div>
+</PanelCard>
+
+@if (_ideas.Count > 0)
+{
+    <div class="ig-ideas">
+        @foreach (var i in _ideas)
+        {
+            var idea = i;
+            <article class="ig-idea" @key="idea">
+                <div class="d-flex gap-2 align-items-center flex-wrap mb-1">
+                    <span class="pp-chip pp-tone-info"><i class="bi @(InstagramRules.FindPillar(idea.Pillar)?.Icon ?? "bi-tag")"></i>@InstagramRules.PillarLabel(idea.Pillar)</span>
+                    <span class="small text-muted"><i class="bi @(idea.Slides.Count > 1 ? "bi-collection" : "bi-image") me-1"></i>@(idea.Slides.Count > 1 ? $"Karuzela · {idea.Slides.Count} slajdów" : "Grafika")</span>
+                    @if (!idea.FromAi) { <span class="small text-muted">· z banku</span> }
+                </div>
+                <h3 class="ig-idea-title">@idea.Title</h3>
+                <ol class="ig-idea-slides">
+                    @foreach (var s in idea.Slides)
+                    {
+                        <li><b>@s.Headline</b>@if (!string.IsNullOrWhiteSpace(s.Body)) { <span> — @s.Body</span> }@if (s.Points is { Count: > 0 }) { <span> (@string.Join(" · ", s.Points))</span> }</li>
+                    }
+                </ol>
+                <details class="ig-idea-cap">
+                    <summary>Opis i hashtagi</summary>
+                    <p>@idea.Caption</p>
+                    <p class="text-muted">@string.Join(" ", idea.Hashtags)</p>
+                </details>
+                <div class="d-flex gap-2 flex-wrap mt-2">
+                    <button class="btn btn-primary btn-sm" @onclick="() => UseAsync(idea, false)" disabled="@_creating"><i class="bi bi-pencil-square me-1"></i>Zrób szkic i edytuj</button>
+                    <button class="btn btn-outline-primary btn-sm" @onclick="() => UseAsync(idea, true)" disabled="@_creating"><i class="bi bi-calendar-plus me-1"></i>Do planu (najbliższy termin)</button>
+                    <button class="btn btn-link btn-sm" @onclick="() => _ideas.Remove(idea)">Odrzuć</button>
+                </div>
+            </article>
+        }
+    </div>
+}
+else if (!_busy)
+{
+    <div class="pp-card"><div class="pp-empty">
+        <i class="bi bi-lightbulb"></i>
+        <div class="pp-empty-title">Tu pojawią się pomysły</div>
+        <p>Każdy pomysł to gotowy post: grafiki w stylu marki, opis z wezwaniem do działania i hashtagi. Wybierz filar i kliknij „Wymyśl”.</p>
+    </div></div>
+}
+
+@code {
+    [Parameter] public EventCallback<(string, int?)> Go { get; set; }
+    [Parameter] public EventCallback<(bool, string)> Flash { get; set; }
+
+    private string _pillar = "", _format = "mix", _brief = "";
+    private int _count = 3;
+    private bool _busy, _creating;
+    private string? _aiOff, _note;
+    private List<InstagramAi.Idea> _ideas = [];
+
+    protected override async Task OnInitializedAsync() => _aiOff = await Ai.UnavailableAsync();
+
+    private async Task GenerateAsync()
+    {
+        _busy = true;
+        _note = null;
+        StateHasChanged();
+        var (ideas, note) = await Ig.IdeasAsync(_count, string.IsNullOrEmpty(_pillar) ? null : _pillar, _format, string.IsNullOrWhiteSpace(_brief) ? null : _brief);
+        _ideas = ideas;
+        _note = note;
+        _busy = false;
+    }
+
+    private async Task UseAsync(InstagramAi.Idea idea, bool schedule)
+    {
+        _creating = true;
+        var id = await Ig.CreateFromIdeaAsync(idea, InstagramPostStatus.Draft, null, idea.FromAi ? "ai" : "manual");
+        _ideas.Remove(idea);
+        _creating = false;
+        if (schedule)
+        {
+            var r = await Ig.ScheduleAsync(id, null);
+            await Flash.InvokeAsync(r);
+            if (!r.Ok) await Go.InvokeAsync(("plan", id));
+            return;
+        }
+        await Go.InvokeAsync(("plan", id));
+    }
+}

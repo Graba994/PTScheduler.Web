@@ -1,0 +1,496 @@
+@inject InstagramService Ig
+@inject InstagramAi Ai
+@inject SiteSettingsService Settings
+
+@* Edytor posta: rodzaj, grafiki (szablony marki albo własne zdjęcia), opis z pomocą AI, podgląd jak na Instagramie i termin. *@
+
+@if (_post is null)
+{
+    <div class="text-muted small py-4 text-center">@(_missing ? "Nie ma takiego posta." : "Wczytuję…")</div>
+}
+else
+{
+    var readOnly = _post.Status is InstagramPostStatus.Published or InstagramPostStatus.Publishing;
+    var problems = InstagramService.Problems(Current);
+    <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
+        <button class="btn btn-link btn-sm px-0" @onclick='() => Go.InvokeAsync(("plan", null))'><i class="bi bi-arrow-left me-1"></i>Plan</button>
+        <span class="pp-chip pp-tone-@InstagramRules.StatusTone(_post.Status)">@InstagramRules.StatusLabel(_post.Status)</span>
+        @if (_post.ScheduledAt is { } sa && _post.Status is InstagramPostStatus.Scheduled or InstagramPostStatus.ToApprove)
+        {
+            <span class="small text-muted"><i class="bi bi-clock me-1"></i>@IgUi.When(sa)</span>
+        }
+        @if (_post.Source != "manual") { <span class="small text-muted">· @IgUi.Source(_post.Source)</span> }
+        @if (_post.Permalink is not null)
+        {
+            <a class="btn btn-outline-secondary btn-sm ms-auto" href="@_post.Permalink" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i>Zobacz na Instagramie</a>
+        }
+    </div>
+
+    @if (_post.Status == InstagramPostStatus.Failed && _post.Error is not null)
+    {
+        <div class="pp-callout pp-tone-danger"><i class="bi bi-exclamation-triangle"></i><div><strong>Nie udało się opublikować.</strong> @_post.Error</div></div>
+    }
+    @if (_post.Status == InstagramPostStatus.ToApprove)
+    {
+        <div class="pp-callout pp-tone-warn"><i class="bi bi-robot"></i><div>Ten post przygotował autopilot. Sprawdź grafiki i opis, popraw, co chcesz, i kliknij <strong>Akceptuj</strong> — trafi do planu na @IgUi.When(_post.ScheduledAt).</div></div>
+    }
+
+    <div class="ig-editor">
+        <div class="ig-editor-main">
+            <PanelCard Title="Post" Icon="bi-pencil-square">
+                <div class="row g-2">
+                    <div class="col-md-7">
+                        <label class="form-label small fw-semibold" for="ig-title">Temat roboczy</label>
+                        <input id="ig-title" class="form-control form-control-sm" @bind="_title" disabled="@readOnly" placeholder="np. 3 sposoby na mniej odwołań" />
+                    </div>
+                    <div class="col-md-5">
+                        <label class="form-label small fw-semibold" for="ig-pillar">Filar treści</label>
+                        <select id="ig-pillar" class="form-select form-select-sm" @bind="_pillar" disabled="@readOnly">
+                            <option value="">— bez filaru —</option>
+                            @foreach (var p in InstagramRules.Pillars) { <option value="@p.Key">@p.Label</option> }
+                        </select>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <div class="small fw-semibold mb-1">Rodzaj</div>
+                    <div class="pp-seg flex-wrap" role="group" aria-label="Rodzaj posta">
+                        @foreach (var k in Enum.GetValues<InstagramPostKind>())
+                        {
+                            var kind = k;
+                            <button type="button" class="@(_kind == kind ? "active" : "")" disabled="@readOnly" @onclick="() => _kind = kind"><i class="bi @InstagramRules.KindIcon(kind)"></i>@InstagramRules.KindLabel(kind)</button>
+                        }
+                    </div>
+                    <div class="small text-muted mt-1">@KindHint(_kind)</div>
+                </div>
+            </PanelCard>
+
+            <PanelCard Title="Grafiki i film" Icon="bi-images" Subtitle="@AssetsHint">
+                @if (_post.Assets.Count > 0)
+                {
+                    <div class="ig-assets">
+                        @foreach (var a in _post.Assets)
+                        {
+                            var asset = a;
+                            var idx = _post.Assets.IndexOf(asset);
+                            <div class="ig-asset" @key="asset.Id">
+                                @if (asset.Kind == "video")
+                                {
+                                    <span class="ig-asset-video"><i class="bi bi-film"></i><small>@asset.ExternalUrl</small></span>
+                                }
+                                else
+                                {
+                                    <img src="/media/ig/@(asset.Token).jpg" alt="Grafika @(idx + 1)" loading="lazy" />
+                                }
+                                @if (!readOnly)
+                                {
+                                    <div class="ig-asset-tools">
+                                        <button class="btn btn-light btn-sm" title="Wcześniej" aria-label="Przesuń wcześniej" disabled="@(idx == 0)" @onclick="() => MoveAsync(asset.Id, -1)"><i class="bi bi-arrow-left"></i></button>
+                                        @if (InstagramService.SpecOf(asset) is { } spec)
+                                        {
+                                            <button class="btn btn-light btn-sm" title="Edytuj tekst grafiki" aria-label="Edytuj grafikę" @onclick="() => OpenDesigner(asset.Id, spec)"><i class="bi bi-pencil"></i></button>
+                                        }
+                                        <button class="btn btn-light btn-sm" title="Później" aria-label="Przesuń później" disabled="@(idx == _post.Assets.Count - 1)" @onclick="() => MoveAsync(asset.Id, 1)"><i class="bi bi-arrow-right"></i></button>
+                                        <button class="btn btn-light btn-sm text-danger" title="Usuń" aria-label="Usuń grafikę" @onclick="() => RemoveAsync(asset.Id)"><i class="bi bi-x-lg"></i></button>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+                @if (!readOnly)
+                {
+                    <div class="d-flex gap-2 flex-wrap mt-2">
+                        <button class="btn btn-outline-primary btn-sm" @onclick="() => OpenDesigner(null, null)"><i class="bi bi-palette me-1"></i>Grafika z szablonu</button>
+                        <label class="btn btn-outline-primary btn-sm mb-0">
+                            <i class="bi bi-upload me-1"></i>Wgraj zdjęcie / zrzut
+                            <InputFile OnChange="UploadAsync" accept="image/jpeg,image/png,image/webp" multiple class="d-none" />
+                        </label>
+                        @if (_kind is InstagramPostKind.Reel or InstagramPostKind.Story)
+                        {
+                            <div class="input-group input-group-sm ig-video-url">
+                                <input class="form-control" placeholder="https://… adres pliku MP4" @bind="_videoUrl" aria-label="Adres filmu" />
+                                <button class="btn btn-outline-primary" @onclick="AddVideoAsync"><i class="bi bi-film me-1"></i>Dodaj film</button>
+                            </div>
+                        }
+                    </div>
+                    @if (_uploading) { <div class="small text-muted mt-2"><span class="spinner-border spinner-border-sm me-1"></span>Przygotowuję zdjęcia…</div> }
+                }
+
+                @if (_designer)
+                {
+                    <div class="ig-designer">
+                        <div class="ig-designer-form">
+                            <div class="small fw-semibold mb-1">Szablon</div>
+                            <div class="ig-chips mb-2">
+                                @foreach (var t in InstagramGraphics.Templates)
+                                {
+                                    var tpl = t;
+                                    <button type="button" class="ig-chip @(_spec.Template == tpl.Key ? "on" : "")" title="@tpl.Hint" @onclick="() => SetSpecAsync(_spec with { Template = tpl.Key })">@tpl.Label</button>
+                                }
+                            </div>
+                            <div class="small fw-semibold mb-1">Kolory</div>
+                            <div class="ig-chips mb-2">
+                                @foreach (var th in InstagramGraphics.Themes)
+                                {
+                                    var theme = th;
+                                    <button type="button" class="ig-swatch @(_spec.Theme == theme.Key ? "on" : "")" style="background:linear-gradient(135deg,@theme.From,@theme.To);color:@theme.Ink" title="@theme.Label" aria-label="Motyw @theme.Label" @onclick="() => SetSpecAsync(_spec with { Theme = theme.Key })">Aa</button>
+                                }
+                                <select class="form-select form-select-sm w-auto ms-2" value="@_spec.Size" @onchange='e => SetSpecAsync(_spec with { Size = e.Value?.ToString() ?? "post" })' aria-label="Rozmiar">
+                                    <option value="post">Post 4:5</option>
+                                    <option value="square">Kwadrat 1:1</option>
+                                    <option value="story">Relacja 9:16</option>
+                                </select>
+                            </div>
+                            <label class="form-label small fw-semibold mb-1" for="ig-eyebrow">Etykieta</label>
+                            <input id="ig-eyebrow" class="form-control form-control-sm mb-2" value="@_spec.Eyebrow" @onchange='e => SetSpecAsync(_spec with { Eyebrow = e.Value?.ToString() })' placeholder="np. Porada" maxlength="40" />
+                            <label class="form-label small fw-semibold mb-1" for="ig-headline">@(_spec.Template == "myth" ? "Mit" : "Nagłówek")</label>
+                            <textarea id="ig-headline" class="form-control form-control-sm mb-2" rows="2" maxlength="160" @onchange='e => SetSpecAsync(_spec with { Headline = e.Value?.ToString() ?? "" })'>@_spec.Headline</textarea>
+                            @if (_spec.Template == "list")
+                            {
+                                <label class="form-label small fw-semibold mb-1" for="ig-points">Punkty (każdy w nowej linii, do 5)</label>
+                                <textarea id="ig-points" class="form-control form-control-sm mb-2" rows="4" @onchange='e => SetSpecAsync(_spec with { Points = Lines(e.Value?.ToString()) })'>@string.Join("\n", _spec.Points ?? [])</textarea>
+                            }
+                            <label class="form-label small fw-semibold mb-1" for="ig-body">@(_spec.Template == "myth" ? "Fakt" : "Tekst")</label>
+                            <textarea id="ig-body" class="form-control form-control-sm mb-2" rows="3" maxlength="420" @onchange='e => SetSpecAsync(_spec with { Body = e.Value?.ToString() })'>@_spec.Body</textarea>
+                            @if (_spec.Template == "screen")
+                            {
+                                <label class="btn btn-outline-secondary btn-sm mb-2">
+                                    <i class="bi bi-phone me-1"></i>@(_shot is null ? "Wybierz zrzut ekranu" : "Zmień zrzut ekranu")
+                                    <InputFile OnChange="ShotAsync" accept="image/jpeg,image/png,image/webp" class="d-none" />
+                                </label>
+                            }
+                            <div class="d-flex gap-3 align-items-center flex-wrap mb-2">
+                                <div class="form-check form-switch mb-0">
+                                    <input class="form-check-input" type="checkbox" id="ig-mascot" checked="@_spec.Mascot" @onchange='e => SetSpecAsync(_spec with { Mascot = e.Value is true })' />
+                                    <label class="form-check-label small" for="ig-mascot">Hantelek</label>
+                                </div>
+                                @if (_spec.Mascot)
+                                {
+                                    <select class="form-select form-select-sm w-auto" value="@_spec.Mood" @onchange='e => SetSpecAsync(_spec with { Mood = e.Value?.ToString() ?? "happy" })' aria-label="Nastrój Hantelka">
+                                        @foreach (var m in MascotArt.Moods) { <option value="@m.Key">@m.Label</option> }
+                                    </select>
+                                }
+                            </div>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-primary btn-sm" @onclick="SaveGraphicAsync" disabled="@(string.IsNullOrWhiteSpace(_spec.Headline))"><i class="bi bi-check-lg me-1"></i>@(_editAssetId is null ? "Dodaj do posta" : "Zapisz grafikę")</button>
+                                <button class="btn btn-link btn-sm" @onclick="() => _designer = false">Anuluj</button>
+                            </div>
+                        </div>
+                        <div class="ig-designer-preview">
+                            @if (_preview is not null)
+                            {
+                                <img src="@_preview" alt="Podgląd grafiki" />
+                            }
+                            else
+                            {
+                                <div class="ig-designer-empty"><i class="bi bi-image"></i>Wpisz nagłówek — podgląd pojawi się tutaj</div>
+                            }
+                            @if (_rendering) { <span class="spinner-border spinner-border-sm ig-designer-spin"></span> }
+                        </div>
+                    </div>
+                }
+            </PanelCard>
+
+            <PanelCard Title="Opis" Icon="bi-text-paragraph">
+                <Actions>
+                    <span class="small @(_caption.Length > InstagramRules.MaxCaption ? "text-danger" : "text-muted")">@_caption.Length / @InstagramRules.MaxCaption · @InstagramRules.Hashtags(_caption).Count # </span>
+                </Actions>
+                <ChildContent>
+                    <textarea class="form-control ig-caption" rows="9" @bind="_caption" @bind:event="oninput" disabled="@readOnly" placeholder="Pierwsze zdanie decyduje, czy ktoś rozwinie opis…"></textarea>
+                    @if (!readOnly)
+                    {
+                        <div class="d-flex gap-2 flex-wrap mt-2 align-items-center">
+                            @foreach (var (key, label) in InstagramAi.CaptionActions)
+                            {
+                                var action = key;
+                                <button class="btn btn-outline-secondary btn-sm" disabled="@(_aiOff is not null || _aiBusy)" title="@(_aiOff ?? "")" @onclick="() => CaptionAiAsync(action)"><i class="bi bi-stars me-1"></i>@label</button>
+                            }
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="AddMyTagsAsync" title="Dodaje hashtagi z ustawień autopilota"><i class="bi bi-hash me-1"></i>Moje hashtagi</button>
+                            @if (_aiBusy) { <span class="spinner-border spinner-border-sm text-muted"></span> }
+                        </div>
+                        @if (_aiOff is not null) { <div class="small text-muted mt-1"><i class="bi bi-info-circle me-1"></i>@_aiOff Opis możesz napisać sam.</div> }
+                    }
+                </ChildContent>
+            </PanelCard>
+        </div>
+
+        <aside class="ig-editor-side">
+            <div class="ig-phone" aria-label="Podgląd posta">
+                <div class="ig-phone-head">
+                    @if (!string.IsNullOrEmpty(_account?.PictureUrl)) { <img src="@_account.PictureUrl" alt="" class="ig-phone-avatar" referrerpolicy="no-referrer" /> }
+                    else { <span class="ig-phone-avatar"></span> }
+                    <b>@(_account?.Username ?? "hantly")</b>
+                </div>
+                <div class="ig-phone-media @(_kind == InstagramPostKind.Story ? "is-story" : "")">
+                    @if (_post.Assets.ElementAtOrDefault(_slide) is { Kind: "image" } shown)
+                    {
+                        <img src="/media/ig/@(shown.Token).jpg" alt="" />
+                    }
+                    else if (_post.Assets.ElementAtOrDefault(_slide) is { Kind: "video" })
+                    {
+                        <div class="ig-phone-empty"><i class="bi bi-film"></i>Film</div>
+                    }
+                    else
+                    {
+                        <div class="ig-phone-empty"><i class="bi bi-image"></i>Dodaj grafikę</div>
+                    }
+                    @if (_post.Assets.Count > 1)
+                    {
+                        <button class="ig-phone-nav prev" aria-label="Poprzednia" disabled="@(_slide == 0)" @onclick="() => _slide--"><i class="bi bi-chevron-left"></i></button>
+                        <button class="ig-phone-nav next" aria-label="Następna" disabled="@(_slide >= _post.Assets.Count - 1)" @onclick="() => _slide++"><i class="bi bi-chevron-right"></i></button>
+                    }
+                </div>
+                @if (_post.Assets.Count > 1)
+                {
+                    <div class="ig-phone-dots">@for (var i = 0; i < _post.Assets.Count; i++) { <i class="@(i == _slide ? "on" : "")"></i> }</div>
+                }
+                @if (_kind != InstagramPostKind.Story)
+                {
+                    <div class="ig-phone-icons"><i class="bi bi-heart"></i><i class="bi bi-chat"></i><i class="bi bi-send"></i><i class="bi bi-bookmark ms-auto"></i></div>
+                    <div class="ig-phone-cap"><b>@(_account?.Username ?? "hantly")</b> @(_caption.Length > 125 ? _caption[..125] + "… więcej" : _caption)</div>
+                }
+            </div>
+
+            @if (!readOnly)
+            {
+                <div class="pp-card mt-3">
+                    @if (problems.Count > 0)
+                    {
+                        <ul class="ig-problems">@foreach (var pr in problems) { <li><i class="bi bi-dot"></i>@pr</li> }</ul>
+                    }
+                    <button class="btn btn-outline-secondary btn-sm w-100 mb-2" @onclick="SaveAsync" disabled="@_busy"><i class="bi bi-save me-1"></i>Zapisz szkic</button>
+                    @if (_post.Status == InstagramPostStatus.ToApprove)
+                    {
+                        <button class="btn btn-success btn-sm w-100 mb-2" @onclick="() => ActAsync(() => Ig.ApproveAsync(_post.Id))" disabled="@(_busy || problems.Count > 0)"><i class="bi bi-check-lg me-1"></i>Akceptuj (@IgUi.When(_post.ScheduledAt))</button>
+                    }
+                    <label class="form-label small fw-semibold mb-1" for="ig-when">Termin publikacji</label>
+                    <input id="ig-when" type="datetime-local" class="form-control form-control-sm mb-2" @bind="_when" @bind:format="yyyy-MM-ddTHH:mm" />
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-primary btn-sm" @onclick="ScheduleAtAsync" disabled="@(_busy || problems.Count > 0 || _when is null)"><i class="bi bi-calendar-check me-1"></i>Zaplanuj na ten termin</button>
+                        <button class="btn btn-outline-primary btn-sm" @onclick="() => ActAsync(() => Ig.ScheduleAsync(_post.Id, null))" disabled="@(_busy || problems.Count > 0)"><i class="bi bi-magic me-1"></i>Najbliższy wolny termin</button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => ActAsync(() => Ig.PublishNowAsync(_post.Id))" disabled="@(_busy || problems.Count > 0)"><i class="bi bi-send me-1"></i>Opublikuj teraz</button>
+                    </div>
+                    <div class="small text-muted mt-2">Godziny w czasie polskim. Zapis, planowanie i publikacja zapisują też zmiany w treści.</div>
+                </div>
+            }
+        </aside>
+    </div>
+}
+
+@code {
+    [Parameter] public int PostId { get; set; }
+    [Parameter] public EventCallback<(string, int?)> Go { get; set; }
+    [Parameter] public EventCallback<(bool, string)> Flash { get; set; }
+
+    private InstagramPost? _post;
+    private InstagramAccount? _account;
+    private bool _missing, _busy, _uploading, _aiBusy, _designer, _rendering;
+    private string _title = "", _caption = "", _pillar = "", _videoUrl = "";
+    private InstagramPostKind _kind;
+    private DateTime? _when;
+    private int _slide;
+    private string? _aiOff, _preview;
+    private InstagramGraphics.Spec _spec = new();
+    private int? _editAssetId;
+    private byte[]? _shot;
+
+    /// <summary>Post z niezapisanymi zmianami z formularza — do sprawdzenia przed publikacją.</summary>
+    private InstagramPost Current => new() { Kind = _kind, Caption = _caption, Assets = _post?.Assets ?? [] };
+
+    private string AssetsHint => _kind switch
+    {
+        InstagramPostKind.Carousel => "2–10 grafik, przewijane w bok",
+        InstagramPostKind.Reel => "film MP4 (pion 9:16, 3–90 s) pod publicznym adresem",
+        InstagramPostKind.Story => "jedna grafika 9:16 albo film",
+        _ => "jedna grafika"
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _account = await Ig.AccountAsync();
+        _aiOff = await Ai.UnavailableAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _post = await Ig.PostAsync(PostId);
+        if (_post is null) { _missing = true; return; }
+        _title = _post.Title; _caption = _post.Caption; _pillar = _post.Pillar; _kind = _post.Kind;
+        _when = _post.ScheduledAt is { } s ? InstagramRules.ToWarsaw(s) : null;
+        _slide = Math.Clamp(_slide, 0, Math.Max(0, _post.Assets.Count - 1));
+    }
+
+    private static string KindHint(InstagramPostKind k) => k switch
+    {
+        InstagramPostKind.Carousel => "Karuzele mają zwykle największy zasięg i najwięcej zapisań — dobre na porady krok po kroku.",
+        InstagramPostKind.Reel => "Rolka trafia też do osób, które Cię nie obserwują. Film musi być pod publicznym adresem (np. Bunny).",
+        InstagramPostKind.Story => "Relacja znika po 24 godzinach — na szybkie ogłoszenia i ankiety.",
+        _ => "Jedna grafika — na krótką poradę, pytanie albo ogłoszenie."
+    };
+
+    private async Task SaveFieldsAsync()
+    {
+        if (_post is null) return;
+        await Ig.SavePostAsync(_post.Id, _title, _caption, _kind, _pillar, true);
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        await SaveFieldsAsync();
+        await LoadAsync();
+        _busy = false;
+        await Flash.InvokeAsync((true, "Zapisano."));
+    }
+
+    private async Task ActAsync(Func<Task<(bool Ok, string Message)>> action)
+    {
+        _busy = true;
+        await SaveFieldsAsync();
+        var r = await action();
+        await LoadAsync();
+        _busy = false;
+        await Flash.InvokeAsync(r);
+    }
+
+    private Task ScheduleAtAsync() => ActAsync(() => Ig.ScheduleAsync(_post!.Id, _when is { } w ? InstagramRules.ToUtc(w) : null));
+
+    // ── Pliki ──
+
+    private async Task UploadAsync(InputFileChangeEventArgs e)
+    {
+        if (_post is null) return;
+        _uploading = true;
+        StateHasChanged();
+        await SaveFieldsAsync();
+        var errors = new List<string>();
+        foreach (var file in e.GetMultipleFiles(10))
+        {
+            try
+            {
+                await using var stream = file.OpenReadStream(15 * 1024 * 1024);
+                using var ms = new MemoryStream();
+                await stream.CopyToAsync(ms);
+                var (ok, msg) = await Ig.AddPhotoAsync(_post.Id, ms.ToArray());
+                if (!ok) errors.Add($"{file.Name}: {msg}");
+            }
+            catch (IOException) { errors.Add($"{file.Name}: plik jest za duży (najwięcej 15 MB)."); }
+        }
+        if (_kind == InstagramPostKind.Image && (_post.Assets.Count + e.FileCount) > 1) _kind = InstagramPostKind.Carousel;
+        await SaveFieldsAsync();
+        await LoadAsync();
+        _uploading = false;
+        if (errors.Count > 0) await Flash.InvokeAsync((false, string.Join(" ", errors)));
+    }
+
+    private async Task AddVideoAsync()
+    {
+        if (_post is null) return;
+        var r = await Ig.AddVideoAsync(_post.Id, _videoUrl);
+        if (r.Ok) _videoUrl = "";
+        await LoadAsync();
+        await Flash.InvokeAsync(r);
+    }
+
+    private async Task MoveAsync(int id, int delta) { await Ig.MoveAssetAsync(id, delta); await LoadAsync(); }
+
+    private async Task RemoveAsync(int id) { await Ig.RemoveAssetAsync(id); await LoadAsync(); }
+
+    // ── Projektant grafiki ──
+
+    private async Task OpenDesigner(int? assetId, InstagramGraphics.Spec? spec)
+    {
+        _editAssetId = assetId;
+        _shot = null;
+        var domain = (await Settings.GetAsync(SiteSettingsService.Keys.MainDomain)).Trim();
+        _spec = spec ?? new InstagramGraphics.Spec
+        {
+            Template = "tip",
+            Theme = InstagramService.ThemeFor(_pillar),
+            Size = _kind == InstagramPostKind.Story ? "story" : "post",
+            Eyebrow = string.IsNullOrEmpty(_pillar) ? null : InstagramRules.PillarLabel(_pillar),
+            Headline = _post?.Assets.Count == 0 ? _title : "",
+            Handle = _account?.Username,
+            Domain = domain,
+        };
+        _designer = true;
+        await RenderPreviewAsync();
+    }
+
+    private async Task SetSpecAsync(InstagramGraphics.Spec spec)
+    {
+        _spec = spec;
+        await RenderPreviewAsync();
+    }
+
+    private async Task RenderPreviewAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_spec.Headline)) { _preview = null; return; }
+        _rendering = true;
+        StateHasChanged();
+        var spec = _spec;
+        var shot = _shot;
+        try
+        {
+            var jpeg = await Task.Run(() => InstagramGraphics.Render(spec, shot));
+            _preview = "data:image/jpeg;base64," + Convert.ToBase64String(jpeg);
+        }
+        catch (Exception) { _preview = null; }
+        _rendering = false;
+    }
+
+    private async Task ShotAsync(InputFileChangeEventArgs e)
+    {
+        try
+        {
+            await using var stream = e.File.OpenReadStream(15 * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            _shot = ms.ToArray();
+            await RenderPreviewAsync();
+        }
+        catch (IOException) { await Flash.InvokeAsync((false, "Zrzut jest za duży (najwięcej 15 MB).")); }
+    }
+
+    private async Task SaveGraphicAsync()
+    {
+        if (_post is null) return;
+        await SaveFieldsAsync();
+        var r = await Ig.AddGraphicAsync(_post.Id, _spec, _shot, _editAssetId);
+        if (r.Ok)
+        {
+            _designer = false;
+            if (_editAssetId is null && _kind == InstagramPostKind.Image && _post.Assets.Count >= 1) _kind = InstagramPostKind.Carousel;
+            await SaveFieldsAsync();
+        }
+        await LoadAsync();
+        if (r.Ok) _slide = _editAssetId is int id ? Math.Max(0, _post.Assets.FindIndex(a => a.Id == id)) : _post.Assets.Count - 1;
+        await Flash.InvokeAsync(r);
+    }
+
+    private static List<string> Lines(string? text) =>
+        (text ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Take(5).ToList();
+
+    // ── Opis ──
+
+    private async Task CaptionAiAsync(string action)
+    {
+        if (_post is null) return;
+        _aiBusy = true;
+        await SaveFieldsAsync();
+        await LoadAsync();
+        var (text, error) = await Ig.CaptionAiAsync(action, _post);
+        _aiBusy = false;
+        if (text is null) { await Flash.InvokeAsync((false, error ?? "AI nie odpowiedziało.")); return; }
+        _caption = action == "hashtags" ? InstagramRules.AddHashtags(_caption, InstagramRules.ParseTags(text), 15) : text;
+    }
+
+    private async Task AddMyTagsAsync()
+    {
+        var ap = await Ig.AutopilotAsync();
+        var tags = InstagramRules.ParseTags(ap.Hashtags);
+        if (tags.Count == 0) { await Flash.InvokeAsync((false, "Nie masz jeszcze swoich hashtagów — dodasz je w zakładce Autopilot.")); return; }
+        _caption = InstagramRules.AddHashtags(_caption, tags, 15);
+    }
+}

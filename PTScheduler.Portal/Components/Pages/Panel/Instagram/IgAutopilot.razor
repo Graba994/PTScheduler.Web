@@ -1,0 +1,159 @@
+@inject InstagramService Ig
+@inject InstagramAi Ai
+
+@* Autopilot: tryb (wyłączony / szkice do akceptacji / publikuje sam), dni i godzina, filary, styl marki, hashtagi, komentarze. *@
+
+@if (_a is not null)
+{
+    <PanelCard Title="Tryb" Icon="bi-robot" IconClass="@(_mode == "off" ? "" : "pp-tone-ok")">
+        <div class="ig-modes">
+            @foreach (var (key, label, icon, text) in Modes)
+            {
+                var mode = key;
+                <button type="button" class="ig-mode @(_mode == mode ? "on" : "")" aria-pressed="@(_mode == mode ? "true" : "false")" @onclick="() => _mode = mode">
+                    <i class="bi @icon"></i><b>@label</b><span>@text</span>
+                </button>
+            }
+        </div>
+        @if (_mode == "auto")
+        {
+            <div class="pp-callout pp-tone-warn mt-3 mb-0"><i class="bi bi-exclamation-triangle"></i><div>Autopilot opublikuje posty bez Twojego sprawdzenia. Zaczynaj od trybu „Szkice do akceptacji” i przełącz, gdy poziom postów będzie Ci odpowiadał.</div></div>
+        }
+        @if (_aiOff is not null)
+        {
+            <div class="small text-muted mt-2"><i class="bi bi-info-circle me-1"></i>@_aiOff Autopilot użyje wtedy gotowego banku pomysłów (12 postów) — włącz AI w Konfiguracji, żeby tematy były zawsze nowe.</div>
+        }
+    </PanelCard>
+
+    <div class="ig-grid">
+        <div>
+            <PanelCard Title="Kiedy publikować" Icon="bi-calendar-week">
+                <div class="small fw-semibold mb-1">Dni</div>
+                <div class="ig-chips mb-3" role="group" aria-label="Dni publikacji">
+                    @for (var d = 1; d <= 7; d++)
+                    {
+                        var day = d;
+                        <button type="button" class="ig-chip @(_days.Contains(day) ? "on" : "")" aria-pressed="@(_days.Contains(day) ? "true" : "false")" @onclick="() => Toggle(day)">@InstagramRules.DayShort(day)</button>
+                    }
+                </div>
+                <div class="row g-2">
+                    <div class="col-6">
+                        <label class="form-label small fw-semibold" for="ig-time">Godzina</label>
+                        <input id="ig-time" type="time" class="form-control form-control-sm" @bind="_time" />
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small fw-semibold" for="ig-per">Postów w tygodniu</label>
+                        <input id="ig-per" type="number" min="1" max="7" class="form-control form-control-sm" @bind="_per" />
+                    </div>
+                </div>
+                <div class="small text-muted mt-2">Na start dobre są 3 posty tygodniowo, wieczorem (18–20). Po kilku tygodniach zakładka Statystyki pokaże najlepsze pory dla Twoich obserwujących.</div>
+            </PanelCard>
+
+            <PanelCard Title="Komentarze" Icon="bi-chat-dots">
+                <div class="pp-seg flex-wrap" role="group" aria-label="Odpowiedzi na komentarze">
+                    <button type="button" class="@(_comments == "off" ? "active" : "")" @onclick='() => _comments = "off"'>Bez AI</button>
+                    <button type="button" class="@(_comments == "suggest" ? "active" : "")" @onclick='() => _comments = "suggest"'>Podpowiedzi</button>
+                    <button type="button" class="@(_comments == "auto" ? "active" : "")" @onclick='() => _comments = "auto"'>Odpowiada na pochwały</button>
+                </div>
+                <div class="small text-muted mt-2">
+                    @(_comments switch
+                    {
+                        "auto" => "Na krótkie pochwały („super!”, emotki) AI odpowie samo. Pytania i dłuższe komentarze zawsze czekają na Ciebie.",
+                        "off" => "Odpowiadasz sam — bez podpowiedzi AI.",
+                        _ => "Przy każdym komentarzu możesz poprosić AI o propozycję odpowiedzi. Wysyłasz Ty."
+                    })
+                </div>
+            </PanelCard>
+        </div>
+        <div>
+            <PanelCard Title="O czym pisać" Icon="bi-diagram-3" Subtitle="Autopilot rotuje filary; oferta najwyżej co piąty post">
+                <div class="ig-pillars">
+                    @foreach (var p in InstagramRules.Pillars)
+                    {
+                        var pillar = p;
+                        <label class="ig-pillar @(_pillars.Contains(pillar.Key) ? "on" : "")">
+                            <input type="checkbox" class="form-check-input" checked="@_pillars.Contains(pillar.Key)" @onchange="() => TogglePillar(pillar.Key)" />
+                            <span><b><i class="bi @pillar.Icon me-1"></i>@pillar.Label</b><small>@pillar.Hint</small></span>
+                        </label>
+                    }
+                </div>
+            </PanelCard>
+
+            <PanelCard Title="Styl marki" Icon="bi-megaphone">
+                <label class="form-label small fw-semibold" for="ig-voice">Jak mówi Hantly (dla AI)</label>
+                <textarea id="ig-voice" class="form-control form-control-sm mb-2" rows="3" @bind="_voice" maxlength="600"
+                          placeholder="np. Luźno, z humorem, bez anglicyzmów. Mówimy jak trener do trenera. Unikamy wykrzykników."></textarea>
+                <label class="form-label small fw-semibold" for="ig-tags">Stałe hashtagi</label>
+                <input id="ig-tags" class="form-control form-control-sm" @bind="_tags" placeholder="#hantly #trenerpersonalny #treningpersonalny" />
+                <div class="small text-muted mt-1">Dodawane do każdego posta od autopilota (razem z najwyżej 12 hashtagami).</div>
+            </PanelCard>
+        </div>
+    </div>
+
+    <div class="d-flex gap-2 flex-wrap align-items-center">
+        <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_busy"><i class="bi bi-save me-1"></i>Zapisz ustawienia</button>
+        <button class="btn btn-outline-primary" @onclick="RunAsync" disabled="@_busy">
+            @if (_running) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-play-fill me-1"></i> }Przygotuj tydzień teraz
+        </button>
+        <span class="small text-muted">Autopilot działa sam codziennie po 7:00 i uzupełnia plan na 7 dni.</span>
+    </div>
+}
+
+@code {
+    [Parameter] public EventCallback<(string, int?)> Go { get; set; }
+    [Parameter] public EventCallback<(bool, string)> Flash { get; set; }
+
+    private static readonly (string Key, string Label, string Icon, string Text)[] Modes =
+    [
+        ("off", "Wyłączony", "bi-pause-circle", "Sam decydujesz, co i kiedy publikować."),
+        ("drafts", "Szkice do akceptacji", "bi-hourglass-split", "Polecane. Co rano przygotowuje posty na tydzień — Ty sprawdzasz i akceptujesz."),
+        ("auto", "Publikuje sam", "bi-lightning-charge", "Przygotowuje i publikuje bez pytania. Dostajesz e-mail, gdy coś pójdzie nie tak."),
+    ];
+
+    private InstagramService.Autopilot? _a;
+    private string _mode = "off", _comments = "suggest", _voice = "", _tags = "";
+    private HashSet<int> _days = [];
+    private TimeOnly _time;
+    private int _per = 3;
+    private List<string> _pillars = [];
+    private bool _busy, _running;
+    private string? _aiOff;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _aiOff = await Ai.UnavailableAsync();
+        _a = await Ig.AutopilotAsync();
+        (_mode, _per, _days, _time, _pillars, _voice, _tags, _comments) = (_a.Mode, _a.PostsPerWeek, [.. _a.Days], _a.Time, [.. _a.Pillars], _a.Voice, _a.Hashtags, _a.CommentMode);
+    }
+
+    private void Toggle(int day) { if (!_days.Remove(day)) _days.Add(day); }
+
+    private void TogglePillar(string key) { if (!_pillars.Remove(key)) _pillars.Add(key); }
+
+    private async Task SaveAsync()
+    {
+        if (_days.Count == 0) { await Flash.InvokeAsync((false, "Wybierz co najmniej jeden dzień.")); return; }
+        if (_pillars.Count == 0) { await Flash.InvokeAsync((false, "Wybierz co najmniej jeden filar.")); return; }
+        _busy = true;
+        await Ig.SaveAutopilotAsync(new(_mode, Math.Clamp(_per, 1, 7), _days, _time, _pillars, _voice, _tags, _comments));
+        _a = await Ig.AutopilotAsync();
+        _tags = _a.Hashtags;
+        _busy = false;
+        await Flash.InvokeAsync((true, _mode == "off" ? "Zapisano. Autopilot jest wyłączony." : "Zapisano. Autopilot przygotuje posty jutro rano — albo kliknij „Przygotuj tydzień teraz”."));
+    }
+
+    private async Task RunAsync()
+    {
+        _busy = _running = true;
+        StateHasChanged();
+        await Ig.SaveAutopilotAsync(new(_mode, Math.Clamp(_per, 1, 7), _days.Count > 0 ? _days : [1, 3, 5], _time, _pillars.Count > 0 ? _pillars : ["porada"], _voice, _tags, _comments));
+        var (created, note) = await Ig.RunAutopilotAsync(force: true);
+        _busy = _running = false;
+        if (created > 0)
+        {
+            await Flash.InvokeAsync((true, $"Przygotowano {created} {(created == 1 ? "post" : "posty")}{(note is null ? "" : $" ({note})")}."));
+            await Go.InvokeAsync(("plan", null));
+        }
+        else await Flash.InvokeAsync((false, note ?? "Nic do przygotowania."));
+    }
+}

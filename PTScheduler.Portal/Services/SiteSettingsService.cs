@@ -183,6 +183,22 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string UptimeSmsAlerts = "uptime_sms_alerts";
         /// <summary>Kiedy poszedł ostatni poranny raport zawieszeń (ISO, UTC).</summary>
         public const string SuspensionReportSentAt = "suspension_report_sent_at";
+        // Instagram marki (Panel → Instagram)
+        public const string InstagramAppId = "instagram_app_id";
+        public const string InstagramAppSecret = "instagram_app_secret";
+        public const string InstagramAuthState = "instagram_auth_state";
+        /// <summary>off | drafts (AI przygotowuje, Ty akceptujesz) | auto (publikuje sam)</summary>
+        public const string InstagramAutopilot = "instagram_autopilot";
+        public const string InstagramPostsPerWeek = "instagram_posts_per_week";
+        /// <summary>Dni publikacji: „1,3,5” (1 = poniedziałek … 7 = niedziela).</summary>
+        public const string InstagramPostDays = "instagram_post_days";
+        public const string InstagramPostTime = "instagram_post_time";
+        public const string InstagramPillars = "instagram_pillars";
+        public const string InstagramVoice = "instagram_voice";
+        public const string InstagramHashtags = "instagram_hashtags";
+        /// <summary>off | suggest (AI podpowiada odpowiedź) | auto (odpowiada sam na proste komentarze)</summary>
+        public const string InstagramCommentMode = "instagram_comment_mode";
+        public const string InstagramAutopilotRunAt = "instagram_autopilot_run_at";
         // Kopie zapasowe: test odtworzenia i kopia poza serwerem
         /// <summary>„weekly” — co niedzielę Portal odtwarza najnowsze kopie do tymczasowej bazy; „off” — bez testu.</summary>
         public const string BackupVerify = "backup_verify";
