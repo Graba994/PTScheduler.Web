@@ -1,0 +1,751 @@
+using Docker.DotNet;
+using Docker.DotNet.Models;
+
+namespace PTScheduler.Portal.Services;
+
+public class DockerService : IDisposable
+{
+    private readonly DockerClient _client = new DockerClientConfiguration(
+        new Uri("unix:///var/run/docker.sock")).CreateClient();
+
+    private readonly ILogger<DockerService> _logger;
+    private readonly IConfiguration _config;
+
+    public DockerService(ILogger<DockerService> logger, IConfiguration config)
+    {
+        _logger = logger;
+        _config = config;
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> AttachedNetworks = new();
+
+    public static bool InContainer => Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true";
+
+    /// <summary>
+    /// Dołącza kontener Portalu do sieci instancji trenera, żeby Portal widział ją bezpośrednio
+    /// (http://pt-slug-web:8080) — bez portów hosta, bramy Dockera i zapory, które na Unraid potrafią
+    /// odrzucać połączenia z kontenera do hosta. Zwraca false, gdy Portal nie działa w Dockerze albo sieci nie ma.
+    /// </summary>
+    public async Task<bool> EnsureAttachedToTenantNetworkAsync(string webContainer)
+    {
+        if (!InContainer) return false;
+        if (AttachedNetworks.TryGetValue(webContainer, out var at) && DateTime.UtcNow - at < TimeSpan.FromMinutes(30)) return true;
+        var portal = _config["Portal:ContainerName"] ?? "ptportal";
+        try
+        {
+            var web = await _client.Containers.InspectContainerAsync(webContainer);
+            var self = await _client.Containers.InspectContainerAsync(portal);
+            var joined = self.NetworkSettings?.Networks?.Keys.ToHashSet() ?? [];
+            foreach (var net in web.NetworkSettings?.Networks?.Keys ?? [])
+            {
+                if (net is "bridge" or "host" or "none" || joined.Contains(net)) continue;
+                await _client.Networks.ConnectNetworkAsync(net, new NetworkConnectParameters { Container = portal });
+                _logger.LogInformation("Portal dołączył do sieci {Network} instancji {Web}.", net, webContainer);
+            }
+            AttachedNetworks[webContainer] = DateTime.UtcNow;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Nie udało się dołączyć Portalu do sieci {Web}.", webContainer);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Limity zasobów kontenerów trenera — jeden obciążony trener nie zabiera pamięci
+    /// i procesora pozostałym. Wartości z konfiguracji Portalu (Portal:TenantWebMemoryMb itd.).
+    /// </summary>
+    public sealed record ResourceLimits(long MemoryBytes, long NanoCpus, long Pids);
+
+    public ResourceLimits LimitsFor(bool database)
+    {
+        var memMb = database
+            ? _config.GetValue<int?>("Portal:TenantDbMemoryMb") ?? 512
+            : _config.GetValue<int?>("Portal:TenantWebMemoryMb") ?? 1024;
+        var cpus = database
+            ? _config.GetValue<double?>("Portal:TenantDbCpus") ?? 1.0
+            : _config.GetValue<double?>("Portal:TenantWebCpus") ?? 2.0;
+        return new ResourceLimits(memMb * 1024L * 1024L, (long)(cpus * 1_000_000_000), database ? 256 : 512);
+    }
+
+    private HostConfig WithLimits(HostConfig host, bool database)
+    {
+        var l = LimitsFor(database);
+        host.Memory = l.MemoryBytes;
+        host.MemorySwap = l.MemoryBytes; // bez dodatkowego swapu — limit jest limitem
+        host.NanoCPUs = l.NanoCpus;
+        host.PidsLimit = l.Pids;
+        return host;
+    }
+
+    /// <summary>Nakłada limity na działający kontener bez restartu (docker update).</summary>
+    public async Task<(bool Success, string? Error)> ApplyResourceLimitsAsync(string containerName, bool database)
+    {
+        var l = LimitsFor(database);
+        try
+        {
+            await _client.Containers.UpdateContainerAsync(containerName, new ContainerUpdateParameters
+            {
+                Memory = l.MemoryBytes,
+                MemorySwap = l.MemoryBytes,
+                NanoCPUs = l.NanoCpus,
+                PidsLimit = l.Pids
+            });
+            return (true, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Nie nałożono limitów na {Container}.", containerName);
+            return (false, ex.Message);
+        }
+    }
+
+    /// <summary>Limit pamięci kontenera w bajtach (0 = bez limitu), null gdy kontener nie istnieje.</summary>
+    public async Task<long?> GetMemoryLimitAsync(string containerName)
+    {
+        try { return (await _client.Containers.InspectContainerAsync(containerName)).HostConfig?.Memory ?? 0; }
+        catch { return null; }
+    }
+
+    public async Task<ContainerInfo?> GetContainerInfoAsync(string containerName)
+    {
+        if (string.IsNullOrWhiteSpace(containerName)) return null;
+        try
+        {
+            var response = await _client.Containers.InspectContainerAsync(containerName);
+            return new ContainerInfo
+            {
+                Id = response.ID[..12],
+                Name = containerName,
+                Status = response.State.Status,
+                Running = response.State.Running,
+                StartedAt = response.State.StartedAt,
+                Image = response.Config.Image,
+                MemoryUsage = 0,
+                RestartCount = response.RestartCount,
+                ExitCode = response.State.ExitCode
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public async Task<TenantContainerStatus> GetTenantStatusAsync(string slug,
+        string? webContainerName = null, string? dbContainerName = null)
+    {
+        var webName = webContainerName ?? $"pt-{slug}-web";
+        var dbName = dbContainerName ?? $"pt-{slug}-db";
+        var web = await GetContainerInfoAsync(webName);
+        var db = await GetContainerInfoAsync(dbName);
+
+        return new TenantContainerStatus
+        {
+            Slug = slug,
+            Web = web,
+            Db = db,
+            IsHealthy = web?.Running == true || db?.Running == true
+        };
+    }
+
+    public async Task<List<TenantContainerStatus>> GetAllTenantsStatusAsync(
+        IEnumerable<(string Slug, string? WebName, string? DbName)> tenants)
+    {
+        var results = new List<TenantContainerStatus>();
+        foreach (var (slug, webName, dbName) in tenants)
+            results.Add(await GetTenantStatusAsync(slug, webName, dbName));
+        return results;
+    }
+
+    public async Task StartContainerAsync(string containerName)
+    {
+        await _client.Containers.StartContainerAsync(containerName, new ContainerStartParameters());
+    }
+
+    public async Task StopContainerAsync(string containerName)
+    {
+        await _client.Containers.StopContainerAsync(containerName,
+            new ContainerStopParameters { WaitBeforeKillSeconds = 10 });
+    }
+
+    public async Task RemoveContainerAsync(string containerName)
+    {
+        await _client.Containers.RemoveContainerAsync(containerName,
+            new ContainerRemoveParameters { Force = true });
+    }
+
+    public async Task RestartContainerAsync(string containerName)
+    {
+        await _client.Containers.RestartContainerAsync(containerName,
+            new ContainerRestartParameters { WaitBeforeKillSeconds = 10 });
+    }
+
+    public async Task<string> GetContainerLogsAsync(string containerName, int tail = 100)
+    {
+        var parameters = new ContainerLogsParameters
+        {
+            ShowStdout = true,
+            ShowStderr = true,
+            Tail = tail.ToString()
+        };
+
+        using var stream = await _client.Containers.GetContainerLogsAsync(containerName, false, parameters);
+        var sb = new System.Text.StringBuilder();
+        var buffer = new byte[8192];
+        while (true)
+        {
+            var result = await stream.ReadOutputAsync(buffer, 0, buffer.Length, default);
+            if (result.Count == 0) break;
+            sb.Append(System.Text.Encoding.UTF8.GetString(buffer, 0, result.Count));
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Logi z podziałem na linie. Docker dokleja znacznik czasu do każdej linii, więc stdout i stderr
+    /// układamy w prawdziwej kolejności (osobne strumienie inaczej się rozjeżdżają).
+    /// </summary>
+    public async Task<List<ContainerLogLine>> GetContainerLogLinesAsync(string containerName, int tail, DateTime? sinceUtc, CancellationToken ct = default)
+    {
+        var parameters = new ContainerLogsParameters
+        {
+            ShowStdout = true,
+            ShowStderr = true,
+            Timestamps = true,
+            Tail = Math.Clamp(tail, 10, 5000).ToString(),
+            Since = sinceUtc is { } since ? new DateTimeOffset(DateTime.SpecifyKind(since, DateTimeKind.Utc)).ToUnixTimeSeconds().ToString() : null
+        };
+
+        using var stream = await _client.Containers.GetContainerLogsAsync(containerName, false, parameters, ct);
+        var stdout = new System.Text.StringBuilder();
+        var stderr = new System.Text.StringBuilder();
+        var buffer = new byte[16384];
+        while (true)
+        {
+            var read = await stream.ReadOutputAsync(buffer, 0, buffer.Length, ct);
+            if (read.EOF || read.Count == 0) break;
+            var text = System.Text.Encoding.UTF8.GetString(buffer, 0, read.Count);
+            (read.Target == Docker.DotNet.MultiplexedStream.TargetStream.StandardError ? stderr : stdout).Append(text);
+        }
+
+        var lines = Split(stdout.ToString(), false).Concat(Split(stderr.ToString(), true))
+            .OrderBy(l => l.TimeUtc ?? DateTime.MinValue)
+            .ToList();
+        return lines;
+
+        static IEnumerable<ContainerLogLine> Split(string raw, bool isErr)
+        {
+            foreach (var line in raw.Split('\n'))
+            {
+                if (line.Length == 0) continue;
+                var clean = line.TrimEnd('\r');
+                var space = clean.IndexOf(' ');
+                DateTime? time = null;
+                if (space > 19 && space < 40)
+                {
+                    var stamp = clean[..space];
+                    // RFC3339 z nanosekundami — .NET przyjmuje do 7 cyfr po przecinku.
+                    var dot = stamp.IndexOf('.');
+                    if (dot > 0 && stamp.EndsWith('Z') && stamp.Length - dot - 2 > 7)
+                        stamp = stamp[..(dot + 8)] + "Z";
+                    if (DateTime.TryParse(stamp, System.Globalization.CultureInfo.InvariantCulture,
+                            System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var t))
+                    {
+                        time = t;
+                        clean = clean[(space + 1)..];
+                    }
+                }
+                yield return new ContainerLogLine(time, isErr, clean);
+            }
+        }
+    }
+
+    public async Task<SystemInfo> GetSystemInfoAsync()
+    {
+        var info = await _client.System.GetSystemInfoAsync();
+        var containers = await _client.Containers.ListContainersAsync(
+            new ContainersListParameters { All = true });
+
+        return new SystemInfo
+        {
+            TotalContainers = containers.Count,
+            RunningContainers = containers.Count(c => c.State == "running"),
+            TotalMemoryMB = info.MemTotal / 1024 / 1024,
+            CpuCount = info.NCPU,
+            DockerVersion = info.ServerVersion,
+            OsType = info.OSType
+        };
+    }
+
+    public sealed record ContainerUsage(double CpuCores, double CpuLimitCores, long MemoryBytes, long MemoryLimitBytes);
+
+    private sealed class Capture<T> : IProgress<T>
+    {
+        public T? Value { get; private set; }
+        public void Report(T value) => Value = value;
+    }
+
+    /// <summary>
+    /// Bieżące zużycie kontenera (jeden odczyt statystyk Dockera): rdzenie procesora, pamięć bez
+    /// pamięci podręcznej plików i limity. Null, gdy kontener nie istnieje albo nie działa.
+    /// </summary>
+    public async Task<ContainerUsage?> GetUsageAsync(string containerName, CancellationToken ct = default)
+    {
+        try
+        {
+            var inspect = await _client.Containers.InspectContainerAsync(containerName, ct);
+            if (!inspect.State.Running) return null;
+            var capture = new Capture<ContainerStatsResponse>();
+            await _client.Containers.GetContainerStatsAsync(containerName, new ContainerStatsParameters { Stream = false }, capture, ct);
+            var st = capture.Value;
+            if (st is null) return null;
+
+            double cores = 0;
+            var cpuDelta = (double)st.CPUStats.CPUUsage.TotalUsage - st.PreCPUStats.CPUUsage.TotalUsage;
+            var sysDelta = (double)st.CPUStats.SystemUsage - st.PreCPUStats.SystemUsage;
+            var online = st.CPUStats.OnlineCPUs > 0 ? st.CPUStats.OnlineCPUs : (uint)(st.CPUStats.CPUUsage.PercpuUsage?.Count ?? 1);
+            if (cpuDelta > 0 && sysDelta > 0) cores = cpuDelta / sysDelta * online;
+
+            // Pamięć podręczna plików (inactive_file) to nie zużycie aplikacji — tak samo liczy `docker stats`.
+            var stats = st.MemoryStats.Stats;
+            ulong cache = 0;
+            if (stats is not null)
+                foreach (var key in new[] { "inactive_file", "total_inactive_file" })
+                    if (stats.TryGetValue(key, out var v)) { cache = v; break; }
+            var usage = st.MemoryStats.Usage > cache ? st.MemoryStats.Usage - cache : st.MemoryStats.Usage;
+
+            var limitCores = inspect.HostConfig.NanoCPUs > 0 ? inspect.HostConfig.NanoCPUs / 1e9 : online;
+            return new ContainerUsage(cores, limitCores, (long)usage, (long)st.MemoryStats.Limit);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "Nie odczytano statystyk kontenera {Name}.", containerName);
+            return null;
+        }
+    }
+
+    public async Task<List<DockerContainer>> ListAllContainersAsync()
+    {
+        var containers = await _client.Containers.ListContainersAsync(
+            new ContainersListParameters { All = true });
+
+        return containers.Select(c => new DockerContainer
+        {
+            Id = c.ID[..12],
+            Name = c.Names.FirstOrDefault()?.TrimStart('/') ?? c.ID[..12],
+            Image = c.Image,
+            State = c.State,
+            Status = c.Status,
+            Ports = string.Join(", ", c.Ports
+                .Where(p => p.PublicPort > 0)
+                .Select(p => $"{p.PublicPort}→{p.PrivatePort}")),
+            Created = c.Created
+        }).OrderBy(c => c.Name).ToList();
+    }
+
+    public async Task ProvisionTenantAsync(string slug, string dbPassword, int appPort,
+        string webImage, string tenantDomain, string? entitlementsJson = null,
+        string? portalUrl = null, string? internalSecret = null, Action<string>? onStep = null)
+    {
+        onStep?.Invoke("db");
+        var webName = $"pt-{slug}-web";
+        var dbName = $"pt-{slug}-db";
+        var networkName = $"pt-{slug}-net";
+        var pgVolume = $"pt-{slug}-pgdata";
+        var brandingVolume = $"pt-{slug}-branding";
+
+        var existingNetworks = await _client.Networks.ListNetworksAsync(
+            new NetworksListParameters { Filters = new Dictionary<string, IDictionary<string, bool>>
+                { ["name"] = new Dictionary<string, bool> { [networkName] = true } } });
+        if (!existingNetworks.Any(n => n.Name == networkName))
+        {
+            await _client.Networks.CreateNetworkAsync(new NetworksCreateParameters
+            {
+                Name = networkName,
+                Driver = "bridge"
+            });
+        }
+
+        try { await _client.Volumes.InspectAsync(pgVolume); }
+        catch { await _client.Volumes.CreateAsync(new VolumesCreateParameters { Name = pgVolume }); }
+
+        try { await _client.Volumes.InspectAsync(brandingVolume); }
+        catch { await _client.Volumes.CreateAsync(new VolumesCreateParameters { Name = brandingVolume }); }
+
+        await EnsureImagePulledAsync("postgres:17-alpine");
+
+        var dbExisting = await GetContainerInfoAsync(dbName);
+        if (dbExisting is null)
+        {
+            await _client.Containers.CreateContainerAsync(new CreateContainerParameters
+            {
+                Name = dbName,
+                Image = "postgres:17-alpine",
+                Env = new List<string>
+                {
+                    "POSTGRES_DB=ptscheduler",
+                    "POSTGRES_USER=ptscheduler",
+                    $"POSTGRES_PASSWORD={dbPassword}"
+                },
+                HostConfig = WithLimits(new HostConfig
+                {
+                    RestartPolicy = new RestartPolicy { Name = RestartPolicyKind.UnlessStopped },
+                    NetworkMode = networkName,
+                    Mounts = new List<Mount>
+                    {
+                        new() { Type = "volume", Source = pgVolume, Target = "/var/lib/postgresql/data" }
+                    }
+                }, database: true)
+            });
+            await _client.Containers.StartContainerAsync(dbName, new ContainerStartParameters());
+        }
+        else if (!dbExisting.Running)
+        {
+            await _client.Containers.StartContainerAsync(dbName, new ContainerStartParameters());
+        }
+
+        // POSTGRES_PASSWORD is only honoured by the official postgres image on first init —
+        // if the data directory (volume) already existed (leftover from an earlier attempt,
+        // an import, or a manually recreated container), Postgres silently keeps whatever
+        // password was baked in at that time and ignores the env var on subsequent starts.
+        // Force it to match tenant.DbPassword every single time so the web container's
+        // connection string is guaranteed to work, regardless of the volume's history.
+        var (syncOk, syncError) = await EnsureDbPasswordAsync(dbName, dbPassword);
+        if (!syncOk)
+            throw new InvalidOperationException($"Nie udało się zsynchronizować hasła bazy danych: {syncError}");
+
+        onStep?.Invoke("web");
+        var webExisting = await GetContainerInfoAsync(webName);
+        if (webExisting is null)
+        {
+            var env = new List<string>
+            {
+                $"ConnectionStrings__DefaultConnection=Host={dbName};Port=5432;Database=ptscheduler;Username=ptscheduler;Password={dbPassword}",
+                "ASPNETCORE_ENVIRONMENT=Production",
+                $"TENANT_SLUG={slug}",
+                $"TENANT_DOMAIN={tenantDomain}"
+            };
+            if (!string.IsNullOrWhiteSpace(entitlementsJson))
+                env.Add($"TENANT_ENTITLEMENTS={entitlementsJson}");
+            if (!string.IsNullOrWhiteSpace(portalUrl))
+                env.Add($"PORTAL_URL={portalUrl}");
+            if (!string.IsNullOrWhiteSpace(internalSecret))
+                env.Add($"TENANT_INTERNAL_SECRET={internalSecret}");
+
+            await _client.Containers.CreateContainerAsync(new CreateContainerParameters
+            {
+                Name = webName,
+                Image = webImage,
+                Env = env,
+                ExposedPorts = new Dictionary<string, EmptyStruct> { ["8080/tcp"] = default },
+                HostConfig = WithLimits(new HostConfig
+                {
+                    RestartPolicy = new RestartPolicy { Name = RestartPolicyKind.UnlessStopped },
+                    NetworkMode = networkName,
+                    PortBindings = new Dictionary<string, IList<PortBinding>>
+                    {
+                        ["8080/tcp"] = new List<PortBinding>
+                        {
+                            new() { HostPort = appPort.ToString() }
+                        }
+                    },
+                    Mounts = new List<Mount>
+                    {
+                        new() { Type = "volume", Source = brandingVolume, Target = "/app/wwwroot/branding" }
+                    }
+                }, database: false)
+            });
+            await _client.Containers.StartContainerAsync(webName, new ContainerStartParameters());
+        }
+    }
+
+    public async Task<bool> ImageExistsAsync(string image)
+    {
+        try { await _client.Images.InspectImageAsync(image); return true; }
+        catch { return false; }
+    }
+
+    public async Task EnsureImagePulledAsync(string image)
+    {
+        if (await ImageExistsAsync(image)) return;
+        await _client.Images.CreateImageAsync(
+            new ImagesCreateParameters { FromImage = image },
+            null,
+            new Progress<JSONMessage>());
+    }
+
+    public async Task RecreateWebContainerAsync(string slug, string dbPassword, int appPort,
+        string webImage, string tenantDomain, string entitlementsJson,
+        string? portalUrl = null, string? internalSecret = null)
+    {
+        var webName = $"pt-{slug}-web";
+        try { await _client.Containers.StopContainerAsync(webName, new ContainerStopParameters()); } catch (Exception ex) { _logger.LogDebug(ex, "Nie zatrzymano {Container} przed reprovisioningiem (może nie istnieć).", webName); }
+        try { await _client.Containers.RemoveContainerAsync(webName, new ContainerRemoveParameters { Force = true }); } catch (Exception ex) { _logger.LogDebug(ex, "Nie usunięto {Container} przed reprovisioningiem (może nie istnieć).", webName); }
+        await ProvisionTenantAsync(slug, dbPassword, appPort, webImage, tenantDomain, entitlementsJson, portalUrl, internalSecret);
+    }
+
+    /// <summary>
+    /// Forces the Postgres "ptscheduler" role's password inside the given DB container to
+    /// match <paramref name="password"/>. Retries for a few seconds since a just-started
+    /// container needs a moment before it accepts connections. Safe to call unconditionally —
+    /// it's a plain ALTER USER, not a destructive operation.
+    /// </summary>
+    public async Task<(bool Success, string? Error)> EnsureDbPasswordAsync(string dbContainerName, string password)
+    {
+        var sql = $"ALTER USER ptscheduler WITH PASSWORD '{password.Replace("'", "''")}';";
+        Exception? lastError = null;
+
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            try
+            {
+                var exec = await _client.Exec.ExecCreateContainerAsync(dbContainerName, new ContainerExecCreateParameters
+                {
+                    AttachStdout = true,
+                    AttachStderr = true,
+                    Cmd = new List<string> { "psql", "-U", "ptscheduler", "-d", "ptscheduler", "-v", "ON_ERROR_STOP=1", "-c", sql }
+                });
+
+                using var stream = await _client.Exec.StartAndAttachContainerExecAsync(exec.ID, false);
+                var (stdout, stderr) = await stream.ReadOutputToEndAsync(CancellationToken.None);
+
+                var inspect = await _client.Exec.InspectContainerExecAsync(exec.ID);
+                if (inspect.ExitCode == 0) return (true, null);
+
+                lastError = new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? stdout : stderr);
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+            }
+
+            await Task.Delay(1000);
+        }
+
+        return (false, lastError?.Message ?? "Nieznany błąd synchronizacji hasła.");
+    }
+
+    /// <summary>
+    /// Odtwarza kontener z tymi samymi ustawieniami (obraz, wolumeny, porty, sieci,
+    /// polityka restartu), zmieniając tylko wskazane zmienne środowiskowe. Działa też dla
+    /// kontenerów zaimportowanych, których Portal nie tworzył. Przy błędzie przywraca
+    /// poprzedni kontener.
+    /// </summary>
+    private static readonly HashSet<string> ImageOwnedEnv = new(StringComparer.Ordinal)
+    {
+        "PATH", "HOME", "HOSTNAME", "APP_UID", "DOTNET_VERSION", "ASPNET_VERSION", "DOTNET_SDK_VERSION", "DOTNET_RUNNING_IN_CONTAINER",
+        "PTS_BUILD_COMMIT", "PTS_BUILD_TIME", "PTS_BUILD_BRANCH", "BUILD_COMMIT", "BUILD_TIME", "BUILD_BRANCH"
+    };
+
+    public async Task<(bool Success, string? Error)> RecreateWithEnvAsync(string containerName, IDictionary<string, string> setEnv)
+    {
+        ContainerInspectResponse src;
+        try { src = await _client.Containers.InspectContainerAsync(containerName); }
+        catch (Exception ex) { return (false, $"Nie znaleziono kontenera {containerName}: {ex.Message}"); }
+
+        // Config.Env zawiera też ENV z obrazu (m.in. numer wersji). Tag obrazu mógł już przejść na nowszą wersję,
+        // więc zmienne pochodzące z obrazu zostawiamy obrazowi — inaczej nowa wersja pokazywałaby stary numer.
+        var imageEnv = new HashSet<string>(StringComparer.Ordinal);
+        var colon = (src.Config.Image ?? "").LastIndexOf(':');
+        var previousTag = colon > (src.Config.Image ?? "").LastIndexOf('/') ? src.Config.Image![..colon] + ":previous" : null;
+        foreach (var candidate in new[] { src.Image, previousTag }.Where(c => !string.IsNullOrEmpty(c)))
+        {
+            try
+            {
+                var img = await _client.Images.InspectImageAsync(candidate);
+                if (candidate != src.Image && img.ID != src.Image) continue;
+                foreach (var e in img.Config?.Env ?? []) imageEnv.Add(e);
+                break;
+            }
+            catch { /* obraz bez nazwy albo usunięty — próbujemy dalej, w ostateczności pomijamy tylko zmienne wersji */ }
+        }
+
+        var env = (src.Config.Env ?? [])
+            .Where(e => !imageEnv.Contains(e) && !ImageOwnedEnv.Contains(e.Split('=', 2)[0]))
+            .Where(e => !setEnv.Keys.Any(k => e.StartsWith(k + "=", StringComparison.Ordinal)))
+            .Concat(setEnv.Select(kv => $"{kv.Key}={kv.Value}"))
+            .ToList();
+
+        var hostConfig = new HostConfig
+        {
+            Binds = src.HostConfig.Binds,
+            Mounts = src.HostConfig.Mounts,
+            NetworkMode = src.HostConfig.NetworkMode ?? "bridge",
+            RestartPolicy = src.HostConfig.RestartPolicy ?? new RestartPolicy { Name = RestartPolicyKind.UnlessStopped },
+            PortBindings = src.HostConfig.PortBindings,
+            ExtraHosts = src.HostConfig.ExtraHosts,
+            LogConfig = src.HostConfig.LogConfig
+        };
+        var extraNetworks = (src.NetworkSettings?.Networks ?? new Dictionary<string, EndpointSettings>())
+            .Where(n => n.Key != hostConfig.NetworkMode)
+            .ToList();
+
+        var backupName = $"{containerName}-old-{DateTime.UtcNow:yyyyMMddHHmmss}";
+        var wasRunning = src.State?.Running == true;
+        try { await _client.Containers.StopContainerAsync(src.ID, new ContainerStopParameters { WaitBeforeKillSeconds = 20 }); } catch { /* już zatrzymany */ }
+        await _client.Containers.RenameContainerAsync(src.ID, new ContainerRenameParameters { NewName = backupName }, CancellationToken.None);
+
+        string? newId = null;
+        try
+        {
+            var created = await _client.Containers.CreateContainerAsync(new CreateContainerParameters
+            {
+                Name = containerName,
+                Image = src.Config.Image,
+                Env = env,
+                ExposedPorts = src.Config.ExposedPorts,
+                Labels = src.Config.Labels,
+                HostConfig = hostConfig
+            });
+            newId = created.ID;
+            foreach (var (network, endpoint) in extraNetworks)
+            {
+                await _client.Networks.ConnectNetworkAsync(network, new NetworkConnectParameters
+                {
+                    Container = newId,
+                    EndpointConfig = new EndpointSettings { Aliases = endpoint.Aliases }
+                });
+            }
+            await _client.Containers.StartContainerAsync(newId, new ContainerStartParameters());
+            await _client.Containers.RemoveContainerAsync(src.ID, new ContainerRemoveParameters { Force = true });
+            return (true, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Odtworzenie kontenera {Container} nie powiodło się — przywracam poprzedni.", containerName);
+            if (newId is not null)
+            {
+                try { await _client.Containers.RemoveContainerAsync(newId, new ContainerRemoveParameters { Force = true }); } catch { /* sprzątanie */ }
+            }
+            try
+            {
+                await _client.Containers.RenameContainerAsync(src.ID, new ContainerRenameParameters { NewName = containerName }, CancellationToken.None);
+                if (wasRunning) await _client.Containers.StartContainerAsync(src.ID, new ContainerStartParameters());
+            }
+            catch (Exception restoreEx) { _logger.LogError(restoreEx, "Nie udało się przywrócić kontenera {Container}.", containerName); }
+            return (false, ex.Message);
+        }
+    }
+
+    public async Task<ContainerInspectResponse?> InspectAsync(string containerName)
+    {
+        try { return await _client.Containers.InspectContainerAsync(containerName); }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Kontener z bazą PostgreSQL Portalu. Nazwa bywa różna (docker compose, Portainer, Unraid), więc po kolei:
+    /// ustawiona w konfiguracji, kontener o nazwie hosta z connection stringa, usługa compose albo alias sieci
+    /// o tej nazwie, kontener postgres z tą bazą (POSTGRES_DB) albo z opublikowanym portem, na końcu „ptportal-db”.
+    /// </summary>
+    public async Task<string?> FindPostgresContainerAsync(string? configured, string host, string port, string database)
+    {
+        static bool Running(ContainerInspectResponse? i) => i?.State?.Running == true;
+        if (!string.IsNullOrWhiteSpace(configured) && Running(await InspectAsync(configured))) return configured;
+        if (!string.IsNullOrWhiteSpace(host) && Running(await InspectAsync(host))) return host;
+
+        IList<ContainerListResponse> list;
+        try { list = await _client.Containers.ListContainersAsync(new ContainersListParameters { All = false }); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Lista kontenerów niedostępna."); list = []; }
+
+        string NameOf(ContainerListResponse c) => c.Names?.FirstOrDefault()?.TrimStart('/') ?? c.ID;
+        var postgres = list.Where(c => (c.Image ?? "").Contains("postgres", StringComparison.OrdinalIgnoreCase)
+                                    || (c.Image ?? "").Contains("postgis", StringComparison.OrdinalIgnoreCase)).ToList();
+
+        var byService = list.FirstOrDefault(c => c.Labels is { } l && l.TryGetValue("com.docker.compose.service", out var svc) && svc == host);
+        if (byService is not null) return NameOf(byService);
+
+        var inspected = new List<(ContainerListResponse C, ContainerInspectResponse I)>();
+        foreach (var c in postgres)
+            if (await InspectAsync(c.ID) is { } info) inspected.Add((c, info));
+
+        var byAlias = inspected.FirstOrDefault(x => x.I.NetworkSettings?.Networks?.Values
+            .Any(n => (n.Aliases ?? []).Contains(host)) == true);
+        if (byAlias.C is not null) return NameOf(byAlias.C);
+
+        var byDb = inspected.FirstOrDefault(x => (x.I.Config?.Env ?? []).Contains($"POSTGRES_DB={database}"));
+        if (byDb.C is not null) return NameOf(byDb.C);
+
+        if (ushort.TryParse(port, out var p))
+        {
+            var byPort = postgres.FirstOrDefault(c => c.Ports?.Any(x => x.PublicPort == p) == true);
+            if (byPort is not null) return NameOf(byPort);
+        }
+        return Running(await InspectAsync("ptportal-db")) ? "ptportal-db" : null;
+    }
+
+    /// <summary>Sieć, w której działa kontener Portalu — do jednorazowych kontenerów, które mają widzieć te same hosty.</summary>
+    public async Task<string?> OwnNetworkAsync()
+    {
+        var self = await InspectAsync(Environment.MachineName);
+        var networks = self?.NetworkSettings?.Networks?.Keys.ToList();
+        return networks is { Count: > 0 } ? networks.FirstOrDefault(n => n != "bridge") ?? networks[0] : null;
+    }
+
+    public async Task<string?> StartDetachedAsync(CreateContainerParameters spec)
+    {
+        var created = await _client.Containers.CreateContainerAsync(spec);
+        await _client.Containers.StartContainerAsync(created.ID, new ContainerStartParameters());
+        return created.ID;
+    }
+
+    public async Task RemoveTenantResourcesAsync(string slug)
+    {
+        var networkName = $"pt-{slug}-net";
+        var pgVolume = $"pt-{slug}-pgdata";
+        var brandingVolume = $"pt-{slug}-branding";
+
+        try { await _client.Networks.DeleteNetworkAsync(networkName); } catch (Exception ex) { _logger.LogDebug(ex, "Nie usunięto sieci {Network} (może nie istnieć).", networkName); }
+        try { await _client.Volumes.RemoveAsync(pgVolume); } catch (Exception ex) { _logger.LogDebug(ex, "Nie usunięto wolumenu {Volume} (może nie istnieć).", pgVolume); }
+        try { await _client.Volumes.RemoveAsync(brandingVolume); } catch (Exception ex) { _logger.LogDebug(ex, "Nie usunięto wolumenu {Volume} (może nie istnieć).", brandingVolume); }
+    }
+
+    public void Dispose() => _client.Dispose();
+}
+
+public class ContainerInfo
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Status { get; set; } = "";
+    public bool Running { get; set; }
+    public string? StartedAt { get; set; }
+    public string? Image { get; set; }
+    public long MemoryUsage { get; set; }
+    public long RestartCount { get; set; }
+    public long ExitCode { get; set; }
+}
+
+/// <summary>Jedna linia logu kontenera: czas z Dockera, czy ze stderr, treść.</summary>
+public sealed record ContainerLogLine(DateTime? TimeUtc, bool FromStderr, string Text);
+
+public class TenantContainerStatus
+{
+    public string Slug { get; set; } = "";
+    public ContainerInfo? Web { get; set; }
+    public ContainerInfo? Db { get; set; }
+    public bool IsHealthy { get; set; }
+}
+
+public class DockerContainer
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Image { get; set; } = "";
+    public string State { get; set; } = "";
+    public string Status { get; set; } = "";
+    public string Ports { get; set; } = "";
+    public DateTime Created { get; set; }
+}
+
+public class SystemInfo
+{
+    public int TotalContainers { get; set; }
+    public int RunningContainers { get; set; }
+    public long TotalMemoryMB { get; set; }
+    public long CpuCount { get; set; }
+    public string DockerVersion { get; set; } = "";
+    public string OsType { get; set; } = "";
+}

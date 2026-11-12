@@ -1,0 +1,1956 @@
+@page "/witaj"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer")]
+@rendermode PTScheduler.Web.RenderModes.Server
+@using PTScheduler.Domain.Rules
+@using PTScheduler.Domain.Enums
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Web.Components.Layout
+@using PTScheduler.Web.Services
+@inject IEmailSettingsService MailSettings
+@inject IBrandingService Branding
+@inject PTScheduler.Infrastructure.Services.PlatformEmailProvider PlatformMail
+@inject IPermissionService Permission
+@inject ISetupService Setup
+@inject ITrainerAvailabilityService Availability
+@inject ISessionTypeService SessionTypes
+@inject IPackageOfferService Packages
+@inject IPaymentSettingsService PaymentSettings
+@inject IClientService ClientService
+@inject IClientInvitationService Invitations
+@inject EntitlementService Entitlements
+@inject PTScheduler.Web.Services.PlatformAssistantService Platform
+@inject IAppClock Clock
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthState
+@inject Microsoft.AspNetCore.Identity.UserManager<PTScheduler.Infrastructure.Data.ApplicationUser> UserManager
+@inject NavigationManager Nav
+@inject ISiteContentService SiteContent
+@inject IEmailService MailService
+@inject PTScheduler.Web.Services.PlatformHelpService Help
+@inject PTScheduler.Web.Services.MessageDraftService Drafts
+@inject PTScheduler.Web.Services.PlanGeneratorService Generator
+@inject ITrainingPlanService TrainingPlans
+
+@* Pierwsze ustawienia po publikacji z kreatora: kilka krótkich kroków w jednym miejscu, wszystko wypełnione z góry.
+   (Kto prowadzi treningi) → godziny pracy → oferta → zasady odwołań → logo i asystent → strona główna →
+   kto wysyła e-maile → pierwszy klient → gotowe (z powiadomieniami na telefonie).
+   Każdy krok zapisuje się od razu i można go pominąć; przy poczcie i stronie można zamówić pomoc zespołu.
+   Przeglądarka pamięta, gdzie trener skończył. Z boku podgląd w telefonie: aplikacja klienta, a przy stronie —
+   strona główna (przewijana). Na małym ekranie podgląd otwiera przycisk „Podgląd”. Logika: FirstSetupRules. *@
+
+<AppTitle Page="Pierwsze ustawienia" />
+
+<div class="wz">
+    <div class="wz-top">
+        <div class="wz-eyebrow"><i class="bi bi-stars"></i>Pierwsze ustawienia · ok. @Minutes</div>
+        <a class="wz-later" href="/app?witaj=1" data-enhance-nav="false">Dokończę później<i class="bi bi-x-lg"></i></a>
+        @if (!_loading)
+        {
+            <button type="button" class="wz-peek" @onclick="() => _peek = true"><i class="bi bi-phone"></i>Podgląd</button>
+        }
+    </div>
+
+    @if (_loading)
+    {
+        <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+    }
+    else
+    {
+        <ol class="wz-steps" aria-label="Kroki">
+            @for (var i = 0; i < _steps.Count; i++)
+            {
+                var idx = i;
+                var key = _steps[i];
+                <li class="@(idx == _at ? "on" : _saved.Contains(key) ? "done" : "")">
+                    <button type="button" @onclick="() => GoAsync(idx)" aria-current="@(idx == _at ? "step" : null)">
+                        <span class="wz-step-n">@if (_saved.Contains(key) && idx != _at) { <i class="bi bi-check-lg"></i> } else { @(idx + 1) }</span>
+                        <span class="wz-step-t">@StepName(key)</span>
+                    </button>
+                </li>
+            }
+        </ol>
+
+        <div class="wz-grid">
+            <div class="wz-main">
+                <div class="wz-tip">
+                    <span class="wz-tip-mascot" aria-hidden="true">
+                        @if (_assistant?.AnimatedSvg is { Length: > 0 } svg)
+                        {
+                            <span class="hm-fx" data-hm-motion="@(_motion is "calm" or "off" ? _motion : _assistant!.Motion)" data-hm-fx="@PTScheduler.Web.Services.PlatformAssistantService.PageFx(_assistant)"><span class="hm-live st-idle md-@Mood">@((MarkupString)svg)</span></span>
+                        }
+                        else if (_assistant?.Icons.TryGetValue(Mood, out var icon) == true)
+                        {
+                            <img src="@icon" alt="" width="48" height="48" />
+                        }
+                        else
+                        {
+                            <i class="bi bi-stars"></i>
+                        }
+                    </span>
+                    <p><b>@AssistantName:</b> @Tip</p>
+                </div>
+
+                @switch (Current)
+                {
+                    case "me":
+                        <section class="wz-card" aria-labelledby="wz-me">
+                            <h1 id="wz-me">Czy to Ty prowadzisz treningi?</h1>
+                            <p class="wz-lead">Najprościej mieć jedno konto: zarządzasz studiem i prowadzisz treningi — bez drugiego logowania i przełączania kont.</p>
+                            <div class="wz-choices">
+                                <form method="post" action="/Account/OwnerTrains" class="wz-choice-form">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="confirm" value="1" />
+                                    <button type="submit" class="wz-choice on">
+                                        <i class="bi bi-person-check"></i>
+                                        <span><b>Tak, prowadzę treningi <em>polecane</em></b><small>Ustawisz swoje godziny pracy i od razu przyjmiesz zapisy klientów.</small></span>
+                                    </button>
+                                </form>
+                                <a class="wz-choice" href="/admin/users">
+                                    <i class="bi bi-person-plus"></i>
+                                    <span><b>Treningi prowadzi ktoś inny</b><small>Dodasz konto trenera z jego adresem e-mail — godziny pracy ustawi na swoim koncie.</small></span>
+                                </a>
+                            </div>
+                            <div class="wz-nav">
+                                <button type="button" class="btn btn-link text-muted" @onclick="NextAsync">Pomiń</button>
+                                <span></span>
+                            </div>
+                        </section>
+                        break;
+
+                    case "hours":
+                        <section class="wz-card" aria-labelledby="wz-h">
+                            <h1 id="wz-h">Kiedy przyjmujesz klientów?</h1>
+                            <p class="wz-lead">Klienci zapiszą się tylko w tych godzinach. Wybierz gotowy układ, a potem popraw dni, jeśli pracujesz inaczej.</p>
+                            <div class="wz-presets">
+                                @foreach (var p in FirstSetupRules.Presets)
+                                {
+                                    var preset = p;
+                                    <button type="button" class="wz-preset @(Preset == p.Key ? "on" : "")" @onclick="() => ApplyPreset(preset)">
+                                        <i class="bi @p.Icon"></i><b>@p.Name</b><small>@p.Hint</small>
+                                    </button>
+                                }
+                            </div>
+                            <div class="wz-days">
+                                @foreach (var d in _days)
+                                {
+                                    var row = d;
+                                    <div class="wz-day @(row.Windows.Count == 0 ? "off" : "")">
+                                        <label class="wz-day-name">
+                                            <input type="checkbox" class="form-check-input" checked="@(row.Windows.Count > 0)" @onchange="e => ToggleDay(row, (bool)e.Value!)" />
+                                            <span>@FirstSetupRules.DayName(row.Day)</span>
+                                        </label>
+                                        @if (row.Windows.Count == 0)
+                                        {
+                                            <span class="wz-day-free">wolne</span>
+                                        }
+                                        else
+                                        {
+                                            <div class="wz-day-wins">
+                                                @foreach (var w in row.Windows)
+                                                {
+                                                    var win = w;
+                                                    <span class="wz-win">
+                                                        <select class="form-select form-select-sm" aria-label="Od" value="@win.Start.ToString("HH:mm")" @onchange="e => SetTime(win, true, (string)e.Value!)">
+                                                            @foreach (var t in Times) { <option value="@t">@t</option> }
+                                                        </select>
+                                                        <span>–</span>
+                                                        <select class="form-select form-select-sm" aria-label="Do" value="@win.End.ToString("HH:mm")" @onchange="e => SetTime(win, false, (string)e.Value!)">
+                                                            @foreach (var t in Times) { <option value="@t">@t</option> }
+                                                        </select>
+                                                        @if (row.Windows.Count > 1)
+                                                        {
+                                                            <button type="button" class="wz-x" aria-label="Usuń te godziny" @onclick="() => row.Windows.Remove(win)"><i class="bi bi-x"></i></button>
+                                                        }
+                                                    </span>
+                                                }
+                                                @if (row.Windows.Count == 1)
+                                                {
+                                                    <button type="button" class="wz-add-win" @onclick="() => AddWindow(row)"><i class="bi bi-plus"></i>z przerwą</button>
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                            <div class="wz-summary"><i class="bi bi-clock-history"></i><span><b>@Hours(Windows)</b> w tygodniu · @DaysText(FirstSetupRules.WorkDays(Windows))</span></div>
+                            @Error()
+                            <div class="wz-nav">
+                                <button type="button" class="btn btn-link text-muted" @onclick="NextAsync">Pomiń</button>
+                                <button type="button" class="btn btn-primary btn-lg" disabled="@_busy" @onclick="SaveHoursAsync">@Busy()Zapisz i dalej<i class="bi bi-arrow-right ms-1"></i></button>
+                            </div>
+                        </section>
+                        break;
+
+                    case "offer":
+                        <section class="wz-card" aria-labelledby="wz-o">
+                            <h1 id="wz-o">Co oferujesz?</h1>
+                            <p class="wz-lead">To przenieśliśmy z kreatora. Popraw nazwy, czas i ceny — klienci zobaczą je przy zapisie.</p>
+                            <div class="wz-label">Treningi</div>
+                            <div class="wz-rows">
+                                @foreach (var t in _types)
+                                {
+                                    var type = t;
+                                    <div class="wz-row @(type.Active ? "" : "off")">
+                                        <input type="checkbox" class="form-check-input" title="Widoczny dla klientów" aria-label="Widoczny dla klientów" @bind="type.Active" />
+                                        <input class="form-control form-control-sm wz-grow" maxlength="80" placeholder="Np. Trening personalny" aria-label="Nazwa treningu" @bind="type.Name" @bind:event="oninput" />
+                                        <select class="form-select form-select-sm wz-dur" aria-label="Czas" @bind="type.Minutes">
+                                            @foreach (var m in Durations) { <option value="@m">@m min</option> }
+                                        </select>
+                                        <span class="wz-money"><input type="number" min="0" step="10" class="form-control form-control-sm" aria-label="Cena" placeholder="—" @bind="type.Price" @bind:event="oninput" /><span>zł</span></span>
+                                        @if (type.Badge is { } badge) { <span class="wz-badge">@badge</span> }
+                                    </div>
+                                }
+                            </div>
+                            <button type="button" class="wz-add" @onclick="AddType"><i class="bi bi-plus-lg"></i>Dodaj trening</button>
+
+                            <div class="wz-label mt-4">Pakiety</div>
+                            @if (_packs.Count == 0)
+                            {
+                                <p class="wz-muted">Pakiet to kilka treningów w lepszej cenie — klienci kupują go online albo u Ciebie.</p>
+                            }
+                            <div class="wz-rows">
+                                @foreach (var p in _packs)
+                                {
+                                    var pack = p;
+                                    <div class="wz-row wz-row-pack @(pack.Active ? "" : "off")">
+                                        <input type="checkbox" class="form-check-input" title="Widoczny dla klientów" aria-label="Widoczny dla klientów" @bind="pack.Active" />
+                                        <input class="form-control form-control-sm wz-grow" maxlength="80" placeholder="Np. Pakiet 10 treningów" aria-label="Nazwa pakietu" @bind="pack.Name" @bind:event="oninput" />
+                                        <span class="wz-money"><input type="number" min="1" max="100" class="form-control form-control-sm" aria-label="Liczba treningów" @bind="pack.Count" @bind:event="oninput" /><span>×</span></span>
+                                        <select class="form-select form-select-sm wz-pack-type" aria-label="Który trening" @bind="pack.TypeKey">
+                                            @if (pack.TypeKey.StartsWith("org:"))
+                                            {
+                                                <option value="@pack.TypeKey">@pack.Original?.SessionTypeName</option>
+                                            }
+                                            @foreach (var t in _types.Where(t => !string.IsNullOrWhiteSpace(t.Name)))
+                                            {
+                                                <option value="@t.Key">@t.Name</option>
+                                            }
+                                        </select>
+                                        <span class="wz-money"><input type="number" min="0" step="10" class="form-control form-control-sm" aria-label="Cena pakietu" @bind="pack.Price" @bind:event="oninput" /><span>zł</span></span>
+                                        @if (pack.Count > 0 && pack.Price > 0)
+                                        {
+                                            <span class="wz-per">@((pack.Price / pack.Count).ToString("0.##")) zł / trening</span>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                            <button type="button" class="wz-add" @onclick="AddPack"><i class="bi bi-plus-lg"></i>Dodaj pakiet</button>
+                            @Error()
+                            <div class="wz-nav">
+                                <button type="button" class="btn btn-link text-muted" @onclick="NextAsync">Pomiń</button>
+                                <button type="button" class="btn btn-primary btn-lg" disabled="@_busy" @onclick="SaveOfferAsync">@Busy()Zapisz i dalej<i class="bi bi-arrow-right ms-1"></i></button>
+                            </div>
+                        </section>
+                        break;
+
+                    case "rules":
+                        <section class="wz-card" aria-labelledby="wz-r">
+                            <h1 id="wz-r">Zasady odwołań i zapisów</h1>
+                            <p class="wz-lead">Ustalasz raz — aplikacja sama ich pilnuje i pokazuje je klientom przy zapisie.</p>
+
+                            <div class="wz-label">Do kiedy klient może odwołać trening bez kosztów?</div>
+                            <div class="wz-chips" role="radiogroup">
+                                @foreach (var (h, label) in CancelOptions)
+                                {
+                                    var hours = h;
+                                    var on = hours < 0 ? _cfg.LateCancellationPolicy == LateCancellationPolicy.Refund
+                                                       : _cfg.LateCancellationPolicy != LateCancellationPolicy.Refund && _cfg.CancellationWindowHours == hours;
+                                    <button type="button" role="radio" aria-checked="@(on ? "true" : "false")" class="wz-chip @(on ? "on" : "")" @onclick="() => SetWindow(hours)">@label</button>
+                                }
+                            </div>
+
+                            @if (_cfg.LateCancellationPolicy != LateCancellationPolicy.Refund)
+                            {
+                                <div class="wz-label mt-3">A jeśli odwoła później?</div>
+                                <div class="wz-choices">
+                                    <button type="button" class="wz-choice @(_cfg.LateCancellationPolicy == LateCancellationPolicy.ChargeSession ? "on" : "")" @onclick="() => _cfg.LateCancellationPolicy = LateCancellationPolicy.ChargeSession">
+                                        <i class="bi bi-hourglass-bottom"></i><span><b>Trening przepada</b><small>Klient odwoła sam, a trening schodzi z pakietu.</small></span>
+                                    </button>
+                                    <button type="button" class="wz-choice @(_cfg.LateCancellationPolicy == LateCancellationPolicy.Block ? "on" : "")" @onclick="() => _cfg.LateCancellationPolicy = LateCancellationPolicy.Block">
+                                        <i class="bi bi-chat-dots"></i><span><b>Musi napisać do Ciebie</b><small>Zdecydujesz, czy liczyć trening.</small></span>
+                                    </button>
+                                </div>
+                            }
+
+                            <div class="wz-switches">
+                                <label class="wz-switch"><input type="checkbox" class="form-check-input" role="switch" @bind="_cfg.NoShowChargesSession" /><span><b>Nieobecność bez odwołania = trening przepada</b><small>Gdy klient po prostu nie przyjdzie.</small></span></label>
+                            </div>
+
+                            <div class="wz-label mt-3">Pojedynczy trening (bez pakietu)</div>
+                            <div class="wz-switches">
+                                <label class="wz-switch"><input type="checkbox" class="form-check-input" role="switch" @bind="_cfg.OffPackageAtTrainer" /><span><b>Klient może zapłacić u Ciebie</b><small>Gotówką, przelewem albo kartą na treningu — odhaczysz to w Finansach.</small></span></label>
+                                <label class="wz-switch @(_paymentsOn ? "" : "dis")">
+                                    <input type="checkbox" class="form-check-input" role="switch" @bind="_cfg.OffPackageOnline" disabled="@(!_paymentsOn)" />
+                                    <span><b>Klient może zapłacić online</b><small>@(_paymentsOn ? "BLIK albo karta przy zapisie." : "Włączysz po podłączeniu płatności online (Zarządzanie → Płatności).")</small></span>
+                                </label>
+                                <label class="wz-switch"><input type="checkbox" class="form-check-input" role="switch" @bind="_cfg.OffPackageNeedsApproval" /><span><b>Takie zapisy zatwierdzasz Ty</b><small>Dostaniesz powiadomienie z przyciskami „Akceptuj” i „Odrzuć”.</small></span></label>
+                            </div>
+
+                            <div class="wz-says"><i class="bi bi-person"></i><span><small>Tak zobaczy to klient:</small>@ClientRules</span></div>
+                            @Error()
+                            <div class="wz-nav">
+                                <button type="button" class="btn btn-link text-muted" @onclick="NextAsync">Pomiń</button>
+                                <button type="button" class="btn btn-primary btn-lg" disabled="@_busy" @onclick="SaveRulesAsync">@Busy()Zapisz i dalej<i class="bi bi-arrow-right ms-1"></i></button>
+                            </div>
+                        </section>
+                        break;
+
+                    case "look":
+                        <section class="wz-card" aria-labelledby="wz-l">
+                            <h1 id="wz-l">Logo i asystent</h1>
+                            <p class="wz-lead">Kolor aplikacji już jest — z kreatora. Dodaj logo: klienci zobaczą je w aplikacji, na stronie i w e-mailach.</p>
+                            <div class="wz-label">Logo</div>
+                            @if (_canLogo)
+                            {
+                                <div class="wz-logo">
+                                    <span class="wz-logo-prev">
+                                        @if (!string.IsNullOrEmpty(_logo))
+                                        {
+                                            <img src="@_logo" alt="Twoje logo" />
+                                        }
+                                        else
+                                        {
+                                            <span>@Initials</span>
+                                        }
+                                    </span>
+                                    <div class="wz-logo-act">
+                                        <label class="btn btn-outline-primary" for="wz-logo-file">
+                                            @if (_logoBusy)
+                                            {
+                                                <span class="spinner-border spinner-border-sm me-1"></span>
+                                            }
+                                            else
+                                            {
+                                                <i class="bi bi-upload me-1"></i>
+                                            }
+                                            @(string.IsNullOrEmpty(_logo) ? "Wgraj logo" : "Zmień logo")
+                                        </label>
+                                        <InputFile id="wz-logo-file" class="d-none" accept="image/png,image/jpeg,image/svg+xml,image/webp" OnChange="UploadLogoAsync" />
+                                        <small>PNG, SVG albo JPG do 2 MB — najlepiej kwadratowe, na przezroczystym tle.</small>
+                                        @if (!string.IsNullOrEmpty(_logo))
+                                        {
+                                            <button type="button" class="btn btn-link btn-sm text-danger p-0 align-self-start" @onclick="RemoveLogoAsync">Usuń logo</button>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="wz-note"><i class="bi bi-lock"></i><span>Własne logo jest w planie Starter i wyższych — do tego czasu klienci widzą inicjały studia. <a href="/admin/upgrade">Porównaj plany</a></span></div>
+                            }
+
+                            @if (_assistant is { Enabled: true })
+                            {
+                                <div class="wz-label mt-4">@AssistantName — Twój asystent</div>
+                                <p class="wz-muted">Podpowiada, co zrobić, i szkicuje wiadomości do klientów. Nic nie wysyła sam — zawsze decydujesz Ty.</p>
+                                <div class="wz-sub">Ruch maskotki</div>
+                                <div class="wz-chips" role="radiogroup" aria-label="Ruch maskotki">
+                                    @foreach (var (key, label) in MotionChoices)
+                                    {
+                                        var motion = key;
+                                        <button type="button" role="radio" aria-checked="@(_motion == motion ? "true" : "false")" class="wz-chip @(_motion == motion ? "on" : "")" @onclick="() => _motion = motion">@label</button>
+                                    }
+                                </div>
+                                @if (_trainerId is not null)
+                                {
+                                    <div class="wz-sub">Wiadomości do klientów</div>
+                                    <div class="wz-chips" role="radiogroup" aria-label="Forma zwracania się do klientów">
+                                        <button type="button" role="radio" aria-checked="@(_style.Address != "pan" ? "true" : "false")" class="wz-chip @(_style.Address != "pan" ? "on" : "")" @onclick='() => _style.Address = "ty"'>Na „Ty”</button>
+                                        <button type="button" role="radio" aria-checked="@(_style.Address == "pan" ? "true" : "false")" class="wz-chip @(_style.Address == "pan" ? "on" : "")" @onclick='() => _style.Address = "pan"'>Grzecznościowo</button>
+                                    </div>
+                                    <div class="wz-chips mt-2" role="radiogroup" aria-label="Emoji w wiadomościach">
+                                        @foreach (var (value, label) in EmojiChoices)
+                                        {
+                                            var emoji = value;
+                                            <button type="button" role="radio" aria-checked="@(_style.Emoji == emoji ? "true" : "false")" class="wz-chip @(_style.Emoji == emoji ? "on" : "")" @onclick="() => _style.Emoji = emoji">@label</button>
+                                        }
+                                    </div>
+                                    <div class="wz-says"><i class="bi bi-chat-dots"></i><span><small>Tak zacznie szkic do klienta:</small>@StyleSample</span></div>
+                                }
+                            }
+                            @Error()
+                            <div class="wz-nav">
+                                <button type="button" class="btn btn-link text-muted" @onclick="NextAsync">Pomiń</button>
+                                <button type="button" class="btn btn-primary btn-lg" disabled="@(_busy || _logoBusy)" @onclick="SaveLookAsync">@Busy()Zapisz i dalej<i class="bi bi-arrow-right ms-1"></i></button>
+                            </div>
+                        </section>
+                        break;
+
+                    case "site":
+                        <section class="wz-card" aria-labelledby="wz-s">
+                            <h1 id="wz-s">Twoja strona główna</h1>
+                            <p class="wz-lead">Wizytówka pod adresem <b>@AppHost</b> z przyciskiem zapisów. Wybierz wygląd i popraw najważniejsze teksty — zdjęcia, opinie i resztę dodasz później.</p>
+                            @if (_site is null)
+                            {
+                                <div class="text-center py-4"><div class="spinner-border text-primary"></div></div>
+                            }
+                            else
+                            {
+                                <div class="wz-label">Wygląd strony</div>
+                                <div class="wz-tpls">
+                                    @foreach (var t in VisibleTemplates)
+                                    {
+                                        var tpl = t;
+                                        var th = SiteWidgets.ThemeOf(t.Theme);
+                                        <button type="button" class="wz-tpl @(_site.Template == t.Key ? "on" : "")" aria-pressed="@(_site.Template == t.Key ? "true" : "false")" @onclick="() => PickTemplateAsync(tpl.Key)">
+                                            <span class="wz-tpl-art" style="--bg:@th.Bg;--sf:@th.Surface;--ink:@th.Ink;--ac:@(string.IsNullOrEmpty(th.Accent) ? "var(--c-primary)" : th.Accent)"><span></span><span></span><i class="bi @t.Icon"></i></span>
+                                            <b>@t.Name</b>
+                                        </button>
+                                    }
+                                </div>
+                                @if (!_allTemplates)
+                                {
+                                    <button type="button" class="wz-add" @onclick="() => _allTemplates = true"><i class="bi bi-grid me-1"></i>Pokaż wszystkie szablony (@SiteWidgets.Templates.Count)</button>
+                                }
+                                @if (SiteWidgets.Templates.FirstOrDefault(x => x.Key == _site.Template) is { } current)
+                                {
+                                    <p class="wz-muted mt-2 mb-0">@current.Description</p>
+                                }
+
+                                @if (Hero is { } hero)
+                                {
+                                    <div class="wz-label mt-4">Najważniejsze teksty</div>
+                                    <div class="wz-field mb-2">
+                                        <label class="form-label" for="wz-h1">Nagłówek</label>
+                                        <input id="wz-h1" class="form-control" maxlength="120" value="@hero.Title" @onchange="e => SiteEditAsync(() => { hero.Title = Val(e); hero.Sample = false; })" />
+                                    </div>
+                                    <div class="wz-field mb-2">
+                                        <label class="form-label" for="wz-h2">Krótko: co oferujesz i dla kogo</label>
+                                        <textarea id="wz-h2" class="form-control" rows="2" maxlength="300" @onchange="e => SiteEditAsync(() => { hero.Subtitle = Val(e); hero.Sample = false; })">@hero.Subtitle</textarea>
+                                    </div>
+                                }
+                                @if (About is { } about)
+                                {
+                                    <div class="wz-field mb-2">
+                                        <label class="form-label" for="wz-about">O Tobie</label>
+                                        <textarea id="wz-about" class="form-control" rows="4" maxlength="1200" @onchange="e => SiteEditAsync(() => SetAboutText(about, Val(e)))">@about.Text</textarea>
+                                    </div>
+                                    <div class="wz-field mb-2">
+                                        <label class="form-label" for="wz-quals">Kwalifikacje <span class="text-muted fw-normal">(po przecinku, opcjonalnie)</span></label>
+                                        <input id="wz-quals" class="form-control" maxlength="300" value="@Quals(about)" placeholder="np. Trener personalny, Dietetyka sportowa" @onchange="e => SiteEditAsync(() => SetQuals(about, Val(e)))" />
+                                    </div>
+                                }
+
+                                <div class="wz-label mt-4">Kontakt na stronie</div>
+                                <div class="wz-form">
+                                    <div class="wz-field">
+                                        <label class="form-label" for="wz-sphone">Telefon</label>
+                                        <input id="wz-sphone" type="tel" class="form-control" maxlength="30" value="@_sitePhone" placeholder="np. 600 100 200" @onchange="e => SiteContactAsync(Val(e), _siteInsta)" />
+                                    </div>
+                                    <div class="wz-field">
+                                        <label class="form-label" for="wz-sinsta">Instagram <span class="text-muted fw-normal">(opcjonalnie)</span></label>
+                                        <input id="wz-sinsta" class="form-control" maxlength="60" value="@_siteInsta" placeholder="@@twoj.profil" @onchange="e => SiteContactAsync(_sitePhone, Val(e))" />
+                                    </div>
+                                </div>
+                                <p class="wz-muted mb-0">E-mail na stronie: @(string.IsNullOrWhiteSpace(SiteEmail) ? "brak — dodasz w kroku E-maile" : SiteEmail)@(_siteSaving ? " · zapisuję…" : "")</p>
+
+                                @HelpCard(PlatformHelpService.SiteSetup, "Wolisz, żebyśmy ułożyli ją za Ciebie?", "Napiszemy teksty, dobierzemy zdjęcia i ułożymy sekcje po krótkiej rozmowie o Twojej ofercie.", $"Strona główna pod klucz — szablon: {_site.Template}")
+                                <a class="wz-more" href="/admin/site">Pełny edytor strony: zdjęcia, opinie, metamorfozy, cennik<i class="bi bi-arrow-right"></i></a>
+                            }
+                            @Error()
+                            <div class="wz-nav">
+                                <button type="button" class="btn btn-link text-muted" @onclick="NextAsync">Pomiń</button>
+                                <button type="button" class="btn btn-primary btn-lg" disabled="@(_busy || _site is null)" @onclick="PublishSiteAsync">@Busy()Opublikuj i dalej<i class="bi bi-arrow-right ms-1"></i></button>
+                            </div>
+                        </section>
+                        break;
+
+                    case "mail":
+                        <section class="wz-card" aria-labelledby="wz-m">
+                            <h1 id="wz-m">Kto wysyła e-maile do Twoich klientów?</h1>
+                            <p class="wz-lead">Przypomnienia o treningach, potwierdzenia zapisów, zaproszenia i rachunki. Zmienisz to w każdej chwili w Zarządzanie → E-maile.</p>
+                            <div class="wz-choices" role="radiogroup">
+                                @if (_platform)
+                                {
+                                    <button type="button" role="radio" aria-checked="@(_mailChoice == "hantly" ? "true" : "false")" class="wz-choice @(_mailChoice == "hantly" ? "on" : "")" @onclick='() => _mailChoice = "hantly"'>
+                                        <i class="bi bi-send-check"></i>
+                                        <span><b>Hantly wysyła w Twoim imieniu <em>polecane</em></b><small>Działa od razu. Nadawcą jest nazwa Twojego studia, a odpowiedzi klientów trafiają na Twój adres.</small></span>
+                                    </button>
+                                }
+                                <button type="button" role="radio" aria-checked="@(_mailChoice == "own" ? "true" : "false")" class="wz-choice @(_mailChoice == "own" ? "on" : "")" @onclick='() => _mailChoice = "own"'>
+                                    <i class="bi bi-envelope-at"></i>
+                                    <span><b>Mój własny adres e-mail</b><small>Maile wychodzą z Twojej skrzynki (Gmail, WP, Onet, firmowa). Przeprowadzimy Cię krok po kroku.</small></span>
+                                </button>
+                            </div>
+                            @if (_mailChoice == "hantly")
+                            {
+                                <div class="wz-detail">
+                                    <label class="form-label fw-semibold" for="wz-reply">Odpowiedzi klientów trafią na</label>
+                                    <input id="wz-reply" type="email" class="form-control @(_replyProblem is not null ? "is-invalid" : "")" @bind="_replyTo" @bind:after="CheckReply" placeholder="twoj@@email.pl" autocomplete="email" />
+                                    @if (_replyProblem is not null) { <div class="invalid-feedback d-block">@_replyProblem</div> }
+                                    <div class="wz-mail">
+                                        <span class="wz-mail-av">@Initials</span>
+                                        <span><b>@_studio</b><small>Przypomnienie: jutro trening o 18:00 · Odpowiedz → @(string.IsNullOrWhiteSpace(_replyTo) ? "brak" : _replyTo)</small></span>
+                                    </div>
+                                </div>
+                            }
+                            else if (_mailChoice == "own")
+                            {
+                                <div class="wz-detail wz-own">
+                                    @if (_ownOk)
+                                    {
+                                        <div class="wz-ok"><i class="bi bi-check-circle-fill"></i><span><b>Skrzynka podłączona</b><small>E-maile do klientów wychodzą z adresu @_ownEmail. Testową wiadomość wysłaliśmy na ten adres.</small></span></div>
+                                    }
+                                    else
+                                    {
+                                        <label class="form-label fw-semibold" for="wz-own">Adres, z którego mają wychodzić e-maile</label>
+                                        <input id="wz-own" type="email" class="form-control" maxlength="200" @bind="_ownEmail" @bind:event="oninput" placeholder="studio@@gmail.com" autocomplete="email" />
+                                        @if (MailProviderRules.IsUnsupported(_ownEmail))
+                                        {
+                                            <div class="wz-note warn mt-2 mb-0"><i class="bi bi-exclamation-circle"></i><span>Skrzynek Outlook, Hotmail, iCloud i Yahoo nie podłączymy samym hasłem. @(_platform ? "Zostań przy wysyłce przez Hantly — odpowiedzi klientów i tak trafią na ten adres." : "Użyj innej skrzynki albo zamów podłączenie poczty firmowej.")</span></div>
+                                        }
+                                        else if (OwnProvider is { } prov)
+                                        {
+                                            <div class="wz-prov">
+                                                <span class="wz-prov-name"><i class="bi bi-envelope-check"></i>@prov.Name</span>
+                                                @if (prov.Key is "hosting" or "GoogleWorkspace")
+                                                {
+                                                    <span class="wz-seg" role="radiogroup" aria-label="Rodzaj poczty firmowej">
+                                                        <button type="button" role="radio" aria-checked="@(!_workspace ? "true" : "false")" class="@(!_workspace ? "on" : "")" @onclick="() => _workspace = false">Hosting</button>
+                                                        <button type="button" role="radio" aria-checked="@(_workspace ? "true" : "false")" class="@(_workspace ? "on" : "")" @onclick="() => _workspace = true">Google Workspace</button>
+                                                    </span>
+                                                }
+                                            </div>
+                                            <ol class="wz-howto">
+                                                @foreach (var step in prov.Steps)
+                                                {
+                                                    <li>@((MarkupString)step)</li>
+                                                }
+                                            </ol>
+                                            @if (prov.Note is { } note)
+                                            {
+                                                <p class="wz-muted">@note</p>
+                                            }
+                                            <div class="wz-form mb-2">
+                                                @if (prov.CustomHost)
+                                                {
+                                                    <div class="wz-field">
+                                                        <label class="form-label" for="wz-host">Serwer SMTP</label>
+                                                        <input id="wz-host" class="form-control" maxlength="120" @bind="_ownHost" placeholder="@prov.Host" autocomplete="off" />
+                                                        <div class="form-text">Puste pole = @(string.IsNullOrEmpty(prov.Host) ? "brak" : prov.Host)</div>
+                                                    </div>
+                                                    <div class="wz-field">
+                                                        <label class="form-label" for="wz-port">Port</label>
+                                                        <select id="wz-port" class="form-select" @bind="_ownPort">
+                                                            <option value="465">465 (SSL)</option>
+                                                            <option value="587">587 (TLS)</option>
+                                                        </select>
+                                                    </div>
+                                                }
+                                                <div class="wz-field wz-field-wide">
+                                                    <label class="form-label" for="wz-pass">@prov.PasswordLabel</label>
+                                                    <div class="input-group">
+                                                        <input id="wz-pass" type="@(_showPass ? "text" : "password")" class="form-control" maxlength="200" @bind="_ownPass" @bind:event="oninput" autocomplete="new-password" />
+                                                        <button type="button" class="btn btn-outline-secondary" @onclick="() => _showPass = !_showPass" aria-label="@(_showPass ? "Ukryj hasło" : "Pokaż hasło")"><i class="bi @(_showPass ? "bi-eye-slash" : "bi-eye")"></i></button>
+                                                    </div>
+                                                    <div class="form-text">Hasło zostaje w Twojej aplikacji i służy tylko do wysyłki.</div>
+                                                </div>
+                                            </div>
+                                            <button type="button" class="btn btn-primary" disabled="@(_testingOwn || string.IsNullOrWhiteSpace(_ownPass))" @onclick="VerifyOwnAsync">
+                                                @if (_testingOwn)
+                                                {
+                                                    <span class="spinner-border spinner-border-sm me-1"></span>
+                                                }
+                                                else
+                                                {
+                                                    <i class="bi bi-shield-check me-1"></i>
+                                                }
+                                                Sprawdź i włącz
+                                            </button>
+                                            @if (_ownError is not null)
+                                            {
+                                                <div class="alert alert-danger py-2 small mt-2 mb-0" role="alert">@_ownError</div>
+                                            }
+                                        }
+                                        @if (_platform)
+                                        {
+                                            <p class="wz-muted mt-3 mb-0"><i class="bi bi-info-circle me-1"></i>Do czasu podłączenia e-maile wysyła Hantly w imieniu studia — klienci niczego nie tracą.</p>
+                                        }
+                                    }
+                                </div>
+                                @if (!_ownOk)
+                                {
+                                    @HelpCard(PlatformHelpService.MailSetup, "Wolisz, żebyśmy podłączyli ją za Ciebie?", "Podłączymy skrzynkę, wyślemy test i sprawdzimy, czy wiadomości nie trafiają do spamu.", $"Podłączenie skrzynki: {(string.IsNullOrWhiteSpace(_ownEmail) ? "adres do ustalenia" : _ownEmail.Trim())} ({OwnProvider?.Name ?? "dostawca do ustalenia"})")
+                                }
+                            }
+                            @Error()
+                            <div class="wz-nav">
+                                <button type="button" class="btn btn-link text-muted" @onclick="NextAsync">Pomiń</button>
+                                <button type="button" class="btn btn-primary btn-lg" disabled="@(_busy || _mailChoice is null || _testingOwn)" @onclick="SaveMailAsync">@Busy()@(_mailChoice == "own" ? "Dalej" : "Zapisz i dalej")<i class="bi bi-arrow-right ms-1"></i></button>
+                            </div>
+                        </section>
+                        break;
+
+                    case "client":
+                        <section class="wz-card" aria-labelledby="wz-c">
+                            <h1 id="wz-c">Zaproś pierwszego klienta</h1>
+                            <p class="wz-lead">Dostanie e-mail z linkiem: ustawi hasło i od razu zobaczy Twoją aplikację — z Twoimi godzinami i ofertą.</p>
+                            @if (_added.Count > 0)
+                            {
+                                <ul class="wz-added">
+                                    @foreach (var a in _added)
+                                    {
+                                        <li><i class="bi bi-check-circle-fill"></i><span><b>@a.Name</b><small>@a.Note</small></span></li>
+                                    }
+                                </ul>
+                            }
+                            else if (_clientCount > 0)
+                            {
+                                <div class="wz-note"><i class="bi bi-people"></i>Masz już @_clientCount @ClientsWord(_clientCount) w aplikacji@(_limitReached ? "." : " — możesz dodać kolejną osobę albo przejść dalej.")</div>
+                            }
+                            @if (LimitNote is { } limit)
+                            {
+                                <div class="wz-note @(limit.Reached ? "warn" : "")">
+                                    <i class="bi @(limit.Reached ? "bi-exclamation-circle" : "bi-info-circle")"></i>
+                                    <span>
+                                        @limit.Text
+                                        @if (limit.Reached && _isOwner)
+                                        {
+                                            <a class="ms-1" href="/admin/upgrade">Porównaj plany</a>
+                                        }
+                                    </span>
+                                </div>
+                            }
+                            @if (!_limitReached)
+                            {
+                                <div class="wz-form">
+                                    <div class="wz-field">
+                                        <label class="form-label" for="wz-name">Imię i nazwisko</label>
+                                        <input id="wz-name" class="form-control" maxlength="100" autocomplete="off" placeholder="np. Anna Kowalska" @bind="_cName" />
+                                    </div>
+                                    <div class="wz-field">
+                                        <label class="form-label" for="wz-email">E-mail</label>
+                                        <input id="wz-email" type="email" class="form-control" maxlength="200" autocomplete="off" placeholder="anna@@przyklad.pl" @bind="_cEmail" />
+                                    </div>
+                                    <div class="wz-field">
+                                        <label class="form-label" for="wz-phone">Telefon <span class="text-muted fw-normal">(opcjonalnie)</span></label>
+                                        <input id="wz-phone" type="tel" class="form-control" maxlength="30" autocomplete="off" placeholder="np. 600 100 200" @bind="_cPhone" />
+                                    </div>
+                                    <label class="wz-switch wz-field-wide"><input type="checkbox" class="form-check-input" role="switch" @bind="_cInvite" /><span><b>Wyślij zaproszenie e-mailem</b><small>Bez tego dodasz klienta tylko u siebie — zaprosisz później z jego profilu.</small></span></label>
+                                </div>
+                                <button type="button" class="btn btn-outline-primary" disabled="@_busy" @onclick="AddClientAsync">@Busy()<i class="bi bi-person-plus me-1"></i>@(_added.Count > 0 ? "Dodaj kolejną osobę" : "Dodaj klienta")</button>
+                            }
+                            @Error()
+
+                            @if (!_limitReached)
+                            {
+                                <div class="wz-or"><span>albo</span></div>
+                            }
+                            <div class="wz-alt">
+                                <div class="wz-alt-card">
+                                    <i class="bi bi-link-45deg"></i>
+                                    <span><b>Wyślij link do zapisów</b><small>Klient sam założy konto i wybierze termin.</small></span>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => CopyAsync(BookUrl)">@(_copied == BookUrl ? "Skopiowano ✓" : "Kopiuj link")</button>
+                                </div>
+                                <a class="wz-alt-card" href="/clients?import=1">
+                                    <i class="bi bi-file-earmark-spreadsheet"></i>
+                                    <span><b>Masz listę klientów?</b><small>Zaimportuj ją z Excela albo pliku CSV.</small></span>
+                                    <i class="bi bi-chevron-right"></i>
+                                </a>
+                            </div>
+                            <div class="wz-nav">
+                                @if (_added.Count == 0)
+                                {
+                                    <button type="button" class="btn btn-link text-muted" @onclick="NextAsync">Pomiń</button>
+                                }
+                                else
+                                {
+                                    <span></span>
+                                }
+                                <button type="button" class="btn btn-primary btn-lg" @onclick="NextAsync">Dalej<i class="bi bi-arrow-right ms-1"></i></button>
+                            </div>
+                        </section>
+                        break;
+
+                    case "pay":
+                        <section class="wz-card" aria-labelledby="wz-p">
+                            <h1 id="wz-p">Jak klienci za Ciebie płacą?</h1>
+                            <p class="wz-lead">Online klient płaci BLIK-iem albo kartą przy zapisie czy zakupie pakietu, a pieniądze trafiają prosto na Twoje konto w bramce płatności.</p>
+                            @if (_paymentsOn)
+                            {
+                                <div class="wz-detail"><div class="wz-ok"><i class="bi bi-check-circle-fill"></i><span><b>Płatności online działają</b><small>@(_payNames.Count > 0 ? string.Join(", ", _payNames) : "Bramka włączona") — zmienisz to w Zarządzanie → Płatności.</small></span></div></div>
+                            }
+                            else
+                            {
+                                <div class="wz-choices" role="radiogroup">
+                                    <button type="button" role="radio" aria-checked="@(_payChoice == "offline" ? "true" : "false")" class="wz-choice @(_payChoice == "offline" ? "on" : "")" @onclick='() => _payChoice = "offline"'>
+                                        <i class="bi bi-cash-coin"></i>
+                                        <span><b>Na miejscu</b><small>Gotówką, przelewem albo kartą u Ciebie — odhaczasz to w Finansach. Online włączysz, kiedy zechcesz.</small></span>
+                                    </button>
+                                    <button type="button" role="radio" aria-checked="@(_payChoice == "online" ? "true" : "false")" class="wz-choice @(_payChoice == "online" ? "on" : "")" @onclick='() => _payChoice = "online"'>
+                                        <i class="bi bi-credit-card"></i>
+                                        <span><b>Online — mam konto w bramce</b><small>PayU, Przelewy24 albo Autopay. Wkleisz klucze z panelu bramki.</small></span>
+                                    </button>
+                                    <button type="button" role="radio" aria-checked="@(_payChoice == "help" ? "true" : "false")" class="wz-choice @(_payChoice == "help" ? "on" : "")" @onclick='() => _payChoice = "help"'>
+                                        <i class="bi bi-life-preserver"></i>
+                                        <span><b>Online — pomóżcie mi</b><small>Pomożemy założyć konto w bramce i wszystko ustawimy.</small></span>
+                                    </button>
+                                </div>
+                                @if (_payChoice == "online")
+                                {
+                                    <div class="wz-detail">
+                                        <div class="wz-chips" role="radiogroup" aria-label="Bramka płatności">
+                                            @foreach (var g in PayGateways)
+                                            {
+                                                var gate = g.Key;
+                                                <button type="button" role="radio" aria-checked="@(_payKey == gate ? "true" : "false")" class="wz-chip @(_payKey == gate ? "on" : "")" @onclick="() => _payKey = gate">@g.Name</button>
+                                            }
+                                        </div>
+                                        @if (PayMeta is { } meta)
+                                        {
+                                            <p class="wz-muted mt-2">@meta.Description</p>
+                                            <div class="wz-form mb-2">
+                                                @foreach (var f in meta.Fields)
+                                                {
+                                                    var field = f;
+                                                    <div class="wz-field">
+                                                        <label class="form-label" for="@($"wz-pay-{field.Key}")">@field.Label</label>
+                                                        <input id="@($"wz-pay-{field.Key}")" class="form-control" type="@(field.Secret ? "password" : "text")" autocomplete="off" maxlength="200"
+                                                               value="@PayField(field.Key)" @onchange="e => SetPayField(field.Key, e.Value?.ToString())" />
+                                                    </div>
+                                                }
+                                            </div>
+                                            <label class="wz-switch"><input type="checkbox" class="form-check-input" role="switch" @bind="_paySandbox" /><span><b>To klucze testowe (sandbox)</b><small>Klienci nie zapłacą wtedy naprawdę — przełączysz na produkcję w Zarządzanie → Płatności.</small></span></label>
+                                            @if (meta.Key == PTScheduler.Domain.Constants.PaymentProviders.AutoPay)
+                                            {
+                                                <div class="wz-note mt-2 mb-0"><i class="bi bi-link-45deg"></i><span>W panelu Autopay wpisz adres powiadomień <b>@(Nav.BaseUri)payments/autopay/notify</b> i powrotu <b>@(Nav.BaseUri)payments/autopay/return</b>.</span></div>
+                                            }
+                                        }
+                                    </div>
+                                }
+                                else if (_payChoice == "help")
+                                {
+                                    @if (_offers.ContainsKey(PlatformHelpService.PaymentsSetup))
+                                    {
+                                        @HelpCard(PlatformHelpService.PaymentsSetup, "Ustawimy płatności za Ciebie", "Pomożemy założyć konto w PayU albo Przelewy24, wpiszemy klucze i zrobimy płatność testową.", "Ustawienie płatności online")
+                                    }
+                                    else
+                                    {
+                                        <div class="wz-note mt-3 mb-0"><i class="bi bi-chat-dots"></i><span>Napisz do nas z menu Pomoc — ustawimy płatności razem. Do tego czasu klienci płacą na miejscu.</span></div>
+                                    }
+                                }
+                            }
+                            @Error()
+                            <div class="wz-nav">
+                                <button type="button" class="btn btn-link text-muted" @onclick="NextAsync">Pomiń</button>
+                                <button type="button" class="btn btn-primary btn-lg" disabled="@(_busy || (!_paymentsOn && _payChoice is null))" @onclick="SavePayAsync">@Busy()@(_paymentsOn ? "Dalej" : _payChoice == "online" ? "Włącz płatności i dalej" : "Zapisz i dalej")<i class="bi bi-arrow-right ms-1"></i></button>
+                            </div>
+                        </section>
+                        break;
+
+                    case "plan":
+                        <section class="wz-card" aria-labelledby="wz-pl">
+                            <h1 id="wz-pl">Pierwszy plan treningowy</h1>
+                            <p class="wz-lead">Klient zobaczy go w aplikacji i zapisze w nim wyniki, a Ty masz go pod ręką na wizycie. Ułożę propozycję z ćwiczeń z katalogu — dopracujesz ją później w Planach.</p>
+                            @if (_planDone is not null)
+                            {
+                                <div class="wz-detail"><div class="wz-ok"><i class="bi bi-check-circle-fill"></i><span><b>Plan przypisany</b><small>@_planDone</small></span></div></div>
+                            }
+                            else if (_planClients.Count == 0)
+                            {
+                                <div class="wz-note"><i class="bi bi-people"></i><span>Najpierw dodaj klienta w kroku „Klienci”. Plan ułożysz też później w zakładce Plany.</span></div>
+                            }
+                            else
+                            {
+                                <div class="wz-field mb-1">
+                                    <label class="form-label" for="wz-plan-client">Dla kogo</label>
+                                    <select id="wz-plan-client" class="form-select" @bind="_planClientId" @bind:after="PlanClientChanged">
+                                        @foreach (var c in _planClients)
+                                        {
+                                            <option value="@c.Id">@c.FullName@(string.IsNullOrWhiteSpace(c.TrainingGoal) ? "" : $" — {c.TrainingGoal}")</option>
+                                        }
+                                    </select>
+                                </div>
+                                <div class="wz-sub">Cel</div>
+                                <div class="wz-chips" role="radiogroup" aria-label="Cel planu">
+                                    @foreach (var f in Enum.GetValues<PlanGeneratorRules.Focus>())
+                                    {
+                                        var focus = f;
+                                        <button type="button" role="radio" aria-checked="@(_planFocus == focus ? "true" : "false")" class="wz-chip @(_planFocus == focus ? "on" : "")" @onclick="() => { _planFocus = focus; _planProposal = null; }">@PlanGeneratorRules.FocusLabel(focus)</button>
+                                    }
+                                </div>
+                                <div class="wz-sub">Treningi w tygodniu</div>
+                                <div class="wz-chips" role="radiogroup" aria-label="Treningi w tygodniu">
+                                    @foreach (var d in new[] { 2, 3, 4 })
+                                    {
+                                        var days = d;
+                                        <button type="button" role="radio" aria-checked="@(_planDays == days ? "true" : "false")" class="wz-chip @(_planDays == days ? "on" : "")" @onclick="() => { _planDays = days; _planProposal = null; }">@days× w tygodniu</button>
+                                    }
+                                </div>
+                                <div class="wz-sub">Sprzęt</div>
+                                <div class="wz-chips" role="radiogroup" aria-label="Sprzęt">
+                                    @foreach (var (kit, label) in KitChoices)
+                                    {
+                                        var k = kit;
+                                        <button type="button" role="radio" aria-checked="@(_planKit == k ? "true" : "false")" class="wz-chip @(_planKit == k ? "on" : "")" @onclick="() => { _planKit = k; _planProposal = null; }">@label</button>
+                                    }
+                                </div>
+                                <button type="button" class="btn btn-outline-primary mt-3" disabled="@_planBusy" @onclick="ProposePlanAsync">
+                                    @if (_planBusy)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-1"></span>
+                                    }
+                                    else
+                                    {
+                                        <i class="bi bi-magic me-1"></i>
+                                    }
+                                    @(_planProposal is null ? "Ułóż propozycję" : "Ułóż jeszcze raz")
+                                </button>
+                                @if (_planProposal is { } prop)
+                                {
+                                    @if (prop.Plan.Days.Count == 0)
+                                    {
+                                        <div class="wz-note warn mt-3 mb-0"><i class="bi bi-exclamation-circle"></i><span>Nie udało się dobrać ćwiczeń — zmień sprzęt albo cel.</span></div>
+                                    }
+                                    else
+                                    {
+                                        <div class="wz-plan">
+                                            <div class="wz-plan-head"><b>@prop.Plan.Name</b><small>@prop.Plan.Purpose</small></div>
+                                            <div class="wz-plan-days">
+                                                @foreach (var day in prop.Plan.Days)
+                                                {
+                                                    <div class="wz-plan-day">
+                                                        <span>@day.Label</span>
+                                                        <ol>
+                                                            @foreach (var x in day.Exercises)
+                                                            {
+                                                                <li>@x.Name <small>@Dose(x)</small></li>
+                                                            }
+                                                        </ol>
+                                                    </div>
+                                                }
+                                            </div>
+                                        </div>
+                                    }
+                                }
+                            }
+                            @Error()
+                            <div class="wz-nav">
+                                <button type="button" class="btn btn-link text-muted" @onclick="NextAsync">Pomiń</button>
+                                @if (_planDone is null && _planProposal is { Plan.Days.Count: > 0 })
+                                {
+                                    <button type="button" class="btn btn-primary btn-lg" disabled="@_busy" @onclick="AssignPlanAsync">@Busy()Przypisz plan i dalej<i class="bi bi-arrow-right ms-1"></i></button>
+                                }
+                                else
+                                {
+                                    <button type="button" class="btn btn-primary btn-lg" @onclick="NextAsync">Dalej<i class="bi bi-arrow-right ms-1"></i></button>
+                                }
+                            </div>
+                        </section>
+                        break;
+
+                    case "phone":
+                        <section class="wz-card" aria-labelledby="wz-ph">
+                            <h1 id="wz-ph">Powiadomienia na telefonie</h1>
+                            <p class="wz-lead">Nowa rezerwacja, odwołanie albo wiadomość od klienta — od razu na ekranie, także gdy aplikacja jest zamknięta.</p>
+                            <PTScheduler.Web.Components.Account.Shared.PushDeviceCard />
+                            <div class="wz-or wz-desk-only"><span>albo na telefonie</span></div>
+                            <div class="wz-share wz-desk-only">
+                                <div class="wz-qr" @ref="_qrEl" aria-label="Kod QR otwierający ten krok na telefonie"></div>
+                                <div class="wz-share-txt">
+                                    <small>Jesteś przy komputerze?</small>
+                                    <b>Zeskanuj kod telefonem</b>
+                                    <span class="wz-muted mt-1">Otworzy się ten krok: zaloguj się, dodaj aplikację do ekranu głównego i włącz powiadomienia.</span>
+                                </div>
+                            </div>
+                            <div class="wz-nav">
+                                <button type="button" class="btn btn-link text-muted" @onclick="NextAsync">Pomiń</button>
+                                <button type="button" class="btn btn-primary btn-lg" @onclick="NextAsync">Dalej<i class="bi bi-arrow-right ms-1"></i></button>
+                            </div>
+                        </section>
+                        break;
+
+                    default:
+                        <section class="wz-card wz-done" aria-labelledby="wz-d">
+                            <div class="wz-done-ic" aria-hidden="true"><i class="bi bi-check-lg"></i></div>
+                            <h1 id="wz-d">Gotowe! Aplikacja czeka na klientów 🎉</h1>
+                            <p class="wz-lead">Wszystko zmienisz później w Zarządzaniu. Teraz wyślij klientom link albo pokaż im kod QR na treningu — zapiszą się sami.</p>
+                            <ul class="wz-recap">
+                                @foreach (var (ok, label, value, href) in Recap)
+                                {
+                                    <li class="@(ok ? "ok" : "")">
+                                        <i class="bi @(ok ? "bi-check-circle-fill" : "bi-circle")"></i>
+                                        <span><b>@label</b><small>@value</small></span>
+                                        @if (!ok) { <a href="@href">Ustaw</a> }
+                                    </li>
+                                }
+                            </ul>
+                            <div class="wz-share">
+                                <div class="wz-qr" @ref="_qrEl" aria-label="Kod QR z adresem aplikacji"></div>
+                                <div class="wz-share-txt">
+                                    <small>Adres Twojej aplikacji</small>
+                                    <b>@AppHost</b>
+                                    <div class="d-flex gap-2 flex-wrap mt-2">
+                                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => CopyAsync(Nav.BaseUri)"><i class="bi bi-copy me-1"></i>@(_copied == Nav.BaseUri ? "Skopiowano ✓" : "Kopiuj")</button>
+                                        <a class="btn btn-sm btn-outline-secondary" href="/book" target="_blank" rel="noopener"><i class="bi bi-eye me-1"></i>Zobacz, co widzi klient</a>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="wz-nav">
+                                <button type="button" class="btn btn-link text-muted" @onclick="() => GoAsync(0)"><i class="bi bi-arrow-counterclockwise me-1"></i>Od początku</button>
+                                <a class="btn btn-primary btn-lg" href="/app?witaj=1" data-enhance-nav="false">Przejdź do aplikacji<i class="bi bi-arrow-right ms-1"></i></a>
+                            </div>
+                        </section>
+                        break;
+                }
+            </div>
+
+            <aside class="wz-side @(_peek ? "open" : "")" aria-label="Podgląd w telefonie" @onclick="() => _peek = false">
+                <div class="wz-side-k"><i class="bi @(ShowSite ? "bi-globe2" : "bi-phone")"></i>@(ShowSite ? "Twoja strona na telefonie" : "Tak widzi to klient")</div>
+                <button type="button" class="wz-side-close" aria-label="Zamknij podgląd" @onclick="() => _peek = false"><i class="bi bi-x-lg"></i></button>
+                <div class="wz-phone" @onclick:stopPropagation="true">
+                    @if (ShowSite)
+                    {
+                        <div class="wz-scr wz-scr-site">
+                            @* key: nowy adres = nowa ramka, więc spacer po stronie rusza od nowa po każdej zmianie. *@
+                            <iframe @key="SiteSrc" src="@SiteSrc" title="Podgląd strony głównej" onload="ptFirstSetup.tour(this)"></iframe>
+                        </div>
+                    }
+                    else
+                    {
+                    <div class="wz-scr">
+                        <div class="wz-bar"><span>9:41</span><span><i class="bi bi-reception-4"></i><i class="bi bi-battery-full"></i></span></div>
+                        <div class="wz-app-head">
+                            @if (!string.IsNullOrEmpty(_logo))
+                            {
+                                <img src="@_logo" alt="" class="wz-app-logo" />
+                            }
+                            else
+                            {
+                                <span class="wz-app-mono">@Initials</span>
+                            }
+                            <b>@_studio</b>
+                        </div>
+                        <div class="wz-app-title">Umów trening</div>
+                        <div class="wz-app-block @(Current == "offer" ? "hl" : "")">
+                            @foreach (var t in _types.Where(t => t.Active && !string.IsNullOrWhiteSpace(t.Name)).Take(3))
+                            {
+                                <div class="wz-app-offer"><span><b>@t.Name</b><small>@t.Minutes min</small></span><strong>@(t.Price is > 0 ? $"{t.Price:0} zł" : "")</strong></div>
+                            }
+                            @foreach (var p in _packs.Where(p => p.Active && !string.IsNullOrWhiteSpace(p.Name) && p.Price > 0).Take(1))
+                            {
+                                <div class="wz-app-offer pack"><span><b>@p.Name</b><small>@p.Count treningów</small></span><strong>@p.Price.ToString("0") zł</strong></div>
+                            }
+                            @if (!_types.Any(t => t.Active && !string.IsNullOrWhiteSpace(t.Name)))
+                            {
+                                <div class="wz-app-empty">Tu pojawi się Twoja oferta</div>
+                            }
+                        </div>
+                        <div class="wz-app-k">Najbliższe wolne terminy</div>
+                        <div class="wz-app-block @(Current == "hours" ? "hl" : "")">
+                            @if (PreviewSlots.Count == 0)
+                            {
+                                <div class="wz-app-empty">Ustaw godziny pracy, a klienci zobaczą tu terminy</div>
+                            }
+                            else
+                            {
+                                <div class="wz-app-slots">
+                                    @foreach (var s in PreviewSlots)
+                                    {
+                                        <span><small>@FirstSetupRules.DayShort(s.DayOfWeek)</small>@s.ToString("H:mm")</span>
+                                    }
+                                </div>
+                            }
+                        </div>
+                        <div class="wz-app-rules @(Current == "rules" ? "hl" : "")"><i class="bi bi-info-circle"></i>@ClientRules</div>
+                    </div>
+                    }
+                </div>
+                @if (ShowSite)
+                {
+                    <small class="wz-side-hint">Przewiń palcem albo kółkiem myszy</small>
+                }
+            </aside>
+        </div>
+    }
+</div>
+
+@code {
+    // Klucze kroków; lista zależy od tego, kto wchodzi (właściciel widzi ofertę i pocztę, trener — swoje godziny i klientów).
+    private List<string> _steps = [];
+    private int _at;
+    private readonly HashSet<string> _saved = [];
+    private string Current => _at < _steps.Count ? _steps[_at] : "done";
+
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private string? _copied;
+    private string _userId = "";
+    private string? _trainerId;
+    private bool _isOwner;
+    private bool _canMail;
+    private string _studio = "Twoje studio";
+    private string? _logo;
+    private PTScheduler.Web.Services.PlatformAssistantService.Config? _assistant;
+    private ElementReference _qrEl;
+    private bool _qrDrawn;
+    private bool _resumed;
+
+    // Godziny
+    private sealed class Win { public TimeOnly Start; public TimeOnly End; }
+    private sealed class DayRow { public DayOfWeek Day; public List<Win> Windows = []; }
+    private List<DayRow> _days = [];
+    private bool _hoursPrefilled;
+
+    // Oferta
+    private sealed class TypeRow
+    {
+        public int Id; public string Key = Guid.NewGuid().ToString("N"); public string Name = ""; public int Minutes = 60; public decimal? Price;
+        public bool Active = true; public SessionTypeDto? Original;
+        public string? Badge => Original is { IsGroup: true } ? "grupowy" : Original is { IsPair: true } ? "w parze" : null;
+    }
+    private sealed class PackRow
+    {
+        public int Id; public string Name = ""; public int Count = 10; public decimal Price; public string TypeKey = ""; public bool Active = true; public PackageOfferDto? Original;
+    }
+    private List<TypeRow> _types = [];
+    private List<PackRow> _packs = [];
+
+    // Zasady
+    private TrainerConfigDto _cfg = new();
+    private bool _paymentsOn;
+
+    // Poczta
+    private bool _platform;
+    private string? _mailChoice;
+    private string _replyTo = "";
+    private string? _replyProblem;
+
+    // Klient
+    private string _cName = "", _cEmail = "", _cPhone = "";
+    private bool _cInvite = true;
+    private int _clientCount;
+    private int _studioClients, _maxClients = int.MaxValue;
+    private bool _limitReached => _studioClients >= _maxClients;
+    private readonly List<(string Name, string Note)> _added = [];
+
+    // Logo i asystent
+    private bool _canLogo;
+    private bool _logoBusy;
+    private string _motion = "";
+    private PTScheduler.Domain.Entities.TrainerStyle _style = new();
+    private static readonly (string Key, string Label)[] MotionChoices = [("", "Żywy"), ("calm", "Spokojny"), ("off", "Bez ruchu")];
+    private static readonly (string Key, string Label)[] EmojiChoices = [("brak", "Bez emoji"), ("czasem", "Emoji czasem"), ("często", "Emoji często")];
+
+    // Strona główna (szkic — publikacja przyciskiem „Opublikuj i dalej”)
+    private SiteContentDto? _site;
+    private bool _allTemplates;
+    private bool _siteSaving;
+    private int _siteVersion;
+    private string? _sitePhone, _siteInsta;
+    private bool _sitePublished;
+
+    // Własna skrzynka
+    private string _ownEmail = "";
+    private string _ownPass = "";
+    private string? _ownHost;
+    private int _ownPort = 465;
+    private bool _workspace;
+    private bool _showPass;
+    private bool _testingOwn;
+    private bool _ownOk;
+    private string? _ownError;
+
+    // Płatności
+    private string? _payChoice;
+    private string _payKey = "payu";
+    private bool _paySandbox;
+    private readonly Dictionary<string, Dictionary<string, string>> _payFields = [];
+    private List<string> _payNames = [];
+    private static readonly PaymentProviderMeta[] PayGateways =
+        PaymentProviderCatalog.All.Where(m => m.Key is "payu" or "p24" or "autopay").ToArray();
+    private PaymentProviderMeta? PayMeta => PayGateways.FirstOrDefault(m => m.Key == _payKey);
+
+    // Pierwszy plan
+    private bool _isAdmin;
+    private List<ClientDto> _planClients = [];
+    private int _planClientId;
+    private PlanGeneratorRules.Focus _planFocus = PlanGeneratorRules.Focus.General;
+    private int _planDays = 2;
+    private PlanGeneratorRules.Kit _planKit = PlanGeneratorRules.Kit.Gym;
+    private PTScheduler.Web.Services.PlanGeneratorService.Proposal? _planProposal;
+    private bool _planBusy;
+    private string? _planDone;
+    private static readonly (PlanGeneratorRules.Kit Kit, string Label)[] KitChoices =
+        [(PlanGeneratorRules.Kit.Gym, "Siłownia"), (PlanGeneratorRules.Kit.Dumbbells, "Hantle i gumy"), (PlanGeneratorRules.Kit.Bodyweight, "Masa ciała")];
+
+    /// <summary>Krok z linku (np. kod QR „otwórz na telefonie” → ?krok=phone).</summary>
+    [SupplyParameterFromQuery(Name = "krok")] public string? Krok { get; set; }
+
+    // Pomoc zespołu i podgląd na małym ekranie
+    private Dictionary<int, PTScheduler.Web.Services.PlatformHelpService.Offer> _offers = [];
+    private bool _offersLoaded;
+    private readonly HashSet<int> _ordered = [];
+    private bool _ordering;
+    private bool _peek;
+
+    private static readonly int[] Durations = [30, 45, 60, 75, 90, 120];
+    private static readonly (int Hours, string Label)[] CancelOptions = [(6, "6 h przed"), (12, "12 h przed"), (24, "24 h przed"), (48, "48 h przed"), (-1, "Zawsze bez kosztów")];
+    private static readonly string[] Times = Enumerable.Range(10, 37).Select(i => new TimeOnly(i / 2, i % 2 * 30).ToString("HH:mm")).ToArray();
+
+    private string StorageKey => $"witaj-krok:{_userId}";
+    private string AssistantName => _assistant?.Name ?? "Hantly";
+    private string Initials => string.Concat(_studio.Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(w => char.IsLetterOrDigit(w[0])).Take(2).Select(w => char.ToUpperInvariant(w[0])));
+    private string BookUrl => Nav.BaseUri + "book";
+    private string AppHost => new Uri(Nav.BaseUri).Host;
+
+    private List<FirstSetupRules.Window> Windows =>
+        _days.SelectMany(d => d.Windows.Select(w => new FirstSetupRules.Window(d.Day, w.Start, w.End))).ToList();
+    private string? Preset => FirstSetupRules.MatchingPreset(Windows);
+    private IReadOnlyList<DateTime> PreviewSlots =>
+        FirstSetupRules.NextSlots(Windows, Clock.LocalNow, _types.FirstOrDefault(t => t.Active)?.Minutes ?? 60, 6);
+    private string ClientRules => FirstSetupRules.ClientCancellationText(_cfg.CancellationWindowHours, _cfg.LateCancellationPolicy, _cfg.NoShowChargesSession);
+
+    private static string StepName(string key) => key switch
+    {
+        "me" => "Ty", "hours" => "Godziny", "offer" => "Oferta", "rules" => "Zasady", "look" => "Logo", "site" => "Strona",
+        "mail" => "E-maile", "pay" => "Płatności", "client" => "Klienci", "plan" => "Plan", "phone" => "Telefon", _ => "Gotowe"
+    };
+
+    private string Mood => Current switch { "done" => "celebrate", "client" or "site" => "happy", "mail" => "think", _ => "hello" };
+
+    private string Minutes
+    {
+        get
+        {
+            var n = Math.Max(3, _steps.Count);
+            return $"{n} {Pl(n, "minuta", "minuty", "minut")}";
+        }
+    }
+
+    /// <summary>Telefon z podglądu pokazuje stronę główną przy kroku „Strona” i na koniec (już opublikowaną).</summary>
+    private bool ShowSite => _steps.Contains("site") && Current is "site" or "done";
+    private string SiteSrc => Current == "done" ? $"/?v={_siteVersion}" : $"/?draft=1&v={_siteVersion}";
+
+    private SiteBlock? Hero => _site?.Blocks.FirstOrDefault(b => b.Type == "hero" && b.Visible);
+    private SiteBlock? About => _site?.Blocks.FirstOrDefault(b => b.Type == "about" && b.Visible);
+    private string SiteEmail => string.IsNullOrWhiteSpace(_replyTo) ? "" : _replyTo.Trim();
+    private IEnumerable<SiteWidgets.PageTemplate> VisibleTemplates =>
+        _allTemplates ? SiteWidgets.Templates
+        : SiteWidgets.Templates.Take(6).Concat(SiteWidgets.Templates.Skip(6).Where(t => t.Key == _site?.Template));
+
+    private MailProviderRules.Provider? OwnProvider => MailProviderRules.Detect(_ownEmail, _workspace);
+
+    private string StyleSample
+    {
+        get
+        {
+            var formal = _style.Address == "pan";
+            var text = formal ? "Dzień dobry! Zwolnił się termin jutro o 18:00 — czy pasuje na trening?" : "Hej [klient]! Zwolnił mi się termin jutro o 18:00 — wpadasz na trening?";
+            return text + _style.Emoji switch { "brak" => "", "często" => " 💪🔥", _ => " 💪" };
+        }
+    }
+
+    private string Tip => Current switch
+    {
+        "hours" => _hoursPrefilled
+            ? "Ustawiłem najczęstszy układ — jeśli pasuje, po prostu zapisz. Dni, w które pracujesz inaczej, poprawisz jednym kliknięciem."
+            : "To najważniejszy krok: bez godzin pracy klienci nie mają się na co zapisać.",
+        "offer" => "Ceny możesz zmieniać w każdej chwili. Pakiet zachęca do regularności — klienci chętniej wracają.",
+        "rules" => "Większość trenerów wybiera 24 godziny. Jasne zasady to mniej niezręcznych rozmów o odwołanych treningach.",
+        "me" => "Jedno konto to mniej klikania: ustawienia studia i Twój grafik w jednym miejscu.",
+        "look" => "Logo robi dużą różnicę — klienci od razu wiedzą, że to Twoja aplikacja.",
+        "site" => "Wystarczy nagłówek i parę zdań o Tobie. Podgląd strony odświeża się po każdej zmianie.",
+        "mail" => _mailChoice == "own"
+            ? "Wpisz adres — sam rozpoznam pocztę i powiem, co kliknąć u dostawcy."
+            : "Najprościej zostawić wysyłkę mnie — działa od razu, a nadawcą jest Twoje studio.",
+        "pay" => "Płatność online przy zapisie to mniej przypominania o pieniądzach. Na miejscu też jest w porządku — zmienisz to później.",
+        "plan" => "Plan z katalogu to dobry start. Klient od razu widzi, co będzie robić, a Ty poprawisz szczegóły po pierwszym treningu.",
+        "phone" => "Z powiadomieniami nie przegapisz żadnej rezerwacji — także gdy aplikacja jest zamknięta.",
+        "client" => "Zacznij od jednej osoby, która trenuje z Tobą najdłużej — zobaczysz, jak aplikacja działa po stronie klienta.",
+        _ => "Świetna robota! Wyślij link klientom albo pokaż im kod QR na treningu."
+    };
+
+    private IEnumerable<(bool Ok, string Label, string Value, string Href)> Recap
+    {
+        get
+        {
+            var w = Windows;
+            if (_steps.Contains("hours"))
+                yield return (w.Count > 0, "Godziny pracy", w.Count > 0 ? $"{Hours(w)} w tygodniu · {DaysText(FirstSetupRules.WorkDays(w))}" : "jeszcze nieustawione", "/trainer/availability");
+            if (_steps.Contains("offer"))
+            {
+                var types = _types.Count(t => t.Active && t.Id > 0);
+                var packs = _packs.Count(p => p.Active && p.Id > 0);
+                yield return (types > 0, "Oferta", types > 0 ? $"{types} {Pl(types, "trening", "treningi", "treningów")}" + (packs > 0 ? $", {packs} {Pl(packs, "pakiet", "pakiety", "pakietów")}" : "") : "brak treningów", "/admin/session-types");
+            }
+            if (_steps.Contains("rules"))
+                yield return (_saved.Contains("rules"), "Zasady odwołań", ClientRules, "/trainer/availability");
+            if (_steps.Contains("look"))
+                yield return (!string.IsNullOrEmpty(_logo), "Logo", string.IsNullOrEmpty(_logo) ? "jeszcze nie dodane" : "dodane — widać je w aplikacji i e-mailach", "/admin/branding");
+            if (_steps.Contains("site"))
+                yield return (_sitePublished, "Strona główna", _sitePublished ? $"opublikowana pod adresem {AppHost}" : "zmiany czekają na publikację", "/admin/site");
+            if (_steps.Contains("mail"))
+                yield return (_saved.Contains("mail") && (_mailChoice != "own" || _ownOk), "E-maile do klientów",
+                    _ownOk ? $"z Twojej skrzynki {_ownEmail}" : _mailChoice == "own" ? "własna skrzynka — do podłączenia" : $"wysyła Hantly jako {_studio}", "/admin/email");
+            if (_steps.Contains("pay"))
+                yield return (_saved.Contains("pay"), "Płatności",
+                    _paymentsOn ? (_payNames.Count > 0 ? $"online: {string.Join(", ", _payNames)}" : "online") : _payChoice == "offline" ? "na miejscu" : _ordered.Contains(PlatformHelpService.PaymentsSetup) ? "pomoc zamówiona — odezwiemy się" : "jeszcze nie wybrane", "/admin/payments");
+            if (_steps.Contains("plan"))
+                yield return (_saved.Contains("plan"), "Pierwszy plan", _planDone ?? "jeszcze nie przypisany", "/plans/new");
+            if (_steps.Contains("client"))
+            {
+                var n = _clientCount + _added.Count;
+                yield return (n > 0, "Klienci", n > 0 ? $"{n} {ClientsWord(n)}" : "nikogo jeszcze nie dodano", "/clients/new");
+            }
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var principal = (await AuthState.GetAuthenticationStateAsync()).User;
+        var me = await UserManager.GetUserAsync(principal);
+        _userId = me?.Id ?? "";
+        var isAdmin = principal.IsInRole(PTScheduler.Domain.Constants.Roles.Admin);
+        _isAdmin = isAdmin;
+        var switchedOwner = principal.HasClaim(c => c.Type == PTScheduler.Web.Services.AccountSwitchService.OriginalUserClaim);
+        _isOwner = isAdmin || switchedOwner;
+        _canMail = _isOwner;
+        // Samo konto administratora (bez roli trenera i bez żadnego trenera w aplikacji): najpierw pytamy,
+        // czy właściciel sam prowadzi treningi — zapisany w kreatorze profil mógł już stracić rolę.
+        var iTrain = principal.IsInRole(PTScheduler.Domain.Constants.Roles.Trainer);
+        var askWhoTrains = isAdmin && !iTrain && (await UserManager.GetUsersInRoleAsync(PTScheduler.Domain.Constants.Roles.Trainer)).Count == 0;
+        _trainerId = iTrain ? me?.Id : askWhoTrains ? null : await Setup.GetTrainerProfileIdAsync();
+        var access = await AdminAccess.LoadAsync(AuthState, Permission);
+
+        try
+        {
+            var brand = await Branding.GetAsync();
+            _studio = string.IsNullOrWhiteSpace(brand.CompanyName) || brand.CompanyName is "Hantly" or "PTScheduler" ? _studio : brand.CompanyName;
+            _logo = brand.LogoPath;
+        }
+        catch (Exception) { }
+        try { _assistant = await Platform.GetConfigAsync(); } catch (Exception) { }
+        _canLogo = isAdmin && Entitlements.IsAllowed("CustomLogo");
+
+        if (askWhoTrains) _steps.Add("me");
+        if (_trainerId is not null)
+        {
+            _steps.Add("hours");
+            await LoadHoursAsync();
+        }
+        if (_isOwner)
+        {
+            _steps.Add("offer");
+        }
+        await LoadOfferAsync();
+        if (_trainerId is not null)
+        {
+            _steps.Add("rules");
+            _cfg = await Availability.GetConfigAsync(_trainerId);
+            try { _paymentsOn = (await PaymentSettings.GetAsync()).Enabled; } catch (Exception) { }
+            if (!_paymentsOn) _cfg.OffPackageOnline = false;
+        }
+        if (isAdmin)
+        {
+            _steps.Add("look");
+            if (_trainerId is not null) { try { _style = await Drafts.GetStyleAsync(_trainerId); } catch (Exception) { } }
+            if (!string.IsNullOrEmpty(_logo)) _saved.Add("look");
+            _steps.Add("site");
+            await LoadSiteAsync(me?.Email);
+        }
+        if (_canMail)
+        {
+            _steps.Add("mail");
+            await LoadMailAsync(me?.Email);
+        }
+        if (access.Can(PTScheduler.Domain.Constants.Permissions.ManagePayments) && Entitlements.IsAllowed("PaymentsEnabled"))
+        {
+            _steps.Add("pay");
+            await LoadPayAsync();
+        }
+        if (access.Can(PTScheduler.Domain.Constants.Permissions.ManageClients) || _trainerId is not null)
+        {
+            _steps.Add("client");
+            _clientCount = (await ClientService.GetClientsAsync(isAdmin ? null : _trainerId)).Count;
+            if (_clientCount > 0) _saved.Add("client");
+            await RefreshLimitAsync();
+        }
+        if (_trainerId is not null && Entitlements.IsAllowed("TrainingPlansEnabled"))
+        {
+            _steps.Add("plan");
+            try
+            {
+                if ((await TrainingPlans.GetPlansAsync(_trainerId, isAdmin)).Any(x => x.ClientId is not null))
+                {
+                    _saved.Add("plan");
+                    _planDone = "Masz już plan przypisany klientowi — kolejne ułożysz w zakładce Plany.";
+                }
+            }
+            catch (Exception) { }
+        }
+        _steps.Add("phone");
+        _loading = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Wznowienie raz, po wczytaniu danych (pierwsze renderowanie bywa jeszcze przed końcem ładowania).
+        if (!_resumed && !_loading && !string.IsNullOrEmpty(_userId))
+        {
+            _resumed = true;
+            var saved = await JS.InvokeAsync<string>("ptFirstSetup.load", StorageKey);
+            // Decyzja „kto prowadzi treningi” jest pierwsza i nie da się jej przeskoczyć wznowieniem.
+            var idx = _steps.Contains("me") ? 0
+                : !string.IsNullOrEmpty(Krok) && _steps.Contains(Krok) ? _steps.IndexOf(Krok)
+                : saved == "done" ? _steps.Count : _steps.IndexOf(saved);
+            if (idx > 0)
+            {
+                _at = idx;
+                if (Current == "plan" && _planDone is null) await LoadPlanClientsAsync();
+                StateHasChanged();
+            }
+        }
+        if (!_loading && !_offersLoaded)
+        {
+            // Ceny pomocy zespołu z Portalu — po pierwszym wyświetleniu, żeby wolny Portal nie wstrzymywał kreatora.
+            _offersLoaded = true;
+            try
+            {
+                var motion = await JS.InvokeAsync<string>("ptFirstSetup.getMotion");
+                _motion = motion is "calm" or "off" ? motion : "";
+            }
+            catch (JSException) { }
+            _offers = await Help.OffersAsync();
+            StateHasChanged();
+        }
+        if (Current is "done" or "phone" && !_qrDrawn && !_loading)
+        {
+            _qrDrawn = true;
+            var url = Current == "phone" ? Nav.BaseUri + "witaj?krok=phone" : Nav.BaseUri;
+            try { await JS.InvokeVoidAsync("ptFirstSetup.qr", _qrEl, url); } catch (JSException) { }
+        }
+    }
+
+    // ── Godziny ──
+    private async Task LoadHoursAsync()
+    {
+        var rules = (await Availability.GetAvailabilityRulesAsync(_trainerId!))
+            .Where(r => r.IsActive && r.DayOfWeek is not null && r.SpecificDate is null && r.ValidFrom is null && r.ValidUntil is null)
+            .ToList();
+        _days = FirstSetupRules.Week.Select(d => new DayRow
+        {
+            Day = d,
+            Windows = rules.Where(r => r.DayOfWeek == d).OrderBy(r => r.StartTime).Select(r => new Win { Start = r.StartTime, End = r.EndTime }).ToList()
+        }).ToList();
+        if (rules.Count == 0)
+        {
+            // Świeża aplikacja: najczęstszy układ — wystarczy kliknąć „Zapisz”, jeśli pasuje.
+            ApplyPreset(FirstSetupRules.Presets[0]);
+            _hoursPrefilled = true;
+        }
+        else _saved.Add("hours");
+    }
+
+    private void ApplyPreset(FirstSetupRules.Preset p)
+    {
+        foreach (var d in _days)
+            d.Windows = p.Windows.Where(w => w.Day == d.Day).Select(w => new Win { Start = w.Start, End = w.End }).ToList();
+        _error = null;
+    }
+
+    private void ToggleDay(DayRow row, bool on)
+    {
+        if (!on) { row.Windows.Clear(); return; }
+        // Nowy dzień jak sąsiedni dzień roboczy (zwykle te same godziny), inaczej 8–20.
+        var like = _days.FirstOrDefault(d => d.Windows.Count > 0);
+        row.Windows = like is null ? [new Win { Start = new(8, 0), End = new(20, 0) }]
+                                   : like.Windows.Select(w => new Win { Start = w.Start, End = w.End }).ToList();
+    }
+
+    private static void AddWindow(DayRow row)
+    {
+        var first = row.Windows[0];
+        // „Z przerwą”: rano do 12, potem od 16 (albo od końca pierwszego okna + 2 h).
+        var end = first.End;
+        first.End = first.Start < new TimeOnly(12, 0) ? new TimeOnly(12, 0) : first.Start.AddHours(3);
+        var start = first.End.AddHours(3);
+        row.Windows.Add(new Win { Start = start < end ? start : first.End.AddHours(1), End = end > start ? end : new TimeOnly(21, 0) });
+    }
+
+    private void SetTime(Win w, bool start, string value)
+    {
+        if (!TimeOnly.TryParse(value, out var t)) return;
+        if (start) w.Start = t; else w.End = t;
+        _error = null;
+    }
+
+    private async Task SaveHoursAsync()
+    {
+        var windows = Windows;
+        if (FirstSetupRules.Problem(windows) is { } problem) { _error = problem; return; }
+        if (windows.Count == 0) { _error = "Zaznacz choć jeden dzień albo pomiń ten krok."; return; }
+        await RunAsync(async () =>
+        {
+            // Zastępujemy tylko zwykłe godziny tygodnia — wyjątki (konkretne daty, okresy) zostają.
+            var old = (await Availability.GetAvailabilityRulesAsync(_trainerId!))
+                .Where(r => r.DayOfWeek is not null && r.SpecificDate is null && r.ValidFrom is null && r.ValidUntil is null);
+            foreach (var r in old) await Availability.DeleteRuleAsync(r.Id);
+            foreach (var w in windows)
+                await Availability.AddRuleAsync(new CreateTrainerAvailabilityDto { TrainerUserId = _trainerId!, DayOfWeek = w.Day, StartTime = w.Start, EndTime = w.End });
+            _saved.Add("hours");
+        });
+    }
+
+    // ── Oferta ──
+    private async Task LoadOfferAsync()
+    {
+        var types = await SessionTypes.GetAllAsync(includeInactive: true);
+        _types = types.Where(t => t.IsActive).Take(12)
+            .Select(t => new TypeRow { Id = t.Id, Name = t.Name, Minutes = t.DurationMinutes, Price = Plain(t.SinglePrice), Active = t.IsActive, Original = t }).ToList();
+        var packs = await Packages.GetAllAsync(includeInactive: false);
+        _packs = packs.Take(6).Select(p => new PackRow
+        {
+            Id = p.Id, Name = p.Name, Count = p.SessionsCount, Price = Plain(p.Price) ?? 0, Active = p.IsActive, Original = p,
+            // Trening spoza listy (np. ukryty) zostaje przy pakiecie bez zmian — nie przepinamy go po cichu.
+            TypeKey = _types.FirstOrDefault(t => t.Id == p.SessionTypeId)?.Key ?? $"org:{p.SessionTypeId}"
+        }).ToList();
+        if (_types.Count == 0) AddType();
+    }
+
+    private void AddType()
+    {
+        var row = new TypeRow { Name = _types.Count == 0 ? "Trening personalny" : "" };
+        if (Durations.Contains(_types.LastOrDefault()?.Minutes ?? 60)) row.Minutes = _types.LastOrDefault()?.Minutes ?? 60;
+        _types.Add(row);
+    }
+
+    private void AddPack()
+    {
+        var type = _types.FirstOrDefault(t => t.Active && !string.IsNullOrWhiteSpace(t.Name));
+        var price = type?.Price is > 0 ? Math.Round(type.Price.Value * 10 * 0.9m / 10) * 10 : 0;
+        _packs.Add(new PackRow { Name = "Pakiet 10 treningów", Count = 10, Price = price, TypeKey = type?.Key ?? "" });
+    }
+
+    private async Task SaveOfferAsync()
+    {
+        if (_types.Any(t => t.Active && string.IsNullOrWhiteSpace(t.Name) && t.Id > 0)) { _error = "Podaj nazwę każdego treningu."; return; }
+        if (_types.Any(t => t.Price < 0) || _packs.Any(p => p.Price < 0)) { _error = "Cena nie może być ujemna."; return; }
+        if (_packs.Any(p => !string.IsNullOrWhiteSpace(p.Name) && (p.Count is < 1 or > 100))) { _error = "Pakiet może mieć od 1 do 100 treningów."; return; }
+        await RunAsync(async () =>
+        {
+            foreach (var t in _types)
+            {
+                if (string.IsNullOrWhiteSpace(t.Name)) continue;
+                var dto = new CreateSessionTypeDto
+                {
+                    Name = t.Name.Trim(), DurationMinutes = t.Minutes, SinglePrice = t.Price is > 0 ? t.Price : null,
+                    IsGroup = t.Original?.IsGroup ?? false, MaxParticipants = t.Original?.MaxParticipants, IsPair = t.Original?.IsPair ?? false,
+                    RequiresPackage = t.Original?.RequiresPackage ?? false
+                };
+                if (t.Id == 0)
+                {
+                    t.Id = (await SessionTypes.CreateAsync(dto)).Id;
+                    if (!t.Active) await SessionTypes.SetActiveAsync(t.Id, false);
+                }
+                else
+                {
+                    var o = t.Original!;
+                    if (o.Name != dto.Name || o.DurationMinutes != dto.DurationMinutes || o.SinglePrice != dto.SinglePrice)
+                        await SessionTypes.UpdateAsync(t.Id, dto);
+                    if (o.IsActive != t.Active) await SessionTypes.SetActiveAsync(t.Id, t.Active);
+                }
+            }
+            foreach (var p in _packs)
+            {
+                var keep = p.TypeKey.StartsWith("org:") && p.Original is not null;
+                var type = keep ? null : _types.FirstOrDefault(t => t.Key == p.TypeKey && t.Id > 0) ?? _types.FirstOrDefault(t => t.Id > 0 && t.Active);
+                if (string.IsNullOrWhiteSpace(p.Name) || (type is null && !keep) || p.Price <= 0) continue;
+                var dto = new SavePackageOfferDto
+                {
+                    Name = p.Name.Trim(), SessionTypeId = keep ? p.Original!.SessionTypeId : type!.Id, SessionsCount = p.Count, Price = p.Price, IsActive = p.Active,
+                    IsForPair = keep ? p.Original!.IsForPair : type!.Original?.IsPair ?? false, IsFeatured = p.Original?.IsFeatured ?? _packs.IndexOf(p) == 0,
+                    Description = p.Original?.Description, ImageUrl = p.Original?.ImageUrl, ValidDays = p.Original?.ValidDays,
+                    SortOrder = p.Original?.SortOrder ?? 0
+                };
+                if (p.Id == 0) p.Id = await Packages.CreateAsync(dto, _userId);
+                else await Packages.UpdateAsync(p.Id, dto);
+            }
+            await LoadOfferAsync();
+            _saved.Add("offer");
+        });
+    }
+
+    // ── Zasady ──
+    private void SetWindow(int hours)
+    {
+        if (hours < 0) { _cfg.LateCancellationPolicy = LateCancellationPolicy.Refund; return; }
+        _cfg.CancellationWindowHours = hours;
+        if (_cfg.LateCancellationPolicy == LateCancellationPolicy.Refund) _cfg.LateCancellationPolicy = LateCancellationPolicy.ChargeSession;
+    }
+
+    private async Task SaveRulesAsync() => await RunAsync(async () =>
+    {
+        if (!_paymentsOn) _cfg.OffPackageOnline = false;
+        await Availability.SaveConfigAsync(_trainerId!, _cfg);
+        _saved.Add("rules");
+    });
+
+    // ── Poczta ──
+    private async Task LoadMailAsync(string? myEmail)
+    {
+        var mail = await MailSettings.GetAsync();
+        _platform = await PlatformMail.GetStatusAsync() is not null;
+        var own = mail.IsEnabled && !string.IsNullOrWhiteSpace(mail.SmtpHost);
+        _mailChoice = own ? "own" : _platform ? "hantly" : "own";
+        _replyTo = mail.ReplyTo ?? myEmail ?? "";
+        if (!string.IsNullOrWhiteSpace(mail.FromName) && mail.FromName is not ("Hantly" or "PTScheduler")) _studio = mail.FromName;
+        if (own || !string.IsNullOrWhiteSpace(mail.ReplyTo)) _saved.Add("mail");
+        _ownOk = own;
+        _ownEmail = own ? mail.FromAddress : _replyTo;
+        _workspace = mail.Provider == "GoogleWorkspace";
+    }
+
+    private void CheckReply() => _replyProblem = string.IsNullOrWhiteSpace(_replyTo) ? null : EmailRules.Problem(_replyTo);
+
+    private async Task SaveMailAsync()
+    {
+        if (_mailChoice == "own")
+        {
+            // Niepodłączona skrzynka nie blokuje — do tego czasu (o ile się da) wysyła Hantly w imieniu studia.
+            if (_ownOk) _saved.Add("mail");
+            await NextAsync();
+            return;
+        }
+        CheckReply();
+        if (_replyProblem is not null) return;
+        await RunAsync(async () =>
+        {
+            var mail = await MailSettings.GetAsync();
+            mail.ReplyTo = string.IsNullOrWhiteSpace(_replyTo) ? null : EmailRules.Normalize(_replyTo);
+            // Hantly wysyła: własna skrzynka wyłączona, nadawcą zostaje nazwa studia.
+            mail.IsEnabled = false;
+            if (string.IsNullOrWhiteSpace(mail.FromName) || mail.FromName is "Hantly" or "PTScheduler") mail.FromName = _studio;
+            mail.Password = ""; // puste = bez zmiany zapisanego hasła
+            await MailSettings.SaveAsync(mail);
+            _saved.Add("mail");
+        });
+    }
+
+    // ── Własna skrzynka ──
+    /// <summary>Test z danymi z formularza (wiadomość na ten sam adres); zapis i włączenie dopiero, gdy serwer ją przyjmie.</summary>
+    private async Task VerifyOwnAsync()
+    {
+        _ownError = null;
+        if (EmailRules.Problem(_ownEmail) is { } problem) { _ownError = problem; return; }
+        if (OwnProvider is not { } prov) return;
+        var host = prov.CustomHost && !string.IsNullOrWhiteSpace(_ownHost) ? _ownHost.Trim() : prov.Host;
+        if (string.IsNullOrWhiteSpace(host)) { _ownError = "Wpisz serwer SMTP z panelu hostingu."; return; }
+        _testingOwn = true;
+        try
+        {
+            var email = EmailRules.Normalize(_ownEmail);
+            var dto = await MailSettings.GetAsync();
+            dto.Provider = prov.Key is "Gmail" or "GoogleWorkspace" ? prov.Key : "Custom";
+            dto.SmtpHost = host;
+            dto.SmtpPort = prov.CustomHost ? _ownPort : prov.Port;
+            dto.UseTls = true;
+            dto.Login = email;
+            // Hasło aplikacji Google pokazuje się w grupach po 4 znaki — spacje nie są jego częścią.
+            dto.Password = prov.Key is "Gmail" or "GoogleWorkspace" ? _ownPass.Replace(" ", "") : _ownPass.Trim();
+            dto.FromAddress = email;
+            if (string.IsNullOrWhiteSpace(dto.FromName) || dto.FromName is "Hantly" or "PTScheduler") dto.FromName = _studio;
+            if (string.IsNullOrWhiteSpace(dto.ReplyTo)) dto.ReplyTo = email;
+            var (ok, error) = await MailService.TestOwnAsync(dto, email);
+            if (!ok)
+            {
+                _ownError = $"Skrzynka nie przyjęła wiadomości ({error}). Sprawdź hasło i czy dostęp dla programów pocztowych jest włączony — albo zamów podłączenie poniżej.";
+                return;
+            }
+            dto.IsEnabled = true;
+            await MailSettings.SaveAsync(dto);
+            _ownOk = true;
+            _ownEmail = email;
+            _ownPass = "";
+            if (string.IsNullOrWhiteSpace(_replyTo)) _replyTo = email;
+            _saved.Add("mail");
+        }
+        catch (Exception)
+        {
+            _ownError = "Nie udało się sprawdzić skrzynki. Spróbuj jeszcze raz albo zamów podłączenie poniżej.";
+        }
+        finally { _testingOwn = false; }
+    }
+
+    // ── Logo i asystent ──
+    private async Task UploadLogoAsync(InputFileChangeEventArgs e)
+    {
+        _error = null;
+        if (e.File.Size > 2 * 1024 * 1024) { _error = "Logo może mieć najwyżej 2 MB."; return; }
+        _logoBusy = true;
+        try
+        {
+            await using var stream = e.File.OpenReadStream(2 * 1024 * 1024);
+            _logo = await Branding.UploadLogoAsync(stream, e.File.Name);
+            _saved.Add("look");
+            _siteVersion++;
+        }
+        catch (Exception) { _error = "Nie udało się wgrać logo. Spróbuj pliku PNG albo JPG do 2 MB."; }
+        finally { _logoBusy = false; }
+    }
+
+    private async Task RemoveLogoAsync()
+    {
+        try { await Branding.DeleteLogoAsync(); _logo = null; _siteVersion++; }
+        catch (Exception) { _error = "Nie udało się usunąć logo."; }
+    }
+
+    private async Task SaveLookAsync() => await RunAsync(async () =>
+    {
+        try { await JS.InvokeVoidAsync("ptFirstSetup.setMotion", _motion); } catch (JSException) { }
+        if (_trainerId is not null && _assistant is { Enabled: true })
+        {
+            _style.TrainerUserId = _trainerId;
+            await Drafts.SaveStyleAsync(_style);
+        }
+        _saved.Add("look");
+    });
+
+    // ── Strona główna ──
+    private async Task LoadSiteAsync(string? ownerEmail)
+    {
+        try
+        {
+            _site = await SiteContent.GetDraftAsync();
+            var legacy = _site.LayoutVersion < 2 || _site.Blocks.Count == 0;
+            if (legacy)
+                _site = SiteWidgets.BuildTemplate(string.IsNullOrWhiteSpace(_site.Template) ? "personal" : _site.Template, _site);
+            var contact = _site.Blocks.FirstOrDefault(b => b.Type == "contact")?.Items.Where(i => !SiteWidgets.IsPlaceholderContact(i)).ToList() ?? [];
+            _sitePhone = contact.FirstOrDefault(i => i.Icon == "bi-telephone")?.Value;
+            _siteInsta = contact.FirstOrDefault(i => i.Icon == "bi-instagram")?.Value;
+            if (string.IsNullOrWhiteSpace(_sitePhone)) _sitePhone = (await Setup.GetPrefillAsync())?.Phone;
+            _sitePublished = !await SiteContent.HasUnpublishedDraftAsync();
+            if (_sitePublished && !legacy) _saved.Add("site");
+        }
+        catch (Exception) { _site = null; }
+    }
+
+    private static string? Val(ChangeEventArgs e) => string.IsNullOrWhiteSpace(e.Value?.ToString()) ? null : e.Value!.ToString()!.Trim();
+
+    private static string Quals(SiteBlock about) => about.Sample ? "" : string.Join(", ", about.Items.Select(i => i.Title).Where(t => !string.IsNullOrWhiteSpace(t)));
+
+    /// <summary>Własny tekst „O mnie” zdejmuje przykład — razem z przykładowymi certyfikatami z szablonu.</summary>
+    private static void SetAboutText(SiteBlock about, string? text)
+    {
+        if (about.Sample) about.Items = [];
+        about.Text = text;
+        about.Sample = false;
+    }
+
+    private static void SetQuals(SiteBlock about, string? value)
+    {
+        about.Items = (value ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Take(8).Select(t => new SiteBlockItem { Title = t.Length > 60 ? t[..60] : t }).ToList();
+        about.Sample = false;
+    }
+
+    private async Task SiteEditAsync(Action change)
+    {
+        if (_site is null) return;
+        change();
+        await SaveSiteDraftAsync();
+    }
+
+    private async Task SiteContactAsync(string? phone, string? insta)
+    {
+        if (_site is null) return;
+        _sitePhone = phone;
+        _siteInsta = insta;
+        SiteWidgets.ApplyContact(_site, phone, SiteEmail, insta);
+        await SaveSiteDraftAsync();
+    }
+
+    private async Task PickTemplateAsync(string key)
+    {
+        if (_site is null || _site.Template == key) return;
+        // Nowy szablon = nowe sekcje z przykładową treścią; kontakt wpisany wyżej zostaje.
+        _site = SiteWidgets.BuildTemplate(key, _site);
+        SiteWidgets.ApplyContact(_site, _sitePhone, SiteEmail, _siteInsta);
+        await SaveSiteDraftAsync();
+    }
+
+    private async Task SaveSiteDraftAsync()
+    {
+        _siteSaving = true;
+        try
+        {
+            await SiteContent.SaveDraftAsync(_site!);
+            _sitePublished = false;
+            _siteVersion++;
+        }
+        catch (Exception) { _error = "Nie udało się zapisać szkicu strony. Spróbuj jeszcze raz."; }
+        finally { _siteSaving = false; }
+    }
+
+    private async Task PublishSiteAsync() => await RunAsync(async () =>
+    {
+        SiteWidgets.ApplyContact(_site!, _sitePhone, SiteEmail, _siteInsta);
+        await SiteContent.SaveDraftAsync(_site!);
+        await SiteContent.PublishDraftAsync();
+        _sitePublished = true;
+        _siteVersion++;
+        _saved.Add("site");
+    });
+
+    // ── Pomoc zespołu ──
+    private async Task OrderHelpAsync(int itemId, string notes)
+    {
+        _ordering = true;
+        _error = null;
+        try
+        {
+            var (ok, error) = await Help.OrderAsync(itemId, $"{notes} · zamówione z „Pierwszych ustawień”");
+            if (ok) _ordered.Add(itemId);
+            else _error = error;
+        }
+        finally { _ordering = false; }
+    }
+
+    private RenderFragment HelpCard(int id, string title, string text, string notes) => __builder =>
+    {
+        if (_offers.TryGetValue(id, out var offer))
+        {
+            <div class="wz-help">
+                <span class="wz-help-ic" aria-hidden="true"><i class="bi bi-life-preserver"></i></span>
+                <span class="wz-help-txt">
+                    <b>@title</b>
+                    <small>@text @(offer.Price > 0 ? "Płacisz dopiero po wykonaniu — kwotę doliczymy do najbliższego rachunku." : "W ramach Twoich ustaleń z zespołem.")</small>
+                </span>
+                @if (_ordered.Contains(id))
+                {
+                    <span class="wz-help-done"><i class="bi bi-check-circle-fill"></i>Zamówione — odezwiemy się w 1 dzień roboczy</span>
+                }
+                else
+                {
+                    <button type="button" class="btn btn-outline-primary btn-sm" disabled="@_ordering" @onclick="() => OrderHelpAsync(id, notes)">Zamów · @PlatformHelpService.PriceText(offer.Price)</button>
+                }
+            </div>
+        }
+    };
+
+    // ── Płatności ──
+    private async Task LoadPayAsync()
+    {
+        try
+        {
+            var pay = await PaymentSettings.GetAsync();
+            _paymentsOn = pay.Enabled;
+            _payNames = pay.EnabledProviders.Where(x => x.Key != "sim")
+                .Select(x => PaymentProviderCatalog.Find(x.Key)?.Name ?? x.Key).ToList();
+            foreach (var g in PayGateways)
+                _payFields[g.Key] = new Dictionary<string, string>(pay.Provider(g.Key)?.Fields ?? []);
+            if ((await Setup.GetDecisionsAsync()).Contains("payments-offline")) _payChoice = "offline";
+            if (_paymentsOn || _payChoice == "offline") _saved.Add("pay");
+        }
+        catch (Exception) { }
+    }
+
+    private string PayField(string key) => _payFields.TryGetValue(_payKey, out var f) && f.TryGetValue(key, out var v) ? v : "";
+
+    private void SetPayField(string key, string? value)
+    {
+        if (!_payFields.TryGetValue(_payKey, out var f)) _payFields[_payKey] = f = [];
+        f[key] = (value ?? "").Trim();
+    }
+
+    private async Task SavePayAsync()
+    {
+        if (_paymentsOn) { await NextAsync(); return; }
+        if (_payChoice == "online")
+        {
+            if (PayMeta is not { } meta) return;
+            var missing = meta.Fields.Where(f => string.IsNullOrWhiteSpace(PayField(f.Key))).Select(f => f.Label).ToList();
+            if (missing.Count > 0) { _error = $"Uzupełnij: {string.Join(", ", missing)}."; return; }
+        }
+        await RunAsync(async () =>
+        {
+            if (_payChoice == "online")
+            {
+                var pay = await PaymentSettings.GetAsync();
+                var cfg = pay.Provider(_payKey);
+                if (cfg is null) pay.Providers.Add(cfg = new PaymentProviderConfigDto { Key = _payKey });
+                cfg.Enabled = true;
+                cfg.Sandbox = _paySandbox;
+                foreach (var f in PayMeta!.Fields) cfg.Fields[f.Key] = PayField(f.Key);
+                pay.Enabled = true;
+                await PaymentSettings.SaveAsync(pay);
+                await Setup.SetDecisionAsync("payments-offline", false);
+                _paymentsOn = true;
+                _payNames = [PayMeta.Name];
+                _saved.Add("pay");
+            }
+            else if (_payChoice == "offline")
+            {
+                await Setup.SetDecisionAsync("payments-offline", true);
+                _saved.Add("pay");
+            }
+        });
+    }
+
+    // ── Pierwszy plan ──
+    private async Task LoadPlanClientsAsync()
+    {
+        try
+        {
+            _planClients = (await ClientService.GetClientsAsync(_isAdmin ? null : _trainerId))
+                .OrderByDescending(c => c.CreatedAt).Take(100).ToList();
+            if (_planClients.Count > 0 && _planClients.All(c => c.Id != _planClientId))
+            {
+                _planClientId = _planClients[0].Id;
+                PlanClientChanged();
+            }
+        }
+        catch (Exception) { _planClients = []; }
+    }
+
+    private void PlanClientChanged()
+    {
+        _planProposal = null;
+        _planFocus = PlanGeneratorRules.FocusFromGoal(_planClients.FirstOrDefault(c => c.Id == _planClientId)?.TrainingGoal);
+    }
+
+    private async Task ProposePlanAsync()
+    {
+        if (_trainerId is null || _planClientId == 0) return;
+        _planBusy = true;
+        _error = null;
+        try
+        {
+            // Tylko reguły (bez AI) — propozycja w sekundę; AI jest w edytorze planu, gdy trener zechce.
+            var minutes = _types.FirstOrDefault(t => t.Active)?.Minutes ?? 60;
+            _planProposal = await Generator.ProposeAsync(_planClientId, _trainerId, new PlanGeneratorRules.Options(_planDays, minutes, _planFocus, _planKit), false, null);
+        }
+        catch (Exception) { _error = "Nie udało się ułożyć propozycji. Spróbuj jeszcze raz albo pomiń — plan ułożysz w zakładce Plany."; }
+        finally { _planBusy = false; }
+    }
+
+    private async Task AssignPlanAsync()
+    {
+        if (_planProposal is not { } prop || _trainerId is null) return;
+        await RunAsync(async () =>
+        {
+            var meta = await Generator.MetaAsync(prop.Plan.Days.SelectMany(d => d.Exercises).Select(e => e.ExerciseId));
+            var dto = PTScheduler.Web.Services.PlanGeneratorService.ToEditDto(prop.Plan, _planClientId, meta);
+            await TrainingPlans.SavePlanAsync(_trainerId, dto, _isAdmin);
+            var who = _planClients.FirstOrDefault(c => c.Id == _planClientId)?.FullName ?? "Klient";
+            _planDone = $"„{dto.Name}” — {who} widzi go już w aplikacji.";
+            _saved.Add("plan");
+        });
+    }
+
+    private static string Dose(PlanGeneratorRules.Pick x) =>
+        x.DurationSeconds is int sec ? $"{x.Sets} × {sec} s" : $"{x.Sets} × {x.Reps ?? "—"}";
+
+    // ── Klient ──
+    private async Task AddClientAsync()
+    {
+        _error = null;
+        var name = _cName.Trim();
+        if (name.Length == 0) { _error = "Podaj imię i nazwisko."; return; }
+        if (EmailRules.Problem(_cEmail) is { } problem) { _error = problem; return; }
+        await RefreshLimitAsync();
+        if (_limitReached) return;
+        var space = name.IndexOf(' ');
+        var dto = new CreateClientDto
+        {
+            FirstName = space > 0 ? name[..space] : name,
+            LastName = space > 0 ? name[(space + 1)..].Trim() : "",
+            Email = EmailRules.Normalize(_cEmail),
+            Phone = string.IsNullOrWhiteSpace(_cPhone) ? null : _cPhone.Trim(),
+            TrainerUserId = _trainerId
+        };
+        _busy = true;
+        try
+        {
+            var result = await ClientService.AddClientAsync(dto);
+            if (!result.Ok) { _error = result.Error ?? "Nie udało się dodać klienta."; return; }
+            var note = result.Notice ?? "dodano do Twoich klientów";
+            if (_cInvite && result.Notice is null)
+            {
+                var r = await Invitations.SendInviteAsync(result.Client!.Id, Nav.BaseUri);
+                note = r.EmailSent ? $"zaproszenie wysłane na {dto.Email}" : "dodano — zaproszenia nie udało się wysłać, wyślesz je z profilu klienta";
+            }
+            _added.Add((name, note));
+            _saved.Add("client");
+            _clientCount++;
+            _cName = _cEmail = _cPhone = "";
+            await RefreshLimitAsync();
+        }
+        catch (Exception)
+        {
+            _error = "Nie udało się dodać klienta. Spróbuj jeszcze raz albo dodaj go później w zakładce Klienci.";
+        }
+        finally { _busy = false; }
+    }
+
+    // Limit planu liczy wszystkich klientów studia, a _clientCount u trenera to tylko jego klienci.
+    private async Task RefreshLimitAsync() =>
+        (_, _studioClients, _maxClients) = await Entitlements.CheckClientLimitAsync();
+
+    private (string Text, bool Reached)? LimitNote => FirstSetupRules.ClientLimitNote(_studioClients, _maxClients, _clientCount, _isOwner);
+
+    private async Task CopyAsync(string text)
+    {
+        try { if (await JS.InvokeAsync<bool>("ptShare.copy", text)) _copied = text; } catch (JSException) { }
+    }
+
+    // ── Nawigacja ──
+    private async Task RunAsync(Func<Task> save)
+    {
+        _error = null;
+        _busy = true;
+        try
+        {
+            await save();
+            await NextAsync();
+        }
+        catch (Exception)
+        {
+            _error = "Nie udało się zapisać. Spróbuj jeszcze raz albo pomiń — ustawisz to później w Zarządzaniu.";
+        }
+        finally { _busy = false; }
+    }
+
+    private Task NextAsync() => GoAsync(_at + 1);
+
+    private async Task GoAsync(int idx)
+    {
+        _error = null;
+        _at = Math.Clamp(idx, 0, _steps.Count);
+        if (Current == "plan" && _planDone is null) await LoadPlanClientsAsync();
+        _qrDrawn = false;
+        try { await JS.InvokeVoidAsync("ptFirstSetup.save", StorageKey, _at >= _steps.Count ? "done" : _steps[_at]); } catch (JSException) { }
+        try { await JS.InvokeVoidAsync("scrollTo", 0, 0); } catch (JSException) { }
+    }
+
+    private RenderFragment Error() => __builder =>
+    {
+        if (_error is not null)
+        {
+            <div class="alert alert-danger py-2 mt-3 mb-0" role="alert">@_error</div>
+        }
+    };
+
+    private RenderFragment Busy() => __builder =>
+    {
+        if (_busy)
+        {
+            <span class="spinner-border spinner-border-sm me-1"></span>
+        }
+    };
+
+    private static string Hours(IEnumerable<FirstSetupRules.Window> w)
+    {
+        var h = FirstSetupRules.TotalHours(w);
+        return $"{h:0.#} h";
+    }
+
+    /// <summary>1200.00 → 1200 (pole liczby pokazuje wtedy cenę bez zbędnych zer).</summary>
+    private static decimal? Plain(decimal? v) => v is { } d ? decimal.Parse(d.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture), System.Globalization.CultureInfo.InvariantCulture) : null;
+
+    private static string DaysText(int n) => n == 0 ? "bez dni pracy" : $"{n} {Pl(n, "dzień", "dni", "dni")} pracy";
+    private static string ClientsWord(int n) => Pl(n, "klienta", "klientów", "klientów");
+    private static string Pl(int n, string one, string few, string many) => PTScheduler.Web.Services.SetupGuide.Pl(n, one, few, many);
+}

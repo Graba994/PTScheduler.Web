@@ -1,0 +1,183 @@
+@inject InstagramService Ig
+@inject InstagramAi Ai
+
+@* Statystyki: obserwujący i zasięg w czasie, najlepsze pory, filary treści, tabela postów i analiza AI. *@
+
+<div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+    <div class="pp-seg" role="group" aria-label="Okres">
+        @foreach (var d in new[] { 7, 30, 90 })
+        {
+            var days = d;
+            <button type="button" class="@(_days == days ? "active" : "")" @onclick="() => SetAsync(days)">@days dni</button>
+        }
+    </div>
+    <button class="btn btn-outline-primary btn-sm ms-auto" @onclick="AnalyzeAsync" disabled="@(_busy || _aiOff is not null)" title="@(_aiOff ?? "")">
+        @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-stars me-1"></i> }Analiza AI
+    </button>
+</div>
+
+@if (_analysis is not null)
+{
+    <div class="pp-callout pp-tone-info ig-analysis"><i class="bi bi-stars"></i><div>@foreach (var line in _analysis.Split('\n', StringSplitOptions.RemoveEmptyEntries)) { <p>@line.TrimStart('-', '*', ' ')</p> }</div></div>
+}
+
+@if (_s is null)
+{
+    <div class="text-muted small py-4 text-center"><span class="spinner-border spinner-border-sm me-2"></span>Wczytuję…</div>
+}
+else
+{
+    var posts = _s.Media.Where(m => m.PostedAt >= DateTime.UtcNow.AddDays(-_days) && m.ProductType != "STORY").ToList();
+    var gained = _s.Days.Count > 1 ? _s.Days[^1].Followers - _s.Days[0].Followers : 0;
+    <div class="pp-stats">
+        <StatTile Label="Obserwujący" Value="@_s.Followers.ToString("N0")" Icon="bi-people" Tone="info" Meta="@($"{gained:+#;-#;0} w okresie")" />
+        <StatTile Label="Zasięg" Value="@_s.Days.Sum(d => d.Reach ?? 0).ToString("N0")" Icon="bi-broadcast" Tone="ok" Meta="unikalne konta, suma dzienna" />
+        <StatTile Label="Posty" Value="@posts.Count.ToString()" Icon="bi-grid-3x3" Tone="muted" Meta="@(posts.Count > 0 ? $"{posts.Average(m => InstagramRules.Interactions(m)):0} interakcji na post" : "brak w okresie")" />
+        <StatTile Label="Zaangażowanie" Value="@(posts.Select(m => InstagramRules.EngagementRate(m, _s.Followers)).Where(x => x is not null).Select(x => x!.Value).DefaultIfEmpty().Average().ToString("0.0") + "%")" Icon="bi-heart" Tone="warn" Meta="średnio na post" />
+    </div>
+
+    <div class="ig-grid">
+        <div>
+            <PanelCard Title="Zasięg dzienny" Icon="bi-broadcast">
+                <Sparkline Points="@Points(d => d.Reach)" Range="@TimeSpan.FromDays(_days)" Bucket="@TimeSpan.FromDays(1)" Large="true" Height="140" Tone="ok" Format='v => v.ToString("N0")' AriaLabel="Zasięg dzienny" />
+            </PanelCard>
+            <PanelCard Title="Nowi obserwujący" Icon="bi-person-plus" Subtitle="zmiana dzień do dnia">
+                @if (Deltas().Count == 0)
+                {
+                    <div class="text-muted small">Wykres pojawi się po dwóch dniach zbierania danych.</div>
+                }
+                else
+                {
+                    var deltas = Deltas();
+                    var max = Math.Max(1, deltas.Max(d => Math.Abs(d.Delta)));
+                    <div class="ig-bars" role="img" aria-label="Zmiana liczby obserwujących dzień po dniu">
+                        @foreach (var d in deltas)
+                        {
+                            <span class="ig-bar @(d.Delta < 0 ? "neg" : "")" style="height:@(Math.Max(4, Math.Abs(d.Delta) * 100 / max))%" title="@($"{d.Day:dd.MM}: {d.Delta:+#;-#;0}")"></span>
+                        }
+                    </div>
+                }
+            </PanelCard>
+        </div>
+        <div>
+            <PanelCard Title="Najlepsze pory" Icon="bi-clock-history" Subtitle="średnie zaangażowanie postów wg dnia i godziny publikacji">
+                @if (_s.Slots.Count == 0)
+                {
+                    <div class="text-muted small">Za mało postów — po kilku publikacjach o różnych porach zobaczysz, kiedy obserwujący reagują najlepiej.</div>
+                }
+                else
+                {
+                    <ol class="ig-slots">
+                        @foreach (var sl in _s.Slots)
+                        {
+                            <li><b>@InstagramRules.DayName(sl.Day), @sl.Hour:00</b><span>@sl.Score% · @sl.Posts @(sl.Posts == 1 ? "post" : "posty")</span></li>
+                        }
+                    </ol>
+                }
+            </PanelCard>
+            <PanelCard Title="Filary treści" Icon="bi-diagram-3" Subtitle="posty przygotowane w Portalu">
+                @if (ByPillar(posts).Count == 0)
+                {
+                    <div class="text-muted small">Pojawi się, gdy opublikujesz posty z Portalu (z przypisanym filarem).</div>
+                }
+                else
+                {
+                    <table class="table table-sm ig-table mb-0">
+                        <thead><tr><th>Filar</th><th class="text-end">Posty</th><th class="text-end">Śr. zasięg</th><th class="text-end">Zaangaż.</th></tr></thead>
+                        <tbody>
+                            @foreach (var g in ByPillar(posts).OrderByDescending(g => g.Average(m => InstagramRules.EngagementRate(m, _s.Followers) ?? 0)))
+                            {
+                                <tr><td>@InstagramRules.PillarLabel(g.Key)</td><td class="text-end">@g.Count()</td><td class="text-end">@g.Average(m => m.Reach ?? 0).ToString("N0")</td><td class="text-end">@g.Average(m => InstagramRules.EngagementRate(m, _s.Followers) ?? 0).ToString("0.0")%</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </PanelCard>
+        </div>
+    </div>
+
+    <PanelCard Title="Posty" Icon="bi-grid-3x3" Flush="true">
+        <Actions>
+            <select class="form-select form-select-sm w-auto" @bind="_sort" aria-label="Sortuj">
+                <option value="date">Najnowsze</option>
+                <option value="reach">Zasięg</option>
+                <option value="eng">Zaangażowanie</option>
+                <option value="saved">Zapisania</option>
+            </select>
+        </Actions>
+        <ChildContent>
+            @if (posts.Count == 0)
+            {
+                <div class="pp-empty py-4"><i class="bi bi-grid-3x3"></i><div class="pp-empty-title">Brak postów w tym okresie</div></div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle ig-table mb-0">
+                        <thead><tr><th></th><th>Data</th><th>Opis</th><th class="text-end">Zasięg</th><th class="text-end"><i class="bi bi-heart" title="Polubienia"></i></th><th class="text-end"><i class="bi bi-chat" title="Komentarze"></i></th><th class="text-end"><i class="bi bi-bookmark" title="Zapisania"></i></th><th class="text-end"><i class="bi bi-send" title="Udostępnienia"></i></th><th class="text-end">Zaangaż.</th></tr></thead>
+                        <tbody>
+                            @foreach (var m in Sorted(posts))
+                            {
+                                <tr>
+                                    <td>@if (m.ThumbnailUrl is not null) { <a href="@m.Permalink" target="_blank" rel="noopener"><img src="@m.ThumbnailUrl" alt="" class="ig-table-thumb" referrerpolicy="no-referrer" loading="lazy" /></a> }</td>
+                                    <td class="text-nowrap small">@InstagramRules.ToWarsaw(m.PostedAt).ToString("dd.MM HH:mm")<br /><span class="text-muted">@(m.ProductType == "REELS" ? "Rolka" : m.MediaType == "CAROUSEL_ALBUM" ? "Karuzela" : "Post")</span></td>
+                                    <td class="small ig-table-cap">@InstagramGraphics.Clean(m.Caption, 90)</td>
+                                    <td class="text-end">@(m.Reach?.ToString("N0") ?? "—")</td>
+                                    <td class="text-end">@m.Likes</td>
+                                    <td class="text-end">@m.Comments</td>
+                                    <td class="text-end">@(m.Saved?.ToString() ?? "—")</td>
+                                    <td class="text-end">@(m.Shares?.ToString() ?? "—")</td>
+                                    <td class="text-end fw-semibold">@(InstagramRules.EngagementRate(m, _s.Followers)?.ToString("0.0") ?? "—")%</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </ChildContent>
+    </PanelCard>
+    <div class="small text-muted">Zaangażowanie = (polubienia + komentarze + zapisania + udostępnienia) ÷ zasięg posta. Statystyki odświeżam co 3 godziny; nowe posty mają pełne dane po około dobie.</div>
+}
+
+@code {
+    [Parameter] public EventCallback<(bool, string)> Flash { get; set; }
+
+    private int _days = 30;
+    private string _sort = "date";
+    private InstagramService.Stats? _s;
+    private bool _busy;
+    private string? _aiOff, _analysis;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _aiOff = await Ai.UnavailableAsync();
+        _s = await Ig.StatsAsync(_days);
+    }
+
+    private async Task SetAsync(int days) { _days = days; _s = await Ig.StatsAsync(days); }
+
+    private List<ResourceReportService.Point> Points(Func<InstagramDaily, int?> f) =>
+        _s!.Days.Where(d => f(d) is not null).Select(d => new ResourceReportService.Point(InstagramRules.ToUtc(d.Day.ToDateTime(new TimeOnly(12, 0))), f(d)!.Value)).ToList();
+
+    private List<(DateOnly Day, int Delta)> Deltas() => _s!.Days.Zip(_s.Days.Skip(1), (a, b) => (b.Day, b.Followers - a.Followers)).ToList();
+
+    private List<IGrouping<string, InstagramMedia>> ByPillar(List<InstagramMedia> posts) =>
+        posts.Where(m => m.PostId is int id && _s!.PillarByPost.ContainsKey(id)).GroupBy(m => _s!.PillarByPost[m.PostId!.Value]).ToList();
+
+    private IEnumerable<InstagramMedia> Sorted(List<InstagramMedia> list) => _sort switch
+    {
+        "reach" => list.OrderByDescending(m => m.Reach ?? 0),
+        "eng" => list.OrderByDescending(m => InstagramRules.EngagementRate(m, _s!.Followers) ?? 0),
+        "saved" => list.OrderByDescending(m => m.Saved ?? 0),
+        _ => list.OrderByDescending(m => m.PostedAt)
+    };
+
+    private async Task AnalyzeAsync()
+    {
+        _busy = true;
+        var (text, error) = await Ig.AnalyzeAsync(_days);
+        _busy = false;
+        if (text is null) { await Flash.InvokeAsync((false, error ?? "AI nie odpowiedziało.")); return; }
+        _analysis = text;
+    }
+}

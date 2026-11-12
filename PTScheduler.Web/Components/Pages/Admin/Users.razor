@@ -2,10 +2,15 @@
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Entities
+@using Microsoft.AspNetCore.Identity
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = Roles.Admin)]
 @inject IUserManagementService UserService
+@inject UserManager<ApplicationUser> UserManager
+@inject EntitlementService Entitlements
 @inject NavigationManager Nav
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@inject AuthenticationStateProvider AuthState
+@rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Użytkownicy" />
 
@@ -16,6 +21,38 @@
     </button>
 </div>
 <hr />
+
+@if (_solo is { Possible: true } solo)
+{
+    <section class="solo-card @(solo.Enabled ? "on" : "")" id="solo" aria-labelledby="solo-title">
+        <div class="solo-ic" aria-hidden="true"><i class="bi @(solo.Enabled ? "bi-person-check-fill" : "bi-person-workspace")"></i></div>
+        <div class="min-w-0 flex-grow-1">
+            <h6 id="solo-title">Pracuję sam — jedno konto do wszystkiego</h6>
+            @if (solo.Enabled)
+            {
+                <p>Włączone. Profil trenera <b>@solo.TrainerName</b> (@solo.TrainerEmail) ma też uprawnienia administratora — loguj się tylko nim, bez przełączania. To konto zostaje jako zapasowe.</p>
+            }
+            else
+            {
+                <p>Masz jeden profil trenera. Po włączeniu <b>@solo.TrainerName</b> dostanie też uprawnienia administratora: ustawienia, ceny i treningi w jednym miejscu, bez przełączania kont.</p>
+            }
+            @if (_soloMsg is not null) { <div class="small @(_soloErr ? "text-danger" : "text-success") mb-2">@_soloMsg</div> }
+            <div class="d-flex gap-2 flex-wrap">
+                <button type="button" class="btn btn-sm @(solo.Enabled ? "btn-outline-secondary" : "btn-primary")" disabled="@_soloBusy" @onclick="() => ToggleSoloAsync(!solo.Enabled)">
+                    @(solo.Enabled ? "Wyłącz" : "Włącz tryb „pracuję sam”")
+                </button>
+                @if (solo.Enabled && solo.TrainerId is { } tid && _canSwitchToSolo)
+                {
+                    <form action="Account/SwitchTo" method="post" data-enhance="false">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="userId" value="@tid" />
+                        <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-person-badge me-1"></i>Przejdź na swój profil</button>
+                    </form>
+                }
+            </div>
+        </div>
+    </section>
+}
 
 @if (users is null)
 {
@@ -38,7 +75,7 @@ else
     </div>
 
     <div class="table-responsive">
-        <table class="table table-hover align-middle">
+        <table class="table table-stack table-hover align-middle">
             <thead class="table-light">
                 <tr>
                     <th>Użytkownik</th>
@@ -155,12 +192,13 @@ else
                         <div class="mb-2">
                             <label class="form-label">Trener</label>
                             <select class="form-select" @bind="newClientTrainerId">
-                                <option value="">— brak —</option>
+                                <option value="">— wybierz trenera —</option>
                                 @foreach (var t in trainers)
                                 {
                                     <option value="@t.Id">@t.FullName (@t.Email)</option>
                                 }
                             </select>
+                            <div class="form-text">Klient pojawi się na liście tego trenera.</div>
                         </div>
                     }
                 </div>
@@ -177,6 +215,27 @@ else
 }
 
 @code {
+    private SoloModeState? _solo;
+    private string? _currentUserId;
+    private bool _soloBusy, _soloErr, _canSwitchToSolo;
+    private string? _soloMsg;
+
+    private async Task LoadSoloAsync()
+    {
+        try { _solo = await UserService.GetSoloModeAsync(); } catch { _solo = null; }
+        _canSwitchToSolo = _solo?.TrainerId is not null && _currentUserId != _solo.TrainerId;
+    }
+
+    private async Task ToggleSoloAsync(bool on)
+    {
+        _soloBusy = true; _soloMsg = null;
+        var (ok, error) = await UserService.SetSoloModeAsync(on);
+        _soloErr = !ok;
+        _soloMsg = ok ? (on ? "Gotowe. Przejdź na swój profil — od teraz to Twoje jedyne konto do pracy." : "Wyłączone. Profil trenera ma znowu tylko uprawnienia trenera.") : error;
+        await LoadSoloAsync();
+        _soloBusy = false;
+    }
+
     private List<UserDto>? users;
     private List<UserDto> trainers = [];
     private string search = string.Empty;
@@ -186,6 +245,7 @@ else
     private string createError = string.Empty;
     private CreateUserDto newUser = new();
     private string newClientTrainerId = string.Empty;
+    private string? _confirmedEmail;
 
     private IEnumerable<UserDto> Filtered => users?
         .Where(u => string.IsNullOrEmpty(search) ||
@@ -197,12 +257,14 @@ else
     {
         users = await UserService.GetAllUsersAsync();
         trainers = await UserService.GetTrainersAsync();
+        _currentUserId = (await AuthState.GetAuthenticationStateAsync()).User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        await LoadSoloAsync();
     }
 
     private void OpenCreateModal()
     {
         newUser = new CreateUserDto { Role = Roles.Trainer };
-        newClientTrainerId = string.Empty;
+        newClientTrainerId = trainers.Count == 1 ? trainers[0].Id : string.Empty;
         createError = string.Empty;
         showCreateModal = true;
     }
@@ -213,8 +275,28 @@ else
     {
         createError = string.Empty;
 
-        if (string.IsNullOrWhiteSpace(newUser.Email))   { createError = "E-mail jest wymagany."; return; }
+        newUser.Email = PTScheduler.Domain.Rules.EmailRules.Normalize(newUser.Email);
+        if (PTScheduler.Domain.Rules.EmailRules.Problem(newUser.Email) is { } emailProblem) { createError = emailProblem; return; }
+        if (PTScheduler.Domain.Rules.EmailRules.Suggestion(newUser.Email) is { } suggestion && newUser.Email != _confirmedEmail)
+        {
+            _confirmedEmail = newUser.Email;
+            createError = $"Sprawdź adres — czy chodziło o {suggestion}? Jeśli adres jest dobry, kliknij „Utwórz” jeszcze raz.";
+            return;
+        }
+        if (newUser.Role == Roles.Client && trainers.Count > 0 && string.IsNullOrEmpty(newClientTrainerId)) { createError = "Wybierz trenera klienta."; return; }
         if (string.IsNullOrWhiteSpace(newUser.Password)) { createError = "Hasło jest wymagane."; return; }
+
+        // Plan limit checks — trainers and subordinates are limited by the plan
+        if (newUser.Role == Roles.Trainer)
+        {
+            var (ok, cur, max) = await Entitlements.CheckTrainerLimitAsync(UserManager);
+            if (!ok) { createError = $"Osiągnięto limit trenerów w planie {Entitlements.Current.Name} ({cur}/{max}). Zwiększ plan aby dodać więcej."; return; }
+        }
+        if (newUser.Role == Roles.Subordinate)
+        {
+            var (ok, cur, max) = await Entitlements.CheckSubordinateLimitAsync(UserManager);
+            if (!ok) { createError = $"Osiągnięto limit asystentów w planie {Entitlements.Current.Name} ({cur}/{max}). Zwiększ plan aby dodać więcej."; return; }
+        }
 
         createBusy = true;
         try

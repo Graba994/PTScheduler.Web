@@ -1,0 +1,190 @@
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Enums
+@inject IAppClock Clock
+
+@* Wybór podopiecznego: zdjęcie lub inicjały, cel i ostatni trening; wyszukiwanie bez polskich znaków, klawiatura (↑ ↓ Enter Esc). *@
+<div class="ckp @(_open ? "open" : "")">
+    <button type="button" class="ckp-btn" @onclick="Toggle" aria-haspopup="listbox" aria-expanded="@(_open ? "true" : "false")" disabled="@Disabled">
+        @if (Selected is { } s)
+        {
+            @AvatarOf(s)
+            <span class="ckp-txt">
+                <b>@s.FullName</b>
+                <small>@(string.IsNullOrWhiteSpace(s.TrainingGoal) ? LastLabel(s) : s.TrainingGoal)</small>
+            </span>
+        }
+        else
+        {
+            <span class="ckp-av ckp-av-none"><i class="bi bi-person-plus"></i></span>
+            <span class="ckp-txt"><b>@Placeholder</b><small>@_clients.Count @PeopleWord(_clients.Count)</small></span>
+        }
+        <i class="bi bi-chevron-down ckp-chev"></i>
+    </button>
+
+    @if (_open)
+    {
+        <div class="ckp-backdrop" @onclick="Close"></div>
+        <div class="ckp-pop" role="dialog" aria-label="Wybierz podopiecznego">
+            <div class="ckp-search">
+                <i class="bi bi-search"></i>
+                <input @ref="_input" value="@_q" @oninput="OnSearch" @onkeydown="OnKey" placeholder="Szukaj po imieniu lub celu…" aria-label="Szukaj podopiecznego" autocomplete="off" />
+                <button type="button" class="ckp-x" @onclick="Close" aria-label="Zamknij"><i class="bi bi-x-lg"></i></button>
+            </div>
+            <div class="ckp-list" role="listbox">
+                @if (AllowNone && string.IsNullOrWhiteSpace(_q))
+                {
+                    <button type="button" role="option" aria-selected="@(Value is null ? "true" : "false")" class="ckp-item ckp-none @(Value is null ? "on" : "")" @onclick="() => Choose(null)">
+                        <span class="ckp-av ckp-av-none"><i class="bi bi-dash-lg"></i></span>
+                        <span class="ckp-txt"><b>Bez przypisania</b><small>Plan zostanie bez podopiecznego</small></span>
+                    </button>
+                }
+                @for (var i = 0; i < _filtered.Count; i++)
+                {
+                    var c = _filtered[i];
+                    var idx = i;
+                    <button type="button" role="option" aria-selected="@(Value == c.Id ? "true" : "false")"
+                            class="ckp-item @(Value == c.Id ? "on" : "") @(idx == _hi ? "hi" : "") @(c.Status == ClientStatus.Inactive ? "off" : "")"
+                            @onclick="() => Choose(c.Id)" @onmouseenter="() => _hi = idx">
+                        @AvatarOf(c)
+                        <span class="ckp-txt">
+                            <b>@c.FullName</b>
+                            <small>
+                                @if (!string.IsNullOrWhiteSpace(c.TrainingGoal))
+                                {
+                                    <span class="ckp-goal"><i class="bi bi-bullseye"></i>@c.TrainingGoal</span>
+                                }
+                                <span class="ckp-last">@LastLabel(c)</span>
+                            </small>
+                        </span>
+                        @if (c.Status == ClientStatus.Inactive)
+                        {
+                            <span class="ckp-tag">nieaktywny</span>
+                        }
+                        @if (Value == c.Id)
+                        {
+                            <i class="bi bi-check-lg ckp-check"></i>
+                        }
+                    </button>
+                }
+                @if (_filtered.Count == 0)
+                {
+                    <div class="ckp-empty"><i class="bi bi-search"></i>Nikt nie pasuje do „@_q”.</div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public List<ClientDto> Clients { get; set; } = [];
+    [Parameter] public int? Value { get; set; }
+    [Parameter] public EventCallback<int?> ValueChanged { get; set; }
+    [Parameter] public bool AllowNone { get; set; } = true;
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public string Placeholder { get; set; } = "Wybierz podopiecznego";
+
+    private const int MaxShown = 80;
+    private List<ClientDto> _clients = [];
+    private List<ClientDto> _filtered = [];
+    private bool _open;
+    private bool _focus;
+    private string _q = "";
+    private int _hi;
+    private ElementReference _input;
+
+    private ClientDto? Selected => Value is int id ? _clients.FirstOrDefault(c => c.Id == id) : null;
+
+    protected override void OnParametersSet()
+    {
+        // Najpierw aktywni, potem ostatnio trenujący — tych trener szuka najczęściej.
+        _clients = Clients.OrderBy(c => c.Status == ClientStatus.Inactive)
+            .ThenByDescending(c => c.LastSessionDate ?? DateTime.MinValue).ThenBy(c => c.FullName).ToList();
+        Filter();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focus) return;
+        _focus = false;
+        try { await _input.FocusAsync(); } catch (InvalidOperationException) { /* element zniknął */ }
+    }
+
+    private void Toggle()
+    {
+        if (_open) { Close(); return; }
+        _open = true;
+        _q = "";
+        Filter();
+        _hi = Math.Max(0, _filtered.FindIndex(c => c.Id == Value));
+        _focus = true;
+    }
+
+    private void Close() => _open = false;
+
+    private void OnSearch(ChangeEventArgs e)
+    {
+        _q = e.Value?.ToString() ?? "";
+        Filter();
+        _hi = 0;
+    }
+
+    private async Task OnKey(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "ArrowDown": _hi = Math.Min(_filtered.Count - 1, _hi + 1); break;
+            case "ArrowUp": _hi = Math.Max(0, _hi - 1); break;
+            case "Enter" when _hi >= 0 && _hi < _filtered.Count: await Choose(_filtered[_hi].Id); break;
+            case "Escape": Close(); break;
+        }
+    }
+
+    private async Task Choose(int? id)
+    {
+        _open = false;
+        if (id == Value) return;
+        Value = id;
+        await ValueChanged.InvokeAsync(id);
+    }
+
+    private void Filter()
+    {
+        var q = Fold(_q);
+        _filtered = (q.Length == 0
+                ? _clients
+                : _clients.Where(c => Fold(c.FullName).Contains(q) || Fold(c.TrainingGoal).Contains(q) || Fold(c.Email).StartsWith(q)))
+            .Take(MaxShown).ToList();
+    }
+
+    private static string Fold(string? s)
+    {
+        if (string.IsNullOrEmpty(s)) return "";
+        var d = s.Trim().ToLowerInvariant().Replace('ł', 'l').Normalize(System.Text.NormalizationForm.FormD);
+        return new string(d.Where(ch => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch) != System.Globalization.UnicodeCategory.NonSpacingMark).ToArray());
+    }
+
+    private string LastLabel(ClientDto c)
+    {
+        if (c.LastSessionDate is not { } last) return "jeszcze bez treningu";
+        var days = Clock.Today.DayNumber - DateOnly.FromDateTime(last).DayNumber;
+        if (days < 0) return "najbliższy trening " + DateOnly.FromDateTime(last).ToString("d.MM");
+        if (days == 0) return "trening dziś";
+        if (days == 1) return "ostatnio wczoraj";
+        if (days < 14) return $"ostatnio {days} dni temu";
+        if (days < 60) return $"ostatnio {days / 7} tyg. temu";
+        return "ostatnio " + DateOnly.FromDateTime(last).ToString("d.MM.yyyy");
+    }
+
+    private static string PeopleWord(int n)
+    {
+        var mod10 = n % 10;
+        var mod100 = n % 100;
+        var word = n == 1 ? "osoba" : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14) ? "osoby" : "osób";
+        return word + " do wyboru";
+    }
+
+    private static RenderFragment AvatarOf(ClientDto c) => !string.IsNullOrEmpty(c.ProfilePictureUrl)
+        ? @<img class="ckp-av" src="@c.ProfilePictureUrl" alt="" loading="lazy" />
+        : @<span class="ckp-av" style="--h:@(c.Id * 47 % 360)">@(c.Initials is { Length: > 0 } i ? i : "?")</span>;
+}

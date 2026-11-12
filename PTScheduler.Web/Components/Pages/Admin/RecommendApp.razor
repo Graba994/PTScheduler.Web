@@ -1,0 +1,102 @@
+@page "/admin/polec"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@inject PlatformInfoService Platform
+@inject IJSRuntime JS
+@rendermode PTScheduler.Web.RenderModes.Server
+
+@* Polecenia aplikacji między trenerami (nie mylić z programem poleceń dla klientów w Referrals.razor). *@
+
+<AppTitle Page="Poleć aplikację" />
+
+<div class="page-header mb-3">
+    <h4 class="page-title mb-0"><i class="bi bi-gift me-2" style="color:var(--c-primary)"></i>Poleć aplikację znajomym trenerom</h4>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (_info is null)
+{
+    <div class="alert alert-secondary" style="max-width:640px">Polecenia nie są teraz dostępne — spróbuj za chwilę.</div>
+}
+else
+{
+    <div class="ra" style="max-width:720px">
+        <div class="ra-hero">
+            <div class="ra-gift"><i class="bi bi-gift-fill"></i></div>
+            <div>
+                <h5>Ty dostajesz miesiąc gratis, polecona osoba — @_info.BonusDays dni dłużej za darmo</h5>
+                <p class="mb-0 text-muted">Wyślij link komuś, kto prowadzi treningi. Nagroda wpada, gdy polecona osoba zapłaci pierwszy raz za abonament@(_info.ViaStripe ? " — odejmiemy ją od Twojej najbliższej płatności kartą" : " — odejmiemy miesiąc na Twoim najbliższym rachunku").</p>
+            </div>
+        </div>
+
+        <label class="form-label fw-semibold mt-3" for="ra-link">Twój link</label>
+        <div class="input-group">
+            <input id="ra-link" class="form-control" readonly value="@_info.ReferralLink" />
+            <button class="btn btn-primary" @onclick="Copy"><i class="bi @(_copied ? "bi-check2" : "bi-clipboard") me-1"></i>@(_copied ? "Skopiowano" : "Kopiuj")</button>
+        </div>
+
+        <div class="ra-share">
+            <a class="btn btn-outline-success btn-sm" href="@($"https://wa.me/?text={Uri.EscapeDataString(Message)}")" target="_blank" rel="noopener"><i class="bi bi-whatsapp me-1"></i>WhatsApp</a>
+            <a class="btn btn-outline-secondary btn-sm" href="@($"mailto:?subject={Uri.EscapeDataString("Aplikacja dla trenerów, z której korzystam")}&body={Uri.EscapeDataString(Message)}")"><i class="bi bi-envelope me-1"></i>E-mail</a>
+            <a class="btn btn-outline-secondary btn-sm" href="@($"sms:?&body={Uri.EscapeDataString(Message)}")"><i class="bi bi-chat-dots me-1"></i>SMS</a>
+        </div>
+
+        <div class="ra-stats">
+            <div><b>@_info.Referred</b><span>@Plural(_info.Referred, "osoba z polecenia", "osoby z polecenia", "osób z polecenia")</span></div>
+            <div><b>@_info.Paying</b><span>@Plural(_info.Paying, "już płaci", "już płacą", "już płaci")</span></div>
+            <div><b>@_info.FreeMonths</b><span>@Plural(_info.FreeMonths, "darmowy miesiąc", "darmowe miesiące", "darmowych miesięcy") do wykorzystania</span></div>
+        </div>
+
+        <details class="ra-rules">
+            <summary>Zasady</summary>
+            <ul class="small text-muted mb-0">
+                <li>Polecona osoba zakłada aplikację z Twojego linku albo ze stopki „Zrobione w @_info.PlatformName” na Twojej stronie (pamiętamy to 30 dni).</li>
+                <li>Miesiąc gratis dostajesz po pierwszej płatności poleconej osoby za abonament — nie za samą rejestrację.</li>
+                <li>Najwyżej 12 nagród w roku (zostało: @_info.RewardsLeft). Polecenie samego siebie się nie liczy.</li>
+            </ul>
+        </details>
+    </div>
+}
+
+<style>
+    .ra-hero { display: flex; gap: 1rem; align-items: flex-start; padding: 1.1rem 1.2rem; border-radius: 16px;
+        background: color-mix(in srgb, var(--c-primary, #0284c7) 8%, var(--bs-body-bg, #fff)); border: 1px solid color-mix(in srgb, var(--c-primary, #0284c7) 20%, transparent); }
+    .ra-hero h5 { font-size: 1.05rem; font-weight: 700; margin-bottom: .3rem; text-wrap: balance; }
+    .ra-gift { width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; flex-shrink: 0; font-size: 1.3rem; color: #fff; background: var(--c-primary, #0284c7); }
+    .ra-share { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .75rem; }
+    .ra-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem; margin-top: 1.25rem; }
+    .ra-stats > div { padding: .9rem 1rem; border-radius: 14px; border: 1px solid var(--bs-border-color, #e5e7eb); display: flex; flex-direction: column; }
+    .ra-stats b { font-size: 1.5rem; font-variant-numeric: tabular-nums; line-height: 1.1; }
+    .ra-stats span { font-size: .8rem; color: var(--bs-secondary-color, #6b7280); }
+    .ra-rules { margin-top: 1rem; }
+    .ra-rules summary { cursor: pointer; font-weight: 600; font-size: .9rem; }
+    @@media (max-width: 520px) { .ra-stats { grid-template-columns: 1fr; } }
+</style>
+
+@code {
+    private PlatformInfoService.Info? _info;
+    private bool _loading = true;
+    private bool _copied;
+
+    private string Message => _info is null ? "" :
+        $"Hej! Prowadzę zapisy, płatności i plany klientów w aplikacji {_info.PlatformName} — mam swoją aplikację i stronę pod własną marką. " +
+        $"Z tego linku masz {_info.BonusDays} dni dłużej za darmo: {_info.ReferralLink}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _info = await Platform.GetAsync(fresh: true);
+        _loading = false;
+    }
+
+    private async Task Copy()
+    {
+        if (_info is null) return;
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", _info.ReferralLink); _copied = true; }
+        catch (JSException) { _copied = false; }
+    }
+
+    private static string Plural(int n, string one, string few, string many) =>
+        n == 1 ? one : n % 10 is >= 2 and <= 4 && n % 100 is < 12 or > 14 ? few : many;
+}

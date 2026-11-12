@@ -1,0 +1,138 @@
+@inject InstagramService Ig
+@inject InstagramAi Ai
+
+@* Komentarze: skrzynka „do odpowiedzi” z podpowiedzią AI, odpowiedź, ukrycie, „bez odpowiedzi”. *@
+
+<div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+    <div class="pp-seg" role="group" aria-label="Które komentarze">
+        <button type="button" class="@(_open ? "active" : "")" @onclick="() => SetAsync(true)">Do odpowiedzi</button>
+        <button type="button" class="@(_open ? "" : "active")" @onclick="() => SetAsync(false)">Wszystkie</button>
+    </div>
+    <button class="btn btn-outline-secondary btn-sm ms-auto" @onclick="SyncAsync" disabled="@_busy"><i class="bi bi-arrow-repeat me-1"></i>Pobierz nowe</button>
+</div>
+
+@if (_list.Count == 0)
+{
+    <div class="pp-card"><div class="pp-empty">
+        <i class="bi bi-chat-heart"></i>
+        <div class="pp-empty-title">@(_open ? "Wszystko obsłużone" : "Brak komentarzy")</div>
+        <p>Komentarze pod ostatnimi 15 postami pobieram co 15 minut. Szybka odpowiedź (w ciągu godziny) podbija zasięg posta.</p>
+    </div></div>
+}
+else
+{
+    <div class="ig-comments">
+        @foreach (var c in _list)
+        {
+            var comment = c;
+            var media = _media.GetValueOrDefault(comment.MediaId);
+            <article class="ig-comment @(comment.Done ? "is-done" : "") @(comment.Hidden ? "is-hidden" : "")" @key="comment.Id">
+                @if (media?.ThumbnailUrl is { } thumb)
+                {
+                    <a href="@media.Permalink" target="_blank" rel="noopener" class="ig-comment-media" title="@InstagramGraphics.Clean(media.Caption, 80)"><img src="@thumb" alt="" referrerpolicy="no-referrer" loading="lazy" /></a>
+                }
+                <div class="ig-comment-main">
+                    <div class="ig-comment-head">
+                        <b>@@@comment.Username</b>
+                        <span class="text-muted small">@IgUi.When(comment.At)</span>
+                        @if (comment.ParentId is not null) { <span class="pp-chip">odpowiedź w wątku</span> }
+                        @if (comment.Hidden) { <span class="pp-chip pp-tone-muted">ukryty</span> }
+                        @if (comment.Done && !comment.Hidden) { <span class="pp-chip pp-tone-ok">obsłużony</span> }
+                        @if (InstagramRules.IsSimplePraise(comment.Text)) { <span class="pp-chip pp-tone-info" title="Krótka pochwała — autopilot może na nią odpowiedzieć sam">pochwała</span> }
+                    </div>
+                    <div class="ig-comment-text">@comment.Text</div>
+                    @if (!comment.Done)
+                    {
+                        <textarea class="form-control form-control-sm mt-2" rows="2" placeholder="Twoja odpowiedź…" value="@(_drafts.GetValueOrDefault(comment.Id) ?? comment.Suggestion)"
+                                  @onchange='e => _drafts[comment.Id] = e.Value?.ToString() ?? ""' aria-label="Odpowiedź"></textarea>
+                        <div class="d-flex gap-2 flex-wrap mt-2">
+                            <button class="btn btn-primary btn-sm" @onclick="() => ReplyAsync(comment)" disabled="@_busy"><i class="bi bi-reply me-1"></i>Odpowiedz</button>
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="() => SuggestAsync(comment)" disabled="@(_busy || _aiOff is not null)" title="@(_aiOff ?? "")">
+                                @if (_suggesting == comment.Id) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-stars me-1"></i> }Podpowiedz
+                            </button>
+                            <button class="btn btn-link btn-sm" @onclick="() => DoneAsync(comment)">Bez odpowiedzi</button>
+                            <button class="btn btn-link btn-sm text-danger ms-auto" @onclick="() => HideAsync(comment, true)"><i class="bi bi-eye-slash me-1"></i>Ukryj</button>
+                        </div>
+                    }
+                    else if (comment.Hidden)
+                    {
+                        <button class="btn btn-link btn-sm px-0" @onclick="() => HideAsync(comment, false)"><i class="bi bi-eye me-1"></i>Pokaż ponownie</button>
+                    }
+                </div>
+            </article>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public EventCallback<(bool, string)> Flash { get; set; }
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private bool _open = true, _busy;
+    private string? _aiOff, _suggesting;
+    private List<InstagramComment> _list = [];
+    private Dictionary<string, InstagramMedia> _media = [];
+    private readonly Dictionary<string, string> _drafts = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _aiOff = await Ai.UnavailableAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _list = await Ig.CommentsAsync(_open);
+        _media = await Ig.MediaByIdAsync(_list.Select(c => c.MediaId));
+    }
+
+    private async Task SetAsync(bool open) { _open = open; await LoadAsync(); }
+
+    private async Task SyncAsync()
+    {
+        _busy = true;
+        var (n, error) = await Ig.SyncCommentsAsync();
+        await LoadAsync();
+        _busy = false;
+        await Changed.InvokeAsync();
+        await Flash.InvokeAsync(error is null ? (true, n == 0 ? "Brak nowych komentarzy." : $"Nowe komentarze: {n}.") : (false, error));
+    }
+
+    private async Task SuggestAsync(InstagramComment c)
+    {
+        _suggesting = c.Id;
+        var (text, error) = await Ig.SuggestReplyAsync(c.Id);
+        _suggesting = null;
+        if (text is null) { await Flash.InvokeAsync((false, error ?? "AI nie odpowiedziało.")); return; }
+        _drafts[c.Id] = text;
+    }
+
+    private async Task ReplyAsync(InstagramComment c)
+    {
+        var text = _drafts.GetValueOrDefault(c.Id) ?? c.Suggestion ?? "";
+        _busy = true;
+        var r = await Ig.ReplyAsync(c.Id, text);
+        if (r.Ok) _drafts.Remove(c.Id);
+        await LoadAsync();
+        _busy = false;
+        await Changed.InvokeAsync();
+        await Flash.InvokeAsync(r);
+    }
+
+    private async Task DoneAsync(InstagramComment c)
+    {
+        await Ig.MarkDoneAsync(c.Id);
+        await LoadAsync();
+        await Changed.InvokeAsync();
+    }
+
+    private async Task HideAsync(InstagramComment c, bool hide)
+    {
+        _busy = true;
+        var r = await Ig.HideCommentAsync(c.Id, hide);
+        await LoadAsync();
+        _busy = false;
+        await Changed.InvokeAsync();
+        await Flash.InvokeAsync(r);
+    }
+}

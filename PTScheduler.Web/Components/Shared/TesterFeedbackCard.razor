@@ -1,0 +1,83 @@
+@inject PTScheduler.Web.Services.TesterFeedbackService Testers
+@inject AuthenticationStateProvider AuthState
+@using PTScheduler.Domain.Constants
+
+@* Program testerów: raz w tygodniu na pulpicie właściciela/trenera — ocena tygodnia i dwa krótkie pytania.
+   Odpowiedzi trafiają do Portalu (Testerzy); po wysłaniu karta znika do następnego tygodnia. *@
+@if (_show && Testers.Info is { } t)
+{
+    <section class="tfc" aria-labelledby="tfc-title">
+        @if (_sent)
+        {
+            <div class="tfc-thanks">
+                <span class="tfc-emoji" aria-hidden="true">🙌</span>
+                <div>
+                    <div class="tfc-title" id="tfc-title">Dzięki! Czytam każdą opinię.</div>
+                    <div class="tfc-sub">Do zobaczenia za tydzień. Twoja opinia trafia prosto do twórcy aplikacji.</div>
+                </div>
+                <button type="button" class="btn-close ms-auto" aria-label="Zamknij" @onclick="() => _show = false"></button>
+            </div>
+        }
+        else
+        {
+            <div class="tfc-head">
+                <span class="tfc-badge"><i class="bi bi-clipboard2-pulse"></i> Program testerów</span>
+                <span class="tfc-week">Tydzień @t.Week z @t.Weeks</span>
+            </div>
+            <div class="tfc-title" id="tfc-title">Jak minął ten tydzień z aplikacją?</div>
+            <div class="tfc-sub">3 pytania, minuta. Za te opinie masz aplikację za darmo — i to one decydują, co poprawię najpierw.</div>
+
+            <div class="tfc-rating" role="radiogroup" aria-label="Ocena tygodnia">
+                @foreach (var (value, emoji, label) in Faces)
+                {
+                    var v = value;
+                    <button type="button" role="radio" aria-checked="@(_rating == v ? "true" : "false")" class="tfc-face @(_rating == v ? "on" : "")" @onclick="() => _rating = v">
+                        <span aria-hidden="true">@emoji</span><small>@label</small>
+                    </button>
+                }
+            </div>
+
+            <label class="tfc-label" for="tfc-annoyed">Co Cię wkurzyło albo nie zadziałało?</label>
+            <textarea id="tfc-annoyed" class="form-control" rows="2" maxlength="2000" placeholder="Np. „Przesuwanie wizyty z telefonu nie działa”" @bind="_annoyed"></textarea>
+
+            <label class="tfc-label" for="tfc-missing">Czego najbardziej brakuje?</label>
+            <textarea id="tfc-missing" class="form-control" rows="2" maxlength="2000" placeholder="Jedna rzecz, która oszczędziłaby Ci najwięcej czasu" @bind="_missing"></textarea>
+
+            @if (_error is not null) { <div class="text-danger small mt-2">@_error</div> }
+            <div class="d-flex flex-wrap gap-2 align-items-center mt-3">
+                <button type="button" class="btn btn-primary" disabled="@(_rating == 0 || _busy)" @onclick="SendAsync">
+                    @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                    Wyślij opinię
+                </button>
+                <span class="small text-muted">@(_rating == 0 ? "Najpierw wybierz ocenę." : "Pola tekstowe są opcjonalne.")</span>
+            </div>
+        }
+    </section>
+}
+
+@code {
+    private static readonly (int Value, string Emoji, string Label)[] Faces =
+        [(1, "😫", "Źle"), (2, "😕", "Słabo"), (3, "😐", "OK"), (4, "🙂", "Dobrze"), (5, "🤩", "Super")];
+
+    private bool _show, _sent, _busy;
+    private int _rating;
+    private string? _annoyed, _missing, _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        // Ankieta dla prowadzących studio — nie dla asystentów i klientów.
+        if (!(user.IsInRole(Roles.Admin) || user.IsInRole(Roles.Trainer)) || user.IsInRole(Roles.Root)) return;
+        _show = await Testers.IsDueAsync();
+    }
+
+    private async Task SendAsync()
+    {
+        _busy = true;
+        _error = null;
+        var (ok, error) = await Testers.SubmitAsync(_rating, _annoyed, _missing);
+        _busy = false;
+        if (ok) _sent = true;
+        else _error = error;
+    }
+}

@@ -1,0 +1,47 @@
+@using PTScheduler.Domain.Constants
+@inject PTScheduler.Application.Interfaces.IPermissionService Permissions
+@inject AuthenticationStateProvider AuthState
+
+@* Ręczne „Opłacone”: sposób zapłaty (gotówka / przelew / karta) i — dla osób z dostępem do ukrytych finansów —
+   czy wpłata idzie do ukrytych. Pod przyciskami zawsze widać, gdzie trafi kwota. *@
+<div class="pdb">
+    <div class="pdb-row">
+        <button type="button" class="btn btn-sm btn-success" @onclick='() => PayAsync("gotówka")' disabled="@Busy"><i class="bi bi-cash me-1"></i>Gotówka</button>
+        <button type="button" class="btn btn-sm btn-outline-success" @onclick='() => PayAsync("przelew")' disabled="@Busy"><i class="bi bi-bank me-1"></i>Przelew</button>
+        <button type="button" class="btn btn-sm btn-outline-success" @onclick='() => PayAsync("karta")' disabled="@Busy"><i class="bi bi-credit-card me-1"></i>Karta</button>
+    </div>
+    @if (_canHide)
+    {
+        <label class="form-check form-switch pdb-hide mb-0">
+            <input type="checkbox" class="form-check-input" @bind="_hidden" />
+            <span class="form-check-label">Do ukrytych finansów</span>
+        </label>
+    }
+    <small class="pdb-where"><i class="bi bi-arrow-return-right"></i>@(_hidden ? "Trafi do: Finanse → Ukryte (poza raportami i paczką dla księgowej)" : "Trafi do: Finanse — wpływy u trenera")</small>
+</div>
+
+@code {
+    /// <summary>Wybór przy „Opłacone”: sposób zapłaty i czy do ukrytych finansów.</summary>
+    public sealed record Choice(string Via, bool Hidden)
+    {
+        public string Where => Hidden ? "w ukrytych finansach" : "w Finansach";
+    }
+
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback<Choice> OnPaid { get; set; }
+
+    private bool _canHide, _hidden;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var user = (await AuthState.GetAuthenticationStateAsync()).User;
+            var role = user.IsInRole(Roles.Admin) ? Roles.Admin : user.IsInRole(Roles.Trainer) ? Roles.Trainer : user.IsInRole(Roles.Subordinate) ? Roles.Subordinate : "";
+            _canHide = role.Length > 0 && await Permissions.HasPermissionAsync(role, PTScheduler.Domain.Constants.Permissions.ViewHiddenFinance);
+        }
+        catch { _canHide = false; }
+    }
+
+    private Task PayAsync(string via) => OnPaid.InvokeAsync(new Choice(via, _canHide && _hidden));
+}

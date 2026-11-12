@@ -1,0 +1,119 @@
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@inject IHttpContextAccessor HttpContextAccessor
+@inject PTScheduler.Application.Interfaces.IClientDocumentService DocumentSvc
+@inject PTScheduler.Application.Interfaces.IClientService ClientService
+@rendermode PTScheduler.Web.RenderModes.Server
+
+@* Dokumenty do akceptacji (regulamin, zgody): klient decyduje przed dalszym korzystaniem z aplikacji.
+   Regulamin trzeba zaakceptować; zgodę można odrzucić — decyzja i tak zostaje zapisana. *@
+@if (_current is not null)
+{
+    var doc = _current;
+    var required = doc.Kind == PTScheduler.Domain.Constants.DocumentKinds.Required;
+    <div class="health-gate-backdrop lg-backdrop">
+        <div class="lg-sheet" role="dialog" aria-modal="true" aria-labelledby="docGateTitle">
+            <header class="lg-head">
+                <div class="lg-icon"><i class="bi @(required ? "bi-file-earmark-check" : "bi-person-check")"></i></div>
+                <div class="min-w-0">
+                    <div class="lg-kicker">@(required ? "Do akceptacji" : "Twoja zgoda")@(_pending.Count > 1 ? $" · {_index + 1} z {_pending.Count}" : "")</div>
+                    <h5 class="lg-title" id="docGateTitle">@doc.Title</h5>
+                </div>
+            </header>
+            <div class="lg-body" @key="doc.DocumentId">
+                @if (doc.DecidedVersion is not null)
+                {
+                    <div class="alert alert-info py-2 small mb-3"><i class="bi bi-info-circle me-1"></i>Treść dokumentu się zmieniła — przeczytaj nową wersję.</div>
+                }
+                <div class="lg-doc lg-doc-text">@doc.Content</div>
+                @if (_error is not null)
+                {
+                    <div class="alert alert-danger py-2 small mt-3 mb-0">@_error</div>
+                }
+            </div>
+            <footer class="lg-foot">
+                @if (required)
+                {
+                    <button class="btn btn-primary lg-btn" disabled="@_busy" @onclick="() => Decide(true)"><i class="bi bi-check-lg me-1"></i>Akceptuję</button>
+                }
+                else
+                {
+                    <div class="lg-actions">
+                        <button class="btn btn-primary lg-btn" disabled="@_busy" @onclick="() => Decide(true)"><i class="bi bi-check-lg me-1"></i>Zgadzam się</button>
+                        <button type="button" class="lg-link" disabled="@_busy" @onclick="() => Decide(false)">Nie zgadzam się</button>
+                    </div>
+                    <div class="text-muted small text-center">Decyzję zmienisz w każdej chwili w <strong>Moich dokumentach</strong>.</div>
+                }
+            </footer>
+        </div>
+    </div>
+}
+
+@code {
+    [PersistentState] public string? ClientIp { get; set; }
+
+    private List<PTScheduler.Application.DTOs.ClientDocumentStatusDto> _pending = [];
+    private PTScheduler.Application.DTOs.ClientDocumentStatusDto? _current;
+    private int _index;
+    private int _clientId;
+    private bool _busy;
+    private string? _error;
+
+    protected override void OnInitialized()
+    {
+        // Podczas prerenderingu mamy żądanie HTTP — zapamiętujemy adres IP na potrzeby historii akceptacji.
+        ClientIp ??= HttpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var path = "/" + Nav.ToBaseRelativePath(Nav.Uri);
+            if (path.StartsWith("/my/documents", StringComparison.OrdinalIgnoreCase)) return;
+            // Na pulpicie dokumenty czekają w spokojnej karcie (ClientDocumentsCard) zamiast okna na całą stronę.
+            var bare = path.Split('?', '#')[0].TrimEnd('/');
+            if (bare is "" or "/app") return;
+
+            var user = (await AuthState.GetAuthenticationStateAsync()).User;
+            if (!user.IsInRole(PTScheduler.Domain.Constants.Roles.Client)) return;
+            var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+            var client = await ClientService.GetClientByUserIdAsync(userId);
+            if (client is null) return;
+            _clientId = client.Id;
+
+            _pending = (await DocumentSvc.GetForClientAsync(client.Id)).Where(d => d.Pending).ToList();
+            if (_pending.Count == 0) return;
+            _index = 0;
+            _current = _pending[0];
+            StateHasChanged();
+        }
+        catch { } // Nie blokujemy aplikacji, gdy sprawdzenie się nie uda.
+    }
+
+    private async Task Decide(bool accepted)
+    {
+        if (_current is null) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            await DocumentSvc.DecideAsync(_clientId, _current.DocumentId, accepted, ClientIp);
+            _index++;
+            _current = _index < _pending.Count ? _pending[_index] : null;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            _error = ex.Message;
+        }
+        catch
+        {
+            _error = "Nie udało się zapisać decyzji. Spróbuj ponownie.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

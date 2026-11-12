@@ -1,0 +1,156 @@
+@inject InstagramService Ig
+@inject NavigationManager Nav
+
+@* Połączenie z Instagramem: stan, instrukcja krok po kroku (aplikacja Meta), klucze, logowanie albo wklejony token. *@
+
+@if (_account is not null)
+{
+    var left = _account.TokenExpiresAt - DateTime.UtcNow;
+    <div class="pp-hero @(_account.LastError is null && left > TimeSpan.FromDays(7) ? "pp-tone-ok" : "pp-tone-warn")">
+        <div class="pp-hero-icon"><i class="bi bi-instagram"></i></div>
+        <div class="pp-hero-body">
+            <div class="pp-hero-title">Połączono z @@@_account.Username</div>
+            <div class="pp-hero-text">
+                Dostęp ważny do @InstagramRules.ToWarsaw(_account.TokenExpiresAt).ToString("dd.MM.yyyy") (@Math.Max(0, (int)left.TotalDays) dni) — odnawia się sam, gdy zostanie mniej niż 20 dni.
+                @if (_limit is { } l) { <span> Publikacje z aplikacji w ostatniej dobie: @l.Used z @l.Total.</span> }
+                @if (_account.LastError is not null) { <div class="text-danger mt-1"><i class="bi bi-exclamation-triangle me-1"></i>@_account.LastError</div> }
+            </div>
+        </div>
+        <div class="pp-hero-actions">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="SyncAsync" disabled="@_busy"><i class="bi bi-arrow-repeat me-1"></i>Synchronizuj</button>
+            @if (_confirm)
+            {
+                <button class="btn btn-danger btn-sm" @onclick="DisconnectAsync">Odłącz</button>
+                <button class="btn btn-link btn-sm" @onclick="() => _confirm = false">Nie</button>
+            }
+            else
+            {
+                <button class="btn btn-outline-danger btn-sm" @onclick="() => _confirm = true">Odłącz</button>
+            }
+        </div>
+    </div>
+}
+
+<PanelCard Title="@(_account is null ? "Podłącz Instagram — krok po kroku" : "Jak to jest połączone")" Icon="bi-signpost-split">
+    <ol class="ig-steps">
+        <li>
+            <b>Konto profesjonalne.</b> Na Instagramie: Ustawienia → Typ konta i narzędzia → Przejdź na konto profesjonalne → <i>Firma</i>.
+            Konto nie musi być połączone ze stroną na Facebooku.
+        </li>
+        <li>
+            <b>Aplikacja w Meta for Developers.</b> Na <a href="https://developers.facebook.com/apps/" target="_blank" rel="noopener">developers.facebook.com/apps</a>:
+            <i>Utwórz aplikację</i> → przypadek użycia związany z Instagramem („Zarządzaj wiadomościami i treściami na Instagramie”) → typ <i>Firma</i>.
+            W aplikacji otwórz <i>Instagram → Konfiguracja API z logowaniem przez Instagram</i> (API setup with Instagram login).
+            Nazwy w panelu Meta czasem się zmieniają — szukaj „Instagram API” i „Instagram login”.
+        </li>
+        <li>
+            <b>Dodaj swoje konto.</b> W tej samej sekcji: <i>Dodaj konto</i> i zaloguj się na Instagram marki
+            (albo <i>Role aplikacji → Testerzy Instagrama</i> i akceptuj zaproszenie w Instagramie: Ustawienia → Aplikacje i witryny → Zaproszenia testerów).
+            Dla własnego konta wystarczy tryb deweloperski aplikacji — weryfikacja przez Meta (App Review) nie jest potrzebna.
+        </li>
+        <li>
+            <b>Połącz z Portalem</b> — wybierz jeden sposób:
+            <div class="ig-ways">
+                <div class="ig-way">
+                    <div class="fw-semibold mb-1"><span class="pp-chip pp-tone-ok me-1">najszybciej</span>Wklej token</div>
+                    <div class="small text-muted mb-2">W sekcji API setup przy koncie kliknij <i>Generate token</i>, zaznacz wszystkie zgody i skopiuj token tutaj.</div>
+                    <textarea class="form-control form-control-sm mb-2" rows="2" @bind="_token" @bind:event="oninput" placeholder="IGAA…" aria-label="Token Instagrama" autocomplete="off"></textarea>
+                    <button class="btn btn-primary btn-sm" @onclick="TokenAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_token))"><i class="bi bi-key me-1"></i>Połącz tokenem</button>
+                </div>
+                <div class="ig-way">
+                    <div class="fw-semibold mb-1">Logowanie przez Instagram</div>
+                    <div class="small text-muted mb-2">
+                        W <i>Business login settings</i> skopiuj <i>Instagram app ID</i> i <i>Instagram app secret</i>, a w polu <i>OAuth redirect URIs</i> dodaj adres:
+                    </div>
+                    <input class="form-control form-control-sm mb-2 font-monospace" readonly value="@Ig.RedirectUri" aria-label="Adres powrotu" onclick="this.select()" />
+                    <div class="row g-2 mb-2">
+                        <div class="col-sm-6"><input class="form-control form-control-sm" @bind="_appId" placeholder="Instagram app ID" aria-label="Instagram app ID" /></div>
+                        <div class="col-sm-6"><input type="password" class="form-control form-control-sm" @bind="_secret" placeholder="@(_hasSecret ? "zapisany — wpisz, by zmienić" : "Instagram app secret")" aria-label="Instagram app secret" autocomplete="new-password" /></div>
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="SaveAppAsync" disabled="@_busy">Zapisz klucze</button>
+                        <button class="btn btn-primary btn-sm" @onclick="LoginAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_appId) || !_hasSecret)"><i class="bi bi-instagram me-1"></i>Połącz z Instagramem</button>
+                    </div>
+                    <div class="small text-muted mt-2">Klucz aplikacji zapisuję zaszyfrowany. Zapisane klucze pozwalają też zamienić krótki token (1 h) na 60-dniowy.</div>
+                </div>
+            </div>
+        </li>
+    </ol>
+    <div class="pp-callout pp-tone-muted mb-0">
+        <i class="bi bi-shield-check"></i>
+        <div>
+            Portal prosi tylko o: profil, publikowanie, komentarze i statystyki. Nie widzi hasła ani wiadomości prywatnych.
+            Dostęp cofniesz w każdej chwili — tutaj (<i>Odłącz</i>) albo w Instagramie: Ustawienia → Aplikacje i witryny.
+        </div>
+    </div>
+</PanelCard>
+
+@code {
+    [Parameter] public EventCallback<(bool, string)> Flash { get; set; }
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private InstagramAccount? _account;
+    private (int Used, int Total)? _limit;
+    private string _appId = "", _secret = "", _token = "";
+    private bool _hasSecret, _busy, _confirm;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _account = await Ig.AccountAsync();
+        var app = await Ig.AppAsync();
+        _appId = app.AppId;
+        _hasSecret = app.HasSecret;
+        _limit = _account is null ? null : await Ig.PublishingLimitAsync();
+    }
+
+    private async Task SaveAppAsync()
+    {
+        _busy = true;
+        await Ig.SaveAppAsync(_appId, _secret);
+        _secret = "";
+        await LoadAsync();
+        _busy = false;
+        await Flash.InvokeAsync((true, "Klucze aplikacji zapisane."));
+    }
+
+    private async Task LoginAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(_secret)) await Ig.SaveAppAsync(_appId, _secret);
+        var (url, error) = await Ig.ConnectUrlAsync();
+        if (url is null) { await Flash.InvokeAsync((false, error ?? "Nie da się rozpocząć logowania.")); return; }
+        Nav.NavigateTo(url, forceLoad: true);
+    }
+
+    private async Task TokenAsync()
+    {
+        _busy = true;
+        var r = await Ig.ConnectWithTokenAsync(_token);
+        if (r.Ok) _token = "";
+        await LoadAsync();
+        _busy = false;
+        await Changed.InvokeAsync();
+        await Flash.InvokeAsync(r);
+    }
+
+    private async Task SyncAsync()
+    {
+        _busy = true;
+        var r = await Ig.SyncAsync();
+        var c = await Ig.SyncCommentsAsync();
+        await LoadAsync();
+        _busy = false;
+        await Changed.InvokeAsync();
+        await Flash.InvokeAsync(r.Ok && c.Error is null ? (true, $"{r.Message} Nowe komentarze: {c.New}.") : (false, r.Ok ? c.Error! : r.Message));
+    }
+
+    private async Task DisconnectAsync()
+    {
+        await Ig.DisconnectAsync();
+        _confirm = false;
+        await LoadAsync();
+        await Changed.InvokeAsync();
+        await Flash.InvokeAsync((true, "Instagram odłączony. Posty i statystyki zostają w Portalu."));
+    }
+}

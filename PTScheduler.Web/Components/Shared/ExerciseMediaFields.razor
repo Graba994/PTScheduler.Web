@@ -1,0 +1,460 @@
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Enums
+@inject ExerciseMediaService Media
+@inject IBunnyService Bunny
+@inject EntitlementService Entitlements
+
+@* Zdjęcia i film w oknie ćwiczenia: przeciągnij i upuść, kolejność, wybór źródła filmu i licznik miejsca.
+   Pliki wgrane w tym oknie, a niezapisane, usuwa DiscardAsync; zastąpione przy zapisie — CommitAsync. *@
+
+@if (_status is { QuotaBytes: > 0 } st)
+{
+    <div class="exm-space" role="status">
+        <div class="exm-space-row">
+            <span><i class="bi bi-hdd me-1"></i>Miejsce na pliki</span>
+            <b>zostało @ExerciseMediaService.Size(st.FreeBytes)</b>
+        </div>
+        @if (st.QuotaBytes != long.MaxValue)
+        {
+            <div class="exm-space-bar" aria-hidden="true"><span style="width:@(Math.Max(st.Percent, st.UsedBytes > 0 ? 1 : 0))%" class="@(st.Percent >= 90 ? "warn" : "")"></span></div>
+            <small>Zajęte @ExerciseMediaService.Size(st.UsedBytes) z @ExerciseMediaService.Size(st.QuotaBytes)@(st.ImagesEnabled ? " — filmy i zdjęcia razem." : " na filmy.")</small>
+        }
+    </div>
+}
+
+<section class="exm-block">
+    <div class="exm-head">
+        <b>Zdjęcia</b>
+        <small>@Form.ImageUrls.Count z @ExerciseMediaService.MaxImages · pierwsze jest okładką</small>
+    </div>
+
+    @if (Form.ImageUrls.Count > 0 || _imagesBusy > 0)
+    {
+        <ul class="exm-grid">
+            @for (var i = 0; i < Form.ImageUrls.Count; i++)
+            {
+                var index = i;
+                var url = Form.ImageUrls[i];
+                <li class="exm-thumb @(_dragFrom == index ? "dragging" : "") @(_dragOver == index && _dragFrom != index ? "over" : "")"
+                    draggable="true"
+                    @ondragstart="() => _dragFrom = index"
+                    @ondragenter="() => _dragOver = index"
+                    @ondragover:preventDefault="true"
+                    @ondrop="() => DropOn(index)"
+                    @ondragend="() => { _dragFrom = null; _dragOver = null; }">
+                    <img src="@url" alt="Zdjęcie @(index + 1)" loading="lazy" />
+                    @if (index == 0) { <span class="exm-cover">Okładka</span> }
+                    <div class="exm-thumb-tools">
+                        <button type="button" title="Przesuń wcześniej" aria-label="Przesuń zdjęcie @(index + 1) wcześniej" disabled="@(index == 0)" @onclick="() => Move(index, index - 1)"><i class="bi bi-chevron-left"></i></button>
+                        <button type="button" title="Przesuń dalej" aria-label="Przesuń zdjęcie @(index + 1) dalej" disabled="@(index == Form.ImageUrls.Count - 1)" @onclick="() => Move(index, index + 1)"><i class="bi bi-chevron-right"></i></button>
+                        <button type="button" class="del" title="Usuń" aria-label="Usuń zdjęcie @(index + 1)" @onclick="() => RemoveImage(index)"><i class="bi bi-x-lg"></i></button>
+                    </div>
+                </li>
+            }
+            @for (var i = 0; i < _imagesBusy; i++)
+            {
+                <li class="exm-thumb exm-thumb-busy"><span class="spinner-border spinner-border-sm text-primary"></span></li>
+            }
+        </ul>
+    }
+
+    @if (Form.ImageUrls.Count + _imagesBusy < ExerciseMediaService.MaxImages)
+    {
+        <label class="exm-drop @(_imagesHover ? "hover" : "")"
+               @ondragenter="() => _imagesHover = true" @ondragleave="() => _imagesHover = false" @ondrop="() => _imagesHover = false">
+            <i class="bi bi-images"></i>
+            <span><b>Przeciągnij zdjęcia tutaj</b> albo kliknij, żeby wybrać</span>
+            <small>JPG, PNG, WebP lub prosto z aparatu telefonu · zmniejszymy je automatycznie</small>
+            <InputFile OnChange="OnImagesAsync" multiple accept="image/*" disabled="@(_imagesBusy > 0)" aria-label="Dodaj zdjęcia" />
+        </label>
+    }
+    @if (Form.ImageUrls.Count > 1)
+    {
+        <small class="exm-hint"><i class="bi bi-arrows-move me-1"></i>Kolejność zmienisz, przeciągając zdjęcie albo strzałkami.</small>
+    }
+
+    @if (_linkOpen)
+    {
+        <div class="exm-link">
+            <input class="form-control form-control-sm" @bind="_imageLink" @bind:event="oninput" placeholder="https://…/zdjecie.jpg" aria-label="Adres zdjęcia" />
+            <button type="button" class="btn btn-sm btn-outline-primary" disabled="@string.IsNullOrWhiteSpace(_imageLink)" @onclick="AddImageLink">Dodaj</button>
+        </div>
+    }
+    else
+    {
+        <button type="button" class="btn btn-link btn-sm px-0 exm-more" @onclick="() => _linkOpen = true"><i class="bi bi-link-45deg me-1"></i>Mam link do zdjęcia</button>
+    }
+    @if (_imagesMsg is not null) { <div class="exm-msg @(_imagesError ? "err" : "")">@_imagesMsg</div> }
+</section>
+
+<section class="exm-block">
+    <div class="exm-head">
+        <b>Film</b>
+        <small>Klient zobaczy go w planie i podczas treningu</small>
+    </div>
+
+    <div class="exm-seg" role="radiogroup" aria-label="Źródło filmu">
+        @foreach (var (mode, label, icon) in Modes)
+        {
+            var m = mode;
+            <button type="button" role="radio" aria-checked="@(_mode == m ? "true" : "false")" class="@(_mode == m ? "on" : "")" @onclick="() => SetModeAsync(m)">
+                <i class="bi @icon"></i><span>@label</span>
+            </button>
+        }
+    </div>
+
+    @switch (_mode)
+    {
+        case Mode.Upload:
+            if (!CanUpload)
+            {
+                <div class="exm-note">
+                    <i class="bi bi-cloud-slash"></i>
+                    <span>@(_status?.Reason ?? "Wgrywanie filmów jest w pakiecie z hostingiem wideo.") Możesz dodać film z YouTube albo z linku.</span>
+                </div>
+            }
+            else if (Form.VideoType == ExerciseVideoType.Bunny && !string.IsNullOrWhiteSpace(Form.VideoRef) && !_videoBusy)
+            {
+                <div class="exm-video-card">
+                    <i class="bi bi-camera-video-fill"></i>
+                    <span><b>@(_videoTitle ?? "Film na platformie")</b><small>@(_videoNote ?? "Odtworzy się w aplikacji klienta.")</small></span>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ClearVideo">Zmień</button>
+                </div>
+            }
+            else
+            {
+                <label class="exm-drop @(_videoHover ? "hover" : "") @(_videoBusy ? "busy" : "")"
+                       @ondragenter="() => _videoHover = true" @ondragleave="() => _videoHover = false" @ondrop="() => _videoHover = false">
+                    if (_videoBusy)
+                    {
+                        <i class="bi bi-cloud-arrow-up"></i>
+                        <span><b>Wgrywam… @UploadPct%</b> — nie zamykaj okna</span>
+                        <div class="exm-progress"><span style="width:@(UploadPct)%"></span></div>
+                    }
+                    else
+                    {
+                        <i class="bi bi-camera-video"></i>
+                        <span><b>Przeciągnij film tutaj</b> albo kliknij, żeby wybrać</span>
+                        <small>MP4, MOV i inne · najlepiej krótki klip, do 4 GB</small>
+                        <InputFile OnChange="OnVideoAsync" accept="video/*" aria-label="Wgraj film" />
+                    }
+                </label>
+            }
+            break;
+
+        case Mode.Library:
+            if (_library is null)
+            {
+                <div class="text-center py-3"><span class="spinner-border spinner-border-sm text-primary"></span></div>
+            }
+            else if (_library.Count == 0)
+            {
+                <div class="exm-note"><i class="bi bi-collection-play"></i><span>Nie masz jeszcze wgranych filmów. Wybierz „Wgraj”, a film trafi też tutaj.</span></div>
+            }
+            else
+            {
+                <ul class="exm-lib" role="listbox" aria-label="Twoje filmy">
+                    @foreach (var v in _library)
+                    {
+                        var item = v;
+                        var on = Form.VideoType == ExerciseVideoType.Bunny && Form.VideoRef == item.VideoRef;
+                        <li>
+                            <button type="button" role="option" aria-selected="@(on ? "true" : "false")" class="@(on ? "on" : "")" @onclick="() => PickLibrary(item)">
+                                <i class="bi @(on ? "bi-check-circle-fill" : "bi-play-circle")"></i>
+                                <span><b>@item.Title</b><small>@(item.Kind == VideoKinds.Courses ? "Kursy" : "Ćwiczenia") · @ExerciseMediaService.Size(item.SizeBytes) · @item.CreatedAt.ToLocalTime().ToString("d.MM.yyyy")</small></span>
+                            </button>
+                        </li>
+                    }
+                </ul>
+                <small class="exm-hint">Ten sam film możesz dodać do kilku ćwiczeń — nie zajmie drugi raz miejsca.</small>
+            }
+            break;
+
+        case Mode.YouTube:
+            <input class="form-control" value="@(Form.VideoType == ExerciseVideoType.YouTube ? Form.VideoRef : "")" @oninput="e => SetLink(ExerciseVideoType.YouTube, e.Value?.ToString())"
+                   placeholder="Wklej link z YouTube, np. https://youtu.be/…" aria-label="Link do filmu na YouTube" />
+            if (YouTubeId(Form.VideoType == ExerciseVideoType.YouTube ? Form.VideoRef : null) is { } yt)
+            {
+                <div class="exm-yt"><img src="https://i.ytimg.com/vi/@(yt)/mqdefault.jpg" alt="" onerror="this.hidden=true" /><span><i class="bi bi-check-circle-fill"></i>Film rozpoznany</span></div>
+            }
+            break;
+
+        case Mode.Link:
+            <input class="form-control" value="@(Form.VideoType == ExerciseVideoType.Url ? Form.VideoRef : "")" @oninput="e => SetLink(ExerciseVideoType.Url, e.Value?.ToString())"
+                   placeholder="https://…/film.mp4" aria-label="Link do pliku wideo" />
+            <small class="exm-hint">Bezpośredni link do pliku (zaczyna się od https://), np. z Twojego dysku w chmurze.</small>
+            break;
+    }
+    @if (_videoMsg is not null) { <div class="exm-msg @(_videoError ? "err" : "")">@_videoMsg</div> }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public SaveExerciseDto Form { get; set; } = default!;
+
+    private enum Mode { None, Upload, Library, YouTube, Link }
+    private static readonly (Mode, string, string)[] Modes =
+    [
+        (Mode.None, "Bez filmu", "bi-slash-circle"),
+        (Mode.Upload, "Wgraj", "bi-cloud-arrow-up"),
+        (Mode.Library, "Moje filmy", "bi-collection-play"),
+        (Mode.YouTube, "YouTube", "bi-youtube"),
+        (Mode.Link, "Link", "bi-link-45deg")
+    ];
+
+    private SaveExerciseDto? _boundForm;
+    private VideoHubStatus? _status;
+    private Mode _mode;
+
+    // Pliki wgrane w tym oknie — do sprzątania, jeśli ćwiczenie nie zostanie zapisane albo plik wypadnie.
+    private readonly List<string> _sessionImages = [];
+    private readonly List<string> _sessionVideos = [];
+    private List<string> _originalImages = [];
+    private string? _originalVideo;
+
+    private int _imagesBusy;
+    private bool _imagesHover, _imagesError, _linkOpen;
+    private string? _imagesMsg, _imageLink;
+    private int? _dragFrom, _dragOver;
+
+    private bool _videoBusy, _videoHover, _videoError;
+    private string? _videoMsg, _videoTitle, _videoNote;
+    private long _uploadTotal, _uploadDone;
+    private int UploadPct => _uploadTotal > 0 ? (int)(100 * _uploadDone / _uploadTotal) : 0;
+    private List<VideoItem>? _library;
+
+    /// <summary>Pakiet z hostingiem wideo (Bunny) i działająca platforma.</summary>
+    private bool VideoPlan => Entitlements.Current.VideoProvider == "bunny" && Entitlements.Current.MaxVideoStorageGB > 0;
+    private bool CanUpload => VideoPlan && _status is { Enabled: true };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ReferenceEquals(_boundForm, Form)) return;
+        // Nowe okno (inne ćwiczenie) — stan od zera.
+        _boundForm = Form;
+        _sessionImages.Clear();
+        _sessionVideos.Clear();
+        _originalImages = Form.ImageUrls.ToList();
+        _originalVideo = Form.VideoType == ExerciseVideoType.Bunny ? Form.VideoRef : null;
+        _imagesMsg = _videoMsg = _imageLink = null;
+        _linkOpen = false;
+        _library = null;
+        _videoTitle = null;
+        _videoNote = null;
+        _mode = Form.VideoType switch
+        {
+            ExerciseVideoType.Bunny => Mode.Upload,
+            ExerciseVideoType.YouTube => Mode.YouTube,
+            ExerciseVideoType.Url => Mode.Link,
+            _ => Mode.None
+        };
+        _status = VideoPlan ? await Bunny.GetStatusAsync() : null;
+    }
+
+    // ── Zdjęcia ──
+
+    private async Task OnImagesAsync(InputFileChangeEventArgs e)
+    {
+        _imagesMsg = null; _imagesError = false;
+        var room = ExerciseMediaService.MaxImages - Form.ImageUrls.Count;
+        var files = e.GetMultipleFiles(Math.Max(1, e.FileCount)).Take(Math.Max(0, room)).ToList();
+        if (e.FileCount > room) { _imagesMsg = $"Dodano {Math.Max(0, room)} — najwięcej {ExerciseMediaService.MaxImages} zdjęć w ćwiczeniu."; }
+        _imagesBusy = files.Count;
+        StateHasChanged();
+        var failed = new List<string>();
+        foreach (var f in files)
+        {
+            try
+            {
+                if (f.Size > ExerciseMediaService.MaxSourceBytes) { failed.Add($"{f.Name}: plik jest za duży (najwięcej 25 MB)."); continue; }
+                // Duże zdjęcie z aparatu zmniejszamy już w przeglądarce — szybciej leci przez słabe łącze.
+                var source = f;
+                if (f.Size > 1_500_000 && f.ContentType is "image/jpeg" or "image/png" or "image/webp")
+                {
+                    try { source = await f.RequestImageFileAsync(f.ContentType == "image/png" ? "image/png" : "image/jpeg", 2400, 2400); }
+                    catch (Exception) { source = f; }
+                }
+                await using var stream = source.OpenReadStream(ExerciseMediaService.MaxSourceBytes);
+                var (url, _, error) = await Media.UploadImageAsync(stream);
+                if (url is null) { failed.Add($"{f.Name}: {error}"); continue; }
+                Form.ImageUrls.Add(url);
+                _sessionImages.Add(url);
+            }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException or JSException)
+            {
+                failed.Add($"{f.Name}: nie udało się wczytać pliku.");
+            }
+            finally
+            {
+                _imagesBusy--;
+                StateHasChanged();
+            }
+        }
+        if (failed.Count > 0) { _imagesMsg = string.Join(" ", failed); _imagesError = true; }
+        await RefreshStatusAsync();
+    }
+
+    private void Move(int from, int to)
+    {
+        if (from < 0 || to < 0 || from >= Form.ImageUrls.Count || to >= Form.ImageUrls.Count || from == to) return;
+        var url = Form.ImageUrls[from];
+        Form.ImageUrls.RemoveAt(from);
+        Form.ImageUrls.Insert(to, url);
+    }
+
+    private void DropOn(int index)
+    {
+        if (_dragFrom is int from) Move(from, index);
+        _dragFrom = null; _dragOver = null;
+    }
+
+    private async Task RemoveImage(int index)
+    {
+        if (index < 0 || index >= Form.ImageUrls.Count) return;
+        var url = Form.ImageUrls[index];
+        Form.ImageUrls.RemoveAt(index);
+        // Zdjęcie wgrane przed chwilą i od razu usunięte — od razu zwalnia miejsce.
+        if (_sessionImages.Remove(url))
+        {
+            await Media.DeleteImageIfUnusedAsync(url, Form.Id);
+            await RefreshStatusAsync();
+        }
+    }
+
+    private void AddImageLink()
+    {
+        var link = _imageLink?.Trim();
+        if (!Uri.TryCreate(link, UriKind.Absolute, out var u) || u.Scheme != Uri.UriSchemeHttps || link.Contains(','))
+        {
+            _imagesMsg = "Link musi zaczynać się od https:// i prowadzić do zdjęcia."; _imagesError = true;
+            return;
+        }
+        if (Form.ImageUrls.Count >= ExerciseMediaService.MaxImages) return;
+        Form.ImageUrls.Add(link);
+        _imageLink = null; _linkOpen = false; _imagesMsg = null;
+    }
+
+    // ── Film ──
+
+    private async Task SetModeAsync(Mode mode)
+    {
+        _mode = mode;
+        _videoMsg = null;
+        switch (mode)
+        {
+            case Mode.None:
+                Form.VideoType = ExerciseVideoType.None; Form.VideoRef = null;
+                break;
+            case Mode.YouTube when Form.VideoType != ExerciseVideoType.YouTube:
+            case Mode.Link when Form.VideoType != ExerciseVideoType.Url:
+                Form.VideoType = mode == Mode.YouTube ? ExerciseVideoType.YouTube : ExerciseVideoType.Url;
+                Form.VideoRef = null;
+                break;
+            case Mode.Library:
+                _library ??= VideoPlan ? await Bunny.ListAsync() : [];
+                break;
+        }
+    }
+
+    private void SetLink(ExerciseVideoType type, string? value)
+    {
+        Form.VideoType = type;
+        Form.VideoRef = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private void PickLibrary(VideoItem item)
+    {
+        Form.VideoType = ExerciseVideoType.Bunny;
+        Form.VideoRef = item.VideoRef;
+        _videoTitle = item.Title;
+        _videoNote = $"Z Twoich filmów · {ExerciseMediaService.Size(item.SizeBytes)}";
+    }
+
+    private void ClearVideo()
+    {
+        Form.VideoType = ExerciseVideoType.None;
+        Form.VideoRef = null;
+        _videoTitle = _videoNote = null;
+    }
+
+    private async Task OnVideoAsync(InputFileChangeEventArgs e)
+    {
+        _videoMsg = null; _videoError = false;
+        var f = e.File;
+        const long max = 4L * 1024 * 1024 * 1024;
+        if (f.Size > max) { _videoMsg = "Plik jest za duży — najwięcej 4 GB."; _videoError = true; return; }
+        if (_status is { } st && st.FreeBytes < f.Size)
+        {
+            _videoMsg = $"Za mało miejsca: film ma {ExerciseMediaService.Size(f.Size)}, zostało {ExerciseMediaService.Size(st.FreeBytes)}. Dokup miejsce w Sklepie albo usuń niepotrzebne pliki.";
+            _videoError = true;
+            return;
+        }
+        _videoBusy = true; _uploadTotal = f.Size; _uploadDone = 0;
+        try
+        {
+            await using var stream = f.OpenReadStream(max);
+            var progress = new Progress<long>(done => { _uploadDone = done; _ = InvokeAsync(StateHasChanged); });
+            var title = string.IsNullOrWhiteSpace(Form.NamePl) ? Path.GetFileNameWithoutExtension(f.Name) : Form.NamePl.Trim();
+            var (ok, videoRef, err) = await Bunny.UploadAsync(title, VideoKinds.Exercises, stream, f.Size, progress);
+            if (!ok || videoRef is null) { _videoMsg = err ?? "Przesyłanie nie powiodło się."; _videoError = true; return; }
+            // Poprzedni film wgrany w tym oknie (niezapisany) od razu zwalnia miejsce.
+            foreach (var old in _sessionVideos.ToList())
+            {
+                await Media.DeleteVideoIfUnusedAsync(old, Form.Id);
+                _sessionVideos.Remove(old);
+            }
+            _sessionVideos.Add(videoRef);
+            Form.VideoType = ExerciseVideoType.Bunny;
+            Form.VideoRef = videoRef;
+            _videoTitle = title;
+            _videoNote = $"Wgrany · {ExerciseMediaService.Size(f.Size)} · będzie gotowy do odtworzenia za kilka minut";
+            _library = null;
+            await RefreshStatusAsync();
+        }
+        catch (Exception ex) when (ex is IOException or HttpRequestException or InvalidOperationException or TaskCanceledException)
+        {
+            _videoMsg = "Przesyłanie przerwane — sprawdź połączenie i spróbuj ponownie."; _videoError = true;
+        }
+        finally { _videoBusy = false; }
+    }
+
+    private async Task RefreshStatusAsync()
+    {
+        if (VideoPlan) _status = await Bunny.GetStatusAsync(refresh: true);
+    }
+
+    // ── Dla okna ćwiczenia ──
+
+    /// <summary>Anulowanie: pliki wgrane w tym oknie nie mogą zajmować opłaconego miejsca.</summary>
+    public async Task DiscardAsync()
+    {
+        foreach (var url in _sessionImages) await Media.DeleteImageIfUnusedAsync(url, Form.Id);
+        foreach (var v in _sessionVideos) await Media.DeleteVideoIfUnusedAsync(v, Form.Id);
+        _sessionImages.Clear();
+        _sessionVideos.Clear();
+    }
+
+    /// <summary>Po zapisie: usuń pliki, które wypadły z ćwiczenia (o ile nie używa ich inne ćwiczenie ani lekcja).</summary>
+    public async Task CommitAsync()
+    {
+        var keep = Form.ImageUrls.ToHashSet();
+        foreach (var url in _originalImages.Concat(_sessionImages).Distinct().Where(u => !keep.Contains(u)))
+            await Media.DeleteImageIfUnusedAsync(url);
+        var video = Form.VideoType == ExerciseVideoType.Bunny ? Form.VideoRef : null;
+        foreach (var v in _sessionVideos.Append(_originalVideo).Where(v => v is not null && v != video).Distinct())
+            await Media.DeleteVideoIfUnusedAsync(v);
+        _sessionImages.Clear();
+        _sessionVideos.Clear();
+        _originalImages = Form.ImageUrls.ToList();
+        _originalVideo = video;
+    }
+
+    /// <summary>Id filmu z linku YouTube (watch?v=, youtu.be/, shorts/, embed/) — do podglądu.</summary>
+    public static string? YouTubeId(string? link)
+    {
+        if (string.IsNullOrWhiteSpace(link)) return null;
+        var m = System.Text.RegularExpressions.Regex.Match(link.Trim(),
+            @"(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/|embed/|live/)|youtu\.be/)([A-Za-z0-9_-]{11})");
+        return m.Success ? m.Groups[1].Value : null;
+    }
+}

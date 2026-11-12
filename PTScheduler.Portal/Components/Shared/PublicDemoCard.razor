@@ -1,0 +1,176 @@
+@inject PublicDemoService PublicDemo
+@inject TenantDemoService TenantDemo
+@inject NavigationManager Nav
+
+@* Panel → Strona publiczna: publiczne demo na hantly.pl — które konto testowe, jaki scenariusz, kiedy nocny reset,
+   włącznik i ręczne przywrócenie danych. Logika: PublicDemoService. *@
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header pp-card-header">
+        <span class="pp-icon pp-icon-sm"><i class="bi bi-play-btn"></i></span>Publiczne demo
+        @if (_cfg is not null)
+        {
+            <span class="badge ms-2 @(_cfg.Enabled ? "text-bg-success" : "text-bg-secondary")">@(_cfg.Enabled ? "włączone" : "wyłączone")</span>
+        }
+    </div>
+    <div class="card-body">
+        <p class="text-muted small mb-3">
+            Odwiedzający klikają „Wypróbuj demo” na stronie głównej i od razu trafiają do aplikacji z przykładowymi danymi — jako trener
+            albo jako klient, bez zakładania konta. W demo nie wychodzą e-maile, SMS-y ani powiadomienia, płatności i KSeF są wyłączone,
+            a strony konta (hasło, e-mail, usunięcie) są zablokowane. Dane wracają do początku co noc.
+        </p>
+
+        @if (_cfg is null)
+        {
+            <div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div></div>
+        }
+        else if (_candidates.Count == 0 && _cfg.TenantId is null)
+        {
+            <div class="alert alert-info small mb-0">
+                <i class="bi bi-info-circle me-1"></i>Najpierw oznacz konto trenera jako testowe (Trenerzy → wybrane konto → Dane demo) — tylko takie może służyć jako demo.
+            </div>
+        }
+        else
+        {
+            <div class="row g-3">
+                <div class="col-md-5">
+                    <label class="form-label small fw-semibold" for="demo-tenant">Konto demo</label>
+                    <select id="demo-tenant" class="form-select form-select-sm" value="@(_tenantId?.ToString() ?? "")" @onchange="TenantChangedAsync" disabled="@(_cfg.Enabled || _busy)">
+                        <option value="">— wybierz konto testowe —</option>
+                        @foreach (var t in _candidates)
+                        {
+                            <option value="@t.Id">@t.CompanyName (@t.Slug)</option>
+                        }
+                    </select>
+                    @if (_cfg.Enabled)
+                    {
+                        <div class="form-text">Żeby zmienić konto, najpierw wyłącz demo.</div>
+                    }
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold" for="demo-scenario">Dane</label>
+                    <select id="demo-scenario" class="form-select form-select-sm" @bind="_scenario" disabled="@_busy" @key="_scenarios.Count">
+                        @if (_scenarios.Count == 0)
+                        {
+                            <option value="@_scenario">@_scenario</option>
+                        }
+                        @foreach (var s in _scenarios)
+                        {
+                            <option value="@s.Key">@s.Name — @s.Clients klientów, @s.Months mies.</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold" for="demo-hour">Nocny reset</label>
+                    <select id="demo-hour" class="form-select form-select-sm" @bind="_hour" disabled="@_busy">
+                        <option value="off">bez resetu</option>
+                        @for (var h = 0; h <= 23; h++)
+                        {
+                            <option value="@h">o @h:00</option>
+                        }
+                    </select>
+                </div>
+            </div>
+
+            <div class="d-flex flex-wrap gap-2 align-items-center mt-3">
+                @if (_cfg.Enabled)
+                {
+                    <button type="button" class="btn btn-outline-danger btn-sm" disabled="@_busy" @onclick="() => ToggleAsync(false)"><i class="bi bi-pause-circle me-1"></i>Wyłącz demo</button>
+                }
+                else
+                {
+                    <button type="button" class="btn btn-primary btn-sm" disabled="@(_busy || _tenantId is null)" @onclick="() => ToggleAsync(true)"><i class="bi bi-play-circle me-1"></i>Włącz demo</button>
+                }
+                <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@_busy" @onclick="SaveAsync">Zapisz ustawienia</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@(_busy || _cfg.TenantId is null)" @onclick="ResetAsync"><i class="bi bi-arrow-counterclockwise me-1"></i>Przywróć dane teraz</button>
+                @if (_cfg.Enabled)
+                {
+                    <a class="btn btn-link btn-sm" href="/demo" target="_blank" rel="noopener">Otwórz jako trener <i class="bi bi-box-arrow-up-right"></i></a>
+                    <a class="btn btn-link btn-sm" href="/demo?jako=klient" target="_blank" rel="noopener">jako klient <i class="bi bi-box-arrow-up-right"></i></a>
+                }
+            </div>
+
+            @if (_busy)
+            {
+                <div class="small text-muted mt-2"><span class="spinner-border spinner-border-sm me-1"></span>@_busyText</div>
+            }
+            @if (_message is not null)
+            {
+                <div class="alert @(_ok ? "alert-success" : "alert-danger") small py-2 mt-3 mb-0">@_message</div>
+            }
+            @if (_cfg.LastReset is { } last)
+            {
+                <div class="small text-muted mt-2"><i class="bi bi-clock-history me-1"></i>Dane przywrócone: @Local(last).ToString("d MMMM, HH:mm", Pl)</div>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    private static readonly System.Globalization.CultureInfo Pl = System.Globalization.CultureInfo.GetCultureInfo("pl-PL");
+    private PublicDemoService.Config? _cfg;
+    private List<PTScheduler.Portal.Entities.Tenant> _candidates = [];
+    private List<TenantDemoService.Scenario> _scenarios = [];
+    private int? _tenantId;
+    private string _scenario = PublicDemoService.DefaultScenario;
+    private string _hour = "3";
+    private bool _busy, _ok;
+    private string? _message, _busyText;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _cfg = await PublicDemo.GetConfigAsync();
+        _candidates = await PublicDemo.CandidatesAsync();
+        _tenantId = _cfg.TenantId;
+        _scenario = _cfg.Scenario;
+        _hour = _cfg.ResetHour?.ToString() ?? "off";
+        await LoadScenariosAsync();
+    }
+
+    private async Task LoadScenariosAsync()
+    {
+        _scenarios = [];
+        var t = _candidates.FirstOrDefault(c => c.Id == _tenantId);
+        if (t is null) return;
+        var state = await TenantDemo.GetAsync(t);
+        _scenarios = state.Scenarios;
+    }
+
+    private async Task TenantChangedAsync(ChangeEventArgs e)
+    {
+        _tenantId = int.TryParse(e.Value?.ToString(), out var id) ? id : null;
+        await LoadScenariosAsync();
+    }
+
+    private Task SaveAsync() => RunAsync("Zapisuję…", async () =>
+    {
+        await PublicDemo.SaveAsync(_tenantId, _scenario, _hour == "off" ? null : int.Parse(_hour));
+        return (true, "Zapisano ustawienia demo.");
+    });
+
+    private Task ToggleAsync(bool on) => RunAsync(on ? "Włączam demo i wczytuję dane — przy pełnym scenariuszu to może potrwać kilka minut…" : "Wyłączam demo…", async () =>
+    {
+        await PublicDemo.SaveAsync(_tenantId, _scenario, _hour == "off" ? null : int.Parse(_hour));
+        return await PublicDemo.SetEnabledAsync(on, Nav.BaseUri + "register");
+    });
+
+    private Task ResetAsync() => RunAsync("Przywracam dane demo — to może potrwać kilka minut…", PublicDemo.ResetAsync);
+
+    private async Task RunAsync(string text, Func<Task<(bool Ok, string Message)>> action)
+    {
+        _busy = true; _busyText = text; _message = null;
+        StateHasChanged();
+        try { (_ok, _message) = await action(); }
+        catch (Exception ex) { _ok = false; _message = "Nie udało się: " + ex.Message; }
+        finally
+        {
+            _busy = false;
+            _cfg = await PublicDemo.GetConfigAsync();
+        }
+    }
+
+    private static DateTime Local(DateTime utc)
+    {
+        try { return TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), TimeZoneInfo.FindSystemTimeZoneById("Europe/Warsaw")); }
+        catch (TimeZoneNotFoundException) { return utc; }
+    }
+}

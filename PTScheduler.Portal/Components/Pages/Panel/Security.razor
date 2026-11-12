@@ -1,0 +1,237 @@
+@page "/panel/bezpieczenstwo"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject UserManager<IdentityUser> UserMgr
+@inject AuthenticationStateProvider AuthState
+@inject SiteSettingsService Settings
+@rendermode InteractiveServer
+
+<PageTitle>Bezpieczeństwo — Hantly Portal</PageTitle>
+
+<PanelHeader Title="Bezpieczeństwo konta" Icon="bi-shield-check" IconClass="pp-tone-ok" BackHref="/panel/change-password" BackLabel="Konto"
+             Subtitle="Weryfikacja dwuetapowa: po haśle Portal prosi o kod z aplikacji w telefonie. Nawet gdy ktoś pozna hasło, bez telefonu nie wejdzie." />
+
+@if (_user is null)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    @if (Wymagane == "1" && !_enabled)
+    {
+        <StatusBanner Tone="warn" Icon="bi-shield-exclamation" Title="Włącz weryfikację dwuetapową, żeby korzystać z panelu">
+            Administrator platformy wymaga jej od wszystkich kont. To zajmie minutę.
+        </StatusBanner>
+    }
+
+    @if (_message is not null)
+    {
+        <div class="alert @(_isError ? "alert-danger" : "alert-success") py-2 small">@_message</div>
+    }
+
+    <div class="row g-3">
+        <div class="col-lg-7">
+            <PanelCard Title="Weryfikacja dwuetapowa (2FA)" Icon="bi-phone" IconClass="pp-icon-cyan">
+                <Actions>
+                    <span class="pp-chip @(_enabled ? "pp-tone-ok" : "pp-tone-warn")">@(_enabled ? "włączona" : "wyłączona")</span>
+                </Actions>
+                <ChildContent>
+                    @if (_recovery is not null)
+                    {
+                        <div class="sec-codes-box">
+                            <div class="fw-semibold mb-1"><i class="bi bi-key me-1"></i>Kody zapasowe — zapisz je teraz</div>
+                            <p class="small text-muted mb-2">Każdy działa raz, gdy nie masz przy sobie telefonu. Pokazujemy je tylko teraz.</p>
+                            <div class="sec-codes">
+                                @foreach (var c in _recovery) { <code>@c</code> }
+                            </div>
+                            <div class="d-flex flex-wrap gap-2 mt-3">
+                                <a class="btn btn-sm btn-outline-primary" download="hantly-kody-zapasowe.txt" href="@RecoveryFile"><i class="bi bi-download me-1"></i>Pobierz jako plik</a>
+                                <button class="btn btn-sm btn-primary" @onclick="() => _recovery = null"><i class="bi bi-check2 me-1"></i>Zapisane</button>
+                            </div>
+                        </div>
+                    }
+                    else if (_setupKey is not null)
+                    {
+                        <ol class="sec-steps">
+                            <li>Zainstaluj <b>Google Authenticator</b> (albo Microsoft Authenticator, 1Password, Authy).</li>
+                            <li>W aplikacji wybierz <b>„Zeskanuj kod QR”</b> i nakieruj aparat na kod obok.</li>
+                            <li>Wpisz 6-cyfrowy kod, który pokaże aplikacja.</li>
+                        </ol>
+                        <div class="sec-pair">
+                            <div class="sec-qr" aria-label="Kod QR do aplikacji uwierzytelniającej">@((MarkupString)_qrSvg!)</div>
+                            <div class="flex-grow-1" style="min-width:200px">
+                                <div class="small text-muted mb-1">Nie możesz zeskanować? Wpisz klucz ręcznie:</div>
+                                <code class="sec-key">@AdminSecurity.FormatKey(_setupKey)</code>
+                                <label class="form-label small fw-semibold mt-3 mb-1 d-block" for="sec-code">Kod z aplikacji</label>
+                                <div class="d-flex gap-2">
+                                    <input id="sec-code" class="form-control sec-code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="7"
+                                           placeholder="123456" @bind="_code" @bind:event="oninput" @onkeydown="ConfirmOnEnter" />
+                                    <button class="btn btn-primary text-nowrap" @onclick="ConfirmAsync" disabled="@(_busy || AdminSecurity.NormalizeCode(_code).Length != 6)">Włącz</button>
+                                </div>
+                                <button class="btn btn-link btn-sm px-0 mt-2" @onclick="() => _setupKey = null">Anuluj</button>
+                            </div>
+                        </div>
+                    }
+                    else if (!_enabled)
+                    {
+                        <p class="mb-3">Weryfikacja jest wyłączona — do Portalu wystarczy samo hasło. Włącz ją: do panelu masz dostęp do wszystkich instancji trenerów.</p>
+                        <button class="btn btn-primary" @onclick="StartSetupAsync" disabled="@_busy"><i class="bi bi-qr-code me-1"></i>Włącz weryfikację dwuetapową</button>
+                    }
+                    else
+                    {
+                        <p class="mb-1">Przy logowaniu, po haśle, Portal poprosi o kod z aplikacji.</p>
+                        <p class="small text-muted mb-3">Pozostałe kody zapasowe: <b>@_recoveryLeft</b>@(_recoveryLeft <= 3 ? " — warto wygenerować nowe." : ".")</p>
+                        <label class="form-label small fw-semibold mb-1" for="sec-code2">Kod z aplikacji (do potwierdzenia zmian)</label>
+                        <input id="sec-code2" class="form-control sec-code-input mb-2" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123456"
+                               @bind="_code" @bind:event="oninput" />
+                        <div class="d-flex flex-wrap gap-2">
+                            <button class="btn btn-outline-primary btn-sm" @onclick="NewRecoveryAsync" disabled="@(_busy || AdminSecurity.NormalizeCode(_code).Length != 6)"><i class="bi bi-arrow-repeat me-1"></i>Nowe kody zapasowe</button>
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="ChangePhoneAsync" disabled="@(_busy || AdminSecurity.NormalizeCode(_code).Length != 6)"><i class="bi bi-phone me-1"></i>Zmień telefon</button>
+                            <button class="btn btn-outline-danger btn-sm" @onclick="DisableAsync" disabled="@(_busy || AdminSecurity.NormalizeCode(_code).Length != 6)"><i class="bi bi-shield-x me-1"></i>Wyłącz</button>
+                        </div>
+                    }
+                </ChildContent>
+            </PanelCard>
+        </div>
+        <div class="col-lg-5">
+            <PanelCard Title="Dobre praktyki" Icon="bi-lightbulb" IconClass="pp-tone-warn">
+                <ul class="small mb-0 ps-3">
+                    <li class="mb-2">Kody zapasowe trzymaj poza telefonem — w menedżerze haseł albo na wydruku.</li>
+                    <li class="mb-2">Zmieniasz telefon? Najpierw „Zmień telefon” tutaj, potem usuń konto Hantly ze starej aplikacji.</li>
+                    <li class="mb-2">Zgubiony telefon i brak kodów: inny administrator wyłączy Ci weryfikację w zakładce <a href="/panel/administratorzy">Administratorzy</a>.</li>
+                    <li>Każde logowanie — także kodem zapasowym — widać w <a href="/panel/login-logs">logach logowań</a>.</li>
+                </ul>
+            </PanelCard>
+        </div>
+    </div>
+}
+
+<style>
+    .sec-steps { padding-left: 1.2rem; margin-bottom: 1rem; }
+    .sec-steps li + li { margin-top: .25rem; }
+    .sec-pair { display: flex; flex-wrap: wrap; gap: 1.25rem; align-items: flex-start; }
+    .sec-qr { width: 176px; height: 176px; flex-shrink: 0; padding: 8px; background: #fff; border: 1px solid var(--card-bd); border-radius: 14px; }
+    .sec-qr svg { width: 100%; height: 100%; display: block; }
+    .sec-key { display: inline-block; font-size: .95rem; letter-spacing: .04em; padding: .35rem .55rem; background: var(--muted-bg); border-radius: 8px; color: var(--ink); word-break: break-all; }
+    .sec-code-input { max-width: 160px; font-size: 1.15rem; letter-spacing: .25em; font-variant-numeric: tabular-nums; }
+    .sec-codes-box { padding: 1rem; border: 1px solid var(--ok-bd); background: var(--ok-bg); border-radius: 12px; }
+    .sec-codes { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: .4rem; }
+    .sec-codes code { display: block; text-align: center; padding: .35rem; background: #fff; border-radius: 8px; color: var(--ink); font-size: .9rem; letter-spacing: .05em; }
+</style>
+
+@code {
+    [SupplyParameterFromQuery] public string? Wymagane { get; set; }
+
+    private IdentityUser? _user;
+    private bool _enabled;
+    private int _recoveryLeft;
+    private string? _setupKey;
+    private string? _qrSvg;
+    private string _code = "";
+    private List<string>? _recovery;
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+
+    private string RecoveryFile => "data:text/plain;charset=utf-8," + Uri.EscapeDataString(
+        $"Hantly — kody zapasowe ({_user?.Email})\r\nKażdy kod działa raz.\r\n\r\n" + string.Join("\r\n", _recovery ?? []));
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var principal = (await AuthState.GetAuthenticationStateAsync()).User;
+        _user = await UserMgr.GetUserAsync(principal);
+        if (_user is null) return;
+        _enabled = await UserMgr.GetTwoFactorEnabledAsync(_user);
+        _recoveryLeft = _enabled ? await UserMgr.CountRecoveryCodesAsync(_user) : 0;
+    }
+
+    private void Show(string message, bool error) { _message = message; _isError = error; }
+
+    private async Task StartSetupAsync()
+    {
+        if (_user is null) return;
+        _busy = true;
+        try
+        {
+            // Nowy klucz przy każdej konfiguracji — stary (np. z porzuconej próby) przestaje działać.
+            await UserMgr.ResetAuthenticatorKeyAsync(_user);
+            _setupKey = await UserMgr.GetAuthenticatorKeyAsync(_user);
+            _qrSvg = InviteService.QrSvg(AdminSecurity.AuthenticatorUri(_user.Email ?? _user.UserName ?? "admin", _setupKey!));
+            _code = "";
+            _message = null;
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task<bool> CodeOkAsync() =>
+        _user is not null && await UserMgr.VerifyTwoFactorTokenAsync(_user, UserMgr.Options.Tokens.AuthenticatorTokenProvider, AdminSecurity.NormalizeCode(_code));
+
+    private async Task ConfirmOnEnter(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && AdminSecurity.NormalizeCode(_code).Length == 6) await ConfirmAsync();
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (_user is null) return;
+        _busy = true;
+        try
+        {
+            if (!await CodeOkAsync()) { Show("Kod się nie zgadza — sprawdź, czy zegar w telefonie ustawia się automatycznie, i wpisz nowy kod.", true); return; }
+            await UserMgr.SetTwoFactorEnabledAsync(_user, true);
+            _recovery = (await UserMgr.GenerateNewTwoFactorRecoveryCodesAsync(_user, 10) ?? []).ToList();
+            _setupKey = null;
+            _code = "";
+            await LoadAsync();
+            Show("Weryfikacja dwuetapowa włączona. Od następnego logowania Portal poprosi o kod.", false);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task NewRecoveryAsync()
+    {
+        if (_user is null) return;
+        _busy = true;
+        try
+        {
+            if (!await CodeOkAsync()) { Show("Kod się nie zgadza.", true); return; }
+            _recovery = (await UserMgr.GenerateNewTwoFactorRecoveryCodesAsync(_user, 10) ?? []).ToList();
+            _code = "";
+            await LoadAsync();
+            Show("Nowe kody zapasowe — poprzednie już nie działają.", false);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task ChangePhoneAsync()
+    {
+        if (_user is null) return;
+        if (!await CodeOkAsync()) { Show("Kod się nie zgadza.", true); return; }
+        // Weryfikacja zostaje włączona do czasu potwierdzenia nowego telefonu — nie ma okna „bez 2FA”.
+        await StartSetupAsync();
+        Show("Zeskanuj nowy kod w aplikacji na nowym telefonie i potwierdź go — dopiero wtedy stary przestanie działać.", false);
+    }
+
+    private async Task DisableAsync()
+    {
+        if (_user is null) return;
+        _busy = true;
+        try
+        {
+            if (!await CodeOkAsync()) { Show("Kod się nie zgadza.", true); return; }
+            if (await Settings.GetAsync(SiteSettingsService.Keys.RequireAdmin2fa) == "true")
+            {
+                Show("Weryfikacja jest wymagana dla wszystkich administratorów — możesz tylko zmienić telefon.", true);
+                return;
+            }
+            await UserMgr.SetTwoFactorEnabledAsync(_user, false);
+            await UserMgr.ResetAuthenticatorKeyAsync(_user);
+            _code = "";
+            await LoadAsync();
+            Show("Weryfikacja dwuetapowa wyłączona.", false);
+        }
+        finally { _busy = false; }
+    }
+}

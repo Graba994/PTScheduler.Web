@@ -1,0 +1,189 @@
+@rendermode PTScheduler.Web.RenderModes.Server
+@implements IDisposable
+@inject IJSRuntime JS
+@inject PTScheduler.Web.Services.BugReportService BugReports
+@inject AuthenticationStateProvider AuthState
+@inject Microsoft.AspNetCore.Identity.UserManager<ApplicationUser> UserManager
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Domain.Constants
+
+@* Okno „Zgłoś błąd”. Otwiera je ptBug.open() (bug-report.js) z paska bocznego albo menu „Więcej” — najpierw
+   robi zrzut ekranu, potem woła Open. Zgłoszenie trafia do zespołu Hantly w Portalu (BugReportService). *@
+@if (_open)
+{
+    <div class="bugr-backdrop" data-bug-ignore @onclick="Close"></div>
+    <div class="bugr-modal" role="dialog" aria-modal="true" aria-labelledby="bugr-title" data-bug-ignore>
+        @if (_sent)
+        {
+            <div class="bugr-done">
+                <span class="bugr-done-ico"><i class="bi bi-check-lg"></i></span>
+                <h2 id="bugr-title">Dzięki, zgłoszenie wysłane</h2>
+                <p>Trafiło do zespołu Hantly@(_hasShot && _include ? " razem ze zrzutem ekranu" : ""). Gdy błąd zostanie naprawiony, dostaniesz e-mail.</p>
+                <button type="button" class="btn btn-primary" @onclick="Close">Zamknij</button>
+            </div>
+        }
+        else
+        {
+            <div class="bugr-head">
+                <span class="bugr-ico"><i class="bi bi-bug"></i></span>
+                <div>
+                    <h2 id="bugr-title">Zgłoś błąd</h2>
+                    <p>Opisz krótko, co nie działa — zgłoszenie trafi prosto do zespołu Hantly.</p>
+                </div>
+                <button type="button" class="btn-close" aria-label="Zamknij" @onclick="Close"></button>
+            </div>
+
+            <label class="form-label fw-semibold small" for="bugr-text">Co się stało?</label>
+            <textarea id="bugr-text" class="form-control" rows="3" maxlength="@PTScheduler.Web.Services.BugReportService.MaxComment"
+                      placeholder="np. Po kliknięciu „Zapisz” przy wizycie nic się nie dzieje."
+                      @bind="_text" @bind:event="oninput"></textarea>
+
+            @if (_hasShot)
+            {
+                <div class="bugr-shot @(_include ? "" : "is-off")">
+                    <div class="bugr-canvas" @ref="_host"></div>
+                    <div class="bugr-shot-bar">
+                        <span><i class="bi bi-pencil"></i>Zaznacz palcem lub myszką, gdzie jest problem</span>
+                        <button type="button" class="btn btn-link btn-sm p-0" @onclick="ClearMarksAsync">Wyczyść</button>
+                    </div>
+                </div>
+                <div class="form-check mt-2">
+                    <input class="form-check-input" type="checkbox" id="bugr-include" @bind="_include" />
+                    <label class="form-check-label small" for="bugr-include">Dołącz zrzut ekranu</label>
+                </div>
+            }
+            else
+            {
+                <div class="bugr-noshot"><i class="bi bi-image"></i>Zrzutu ekranu nie udało się zrobić — wystarczy sam opis.</div>
+            }
+
+            <p class="bugr-privacy">
+                <i class="bi bi-shield-lock"></i>
+                <span>Zgłoszenie widzi tylko zespół Hantly i służy wyłącznie do naprawy błędu. Zrzut może pokazywać dane klientów — jeśli nie chcesz ich wysyłać, odznacz go albo zasłoń zaznaczeniem. Dołączamy też adres strony, przeglądarkę i ostatnie błędy techniczne.</span>
+            </p>
+
+            @if (_error is not null)
+            {
+                <div class="alert alert-danger small py-2 mb-2">@_error</div>
+            }
+
+            <div class="bugr-foot">
+                <button type="button" class="btn btn-light" @onclick="Close">Anuluj</button>
+                <button type="button" class="btn btn-primary" disabled="@(_busy || string.IsNullOrWhiteSpace(_text))" @onclick="SendAsync">
+                    @if (_busy)
+                    {
+                        <span class="spinner-border spinner-border-sm me-1"></span>
+                    }
+                    else
+                    {
+                        <i class="bi bi-send me-1"></i>
+                    }
+                    Wyślij zgłoszenie
+                </button>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private DotNetObjectReference<BugReporter>? _ref;
+    private ElementReference _host;
+    private bool _open, _sent, _busy, _hasShot, _include = true, _mount;
+    private string _text = "";
+    private string? _error;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _ref = DotNetObjectReference.Create(this);
+            try { await JS.InvokeVoidAsync("ptBug.register", _ref); } catch (JSException) { }
+        }
+        if (_mount && _open)
+        {
+            _mount = false;
+            try
+            {
+                if (_hasShot) await JS.InvokeVoidAsync("ptBug.mount", _host);
+                await JS.InvokeVoidAsync("ptBug.focus", "#bugr-text");
+            }
+            catch (JSException) { }
+        }
+    }
+
+    [JSInvokable]
+    public Task Open(bool hasShot) => InvokeAsync(() =>
+    {
+        _open = true;
+        _sent = false;
+        _busy = false;
+        _error = null;
+        _hasShot = hasShot;
+        _include = hasShot;
+        _mount = true;
+        StateHasChanged();
+    });
+
+    [JSInvokable]
+    public Task Close() => InvokeAsync(async () =>
+    {
+        if (!_open) return;
+        _open = false;
+        if (_sent) _text = "";
+        StateHasChanged();
+        try { await JS.InvokeVoidAsync("ptBug.reset"); } catch (JSException) { }
+    });
+
+    private async Task ClearMarksAsync()
+    {
+        try { await JS.InvokeVoidAsync("ptBug.clearMarks"); } catch (JSException) { }
+    }
+
+    private async Task SendAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var page = await JS.InvokeAsync<PTScheduler.Web.Services.BugReportService.PageContext>("ptBug.context");
+            byte[]? shot = null;
+            if (_hasShot && _include)
+            {
+                var stream = await JS.InvokeAsync<IJSStreamReference?>("ptBug.image");
+                if (stream is not null)
+                {
+                    await using (stream)
+                    {
+                        await using var s = await stream.OpenReadStreamAsync(PTScheduler.Web.Services.BugReportService.MaxScreenshotBytes);
+                        using var ms = new MemoryStream();
+                        await s.CopyToAsync(ms);
+                        shot = ms.ToArray();
+                    }
+                }
+            }
+            var (ok, error) = await BugReports.SendAsync(_text, shot, page, await AuthorAsync());
+            if (ok) _sent = true; else _error = error;
+        }
+        catch (Exception ex) when (ex is JSException or IOException or InvalidOperationException or TaskCanceledException)
+        {
+            _error = "Nie udało się przygotować zgłoszenia. Spróbuj jeszcze raz — w razie czego odznacz zrzut ekranu.";
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task<PTScheduler.Web.Services.BugReportService.Author> AuthorAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        var email = user.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? user.Identity?.Name;
+        var me = await UserManager.GetUserAsync(user);
+        var name = me is null ? null : $"{me.FirstName} {me.LastName}".Trim() is { Length: > 0 } n ? n : null;
+        var role = user.IsInRole(Roles.Admin) && user.IsInRole(Roles.Trainer) ? "właściciel (pracuje sam)"
+            : user.IsInRole(Roles.Admin) ? "właściciel"
+            : user.IsInRole(Roles.Trainer) ? "trener"
+            : user.IsInRole(Roles.Subordinate) ? "pracownik" : null;
+        if (PTScheduler.Web.Services.AccountSwitchService.IsSwitched(user)) role = (role ?? "konto") + ", po przełączeniu konta";
+        return new(email, name, role);
+    }
+
+    public void Dispose() => _ref?.Dispose();
+}

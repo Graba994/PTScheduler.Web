@@ -1,0 +1,103 @@
+@* Wykres trendu jednej wartości: linia z delikatnym wypełnieniem, kropka na ostatnim punkcie,
+   opcjonalnie linia progu i siatka (wersja duża). Najechanie na fragment pokazuje datę i wartość. *@
+@using PTScheduler.Portal.Services
+<div class="pp-spark @(Large ? "pp-spark-lg" : "") pp-tone-@Tone" style="height:@(Height)px" role="img" aria-label="@AriaLabel">
+    <div class="pp-spark-plot">
+    <svg viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true">
+        @if (Large)
+        {
+            @foreach (var g in new[] { 25, 50, 75 })
+            {
+                <line class="pp-spark-grid" x1="0" x2="1000" y1="@g" y2="@g" />
+            }
+            <line class="pp-spark-base" x1="0" x2="1000" y1="100" y2="100" />
+        }
+        @if (Threshold is { } th && th <= _max)
+        {
+            <line class="pp-spark-th" x1="0" x2="1000" y1="@F(Y(th))" y2="@F(Y(th))" />
+        }
+        @foreach (var seg in _segments)
+        {
+            <path class="pp-spark-area" d="@Area(seg)" />
+            <polyline class="pp-spark-line" points="@Line(seg)" />
+        }
+        @for (var i = 0; i < _points.Count; i++)
+        {
+            var p = _points[i];
+            var x = X(p.At);
+            var w = Math.Max(2, 1000.0 / Math.Max(1, _points.Count));
+            <rect class="pp-spark-hit" x="@F(x - w / 2)" y="0" width="@F(w)" height="100"><title>@p.At.ToLocalTime().ToString(Range > TimeSpan.FromDays(2) ? "dd.MM HH:mm" : "HH:mm") — @Format(p.Value)</title></rect>
+        }
+    </svg>
+    @if (_points.Count > 0)
+    {
+        var last = _points[^1];
+        <span class="pp-spark-dot" style="left:@F(X(last.At) / 10)%;top:@F(Y(last.Value))%"></span>
+    }
+    @if (_points.Count == 0)
+    {
+        <span class="pp-spark-empty">brak danych</span>
+    }
+    </div>
+    @if (Large)
+    {
+        <span class="pp-spark-ylabel" style="top:0">@Format(_max)</span>
+        <span class="pp-spark-ylabel" style="top:50%">@Format(_max / 2)</span>
+        <span class="pp-spark-ylabel" style="top:100%">@Format(0)</span>
+    }
+</div>
+
+@code {
+    [Parameter] public List<ResourceReportService.Point> Points { get; set; } = [];
+    [Parameter] public TimeSpan Range { get; set; } = TimeSpan.FromDays(7);
+    [Parameter] public TimeSpan Bucket { get; set; } = TimeSpan.FromHours(1);
+    /// <summary>Stała góra skali (np. 100 dla procentów); bez niej skala z danych.</summary>
+    [Parameter] public double? Max { get; set; }
+    [Parameter] public double? Threshold { get; set; }
+    [Parameter] public string Tone { get; set; } = "info";
+    [Parameter] public int Height { get; set; } = 32;
+    [Parameter] public bool Large { get; set; }
+    [Parameter] public Func<double, string> Format { get; set; } = v => v.ToString("0");
+    [Parameter] public string AriaLabel { get; set; } = "Wykres trendu";
+
+    private List<ResourceReportService.Point> _points = [];
+    private List<List<ResourceReportService.Point>> _segments = [];
+    private double _max = 1;
+    private DateTime _from, _to;
+
+    protected override void OnParametersSet()
+    {
+        _to = DateTime.UtcNow;
+        _from = _to - Range;
+        _points = Points.Where(p => p.At >= _from).OrderBy(p => p.At).ToList();
+        var top = _points.Count > 0 ? _points.Max(p => p.Value) : 0;
+        _max = Max ?? (top > 0 ? NiceCeiling(top * 1.15) : 1);
+        // Przerwa w danych (np. Portal był wyłączony) przerywa linię zamiast udawać płynny przebieg.
+        _segments = [];
+        List<ResourceReportService.Point>? current = null;
+        foreach (var p in _points)
+        {
+            // Po 2 dniach próbki są co godzinę — dopiero dłuższa przerwa jest prawdziwą luką.
+            var gap = Bucket * 3 > TimeSpan.FromMinutes(90) ? Bucket * 3 : TimeSpan.FromMinutes(90);
+            if (current is null || p.At - current[^1].At > gap) _segments.Add(current = []);
+            current.Add(p);
+        }
+    }
+
+    private static double NiceCeiling(double v)
+    {
+        var mag = Math.Pow(10, Math.Floor(Math.Log10(v)));
+        foreach (var step in new[] { 1, 2, 2.5, 5, 10 })
+            if (step * mag >= v) return step * mag;
+        return 10 * mag;
+    }
+
+    private double X(DateTime at) => Math.Clamp((at - _from).TotalSeconds / Math.Max(1, (_to - _from).TotalSeconds) * 1000, 0, 1000);
+    private double Y(double v) => Math.Clamp(100 - v / _max * 100, 0, 100);
+    private static string F(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+    private string Line(List<ResourceReportService.Point> seg) =>
+        seg.Count == 1 ? $"{F(X(seg[0].At) - 3)},{F(Y(seg[0].Value))} {F(X(seg[0].At) + 3)},{F(Y(seg[0].Value))}"
+        : string.Join(" ", seg.Select(p => $"{F(X(p.At))},{F(Y(p.Value))}"));
+    private string Area(List<ResourceReportService.Point> seg) =>
+        $"M{F(X(seg[0].At))},100 L{string.Join(" L", seg.Select(p => $"{F(X(p.At))},{F(Y(p.Value))}"))} L{F(X(seg[^1].At))},100 Z";
+}

@@ -1,0 +1,76 @@
+@* Samouczek „Pierwsze kroki” na stronie, która jest jednym z kroków: gdzie jestem, co dalej.
+   Znika, gdy wszystkie kroki są zrobione. *@
+@using PTScheduler.Web.Components.Layout
+@inject SetupGuide Guide
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthState
+@inject PTScheduler.Application.Interfaces.IPermissionService Permission
+
+@if (_state is { AllDone: false } s && _step is not null)
+{
+    var index = s.Steps.IndexOf(_step) + 1;
+    var next = s.NextAfter(_step);
+    <section class="setx-guide @(_step.Done ? "is-done" : "")" aria-label="Pierwsze kroki">
+        <div class="setx-guide-top">
+            <span class="setx-guide-badge"><i class="bi bi-rocket-takeoff"></i>Pierwsze kroki</span>
+            <ol class="setx-dots" aria-label="@($"Zrobione {s.DoneCount} z {s.Steps.Count}")">
+                @foreach (var st in s.Steps)
+                {
+                    <li class="@(st.Done ? "done" : "") @(st == _step ? "current" : "")">
+                        <a href="@st.Href" title="@st.Title"><i class="bi @(st.Done ? "bi-check-lg" : st.Icon)"></i></a>
+                    </li>
+                }
+            </ol>
+            <span class="setx-guide-count"><b>@s.DoneCount</b> z @s.Steps.Count</span>
+        </div>
+        <div class="setx-guide-body">
+            <div class="setx-guide-text">
+                @if (_step.Done)
+                {
+                    <b><i class="bi bi-check-circle-fill text-success me-1"></i>Ten krok masz za sobą.</b>
+                    <span>@(next is null ? "To był ostatni — aplikacja jest gotowa dla klientów." : "Możesz tu jeszcze coś poprawić albo iść dalej.")</span>
+                }
+                else
+                {
+                    <b>Krok @index: @_step.Title</b>
+                    <span>@_step.Hint. Gdy skończysz, przejdź do następnego kroku.</span>
+                }
+            </div>
+            <div class="setx-guide-actions">
+                @if (next is not null)
+                {
+                    <a class="btn btn-sm btn-primary" href="@next.Href">Następny krok: @next.Title<i class="bi bi-arrow-right ms-1"></i></a>
+                }
+                else
+                {
+                    <a class="btn btn-sm btn-outline-primary" href="/admin">Wróć do ustawień</a>
+                }
+            </div>
+        </div>
+    </section>
+}
+
+@code {
+    private SetupState? _state;
+    private SetupStep? _step;
+
+    /// <summary>Stan już policzony przez rodzica (układ ustawień) — bez ponownego liczenia.</summary>
+    [Parameter] public SetupState? State { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (State is not null)
+        {
+            _state = State;
+            _step = _state.StepFor(Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0]);
+            return;
+        }
+        var access = await AdminAccess.LoadAsync(AuthState, Permission);
+        if (!access.IsOwner) return;
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        _state = await Guide.GetAsync(userId, access);
+        var path = Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0];
+        _step = _state.StepFor(path);
+    }
+}

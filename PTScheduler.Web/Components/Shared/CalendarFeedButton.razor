@@ -1,0 +1,115 @@
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@inject ITrainerConfigService TrainerConfig
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+@* Subskrypcja wszystkich wizyt trenera w kalendarzu telefonu (Google / Apple / Outlook). *@
+@if (_isStaff)
+{
+    <div class="position-relative">
+        <button class="btn btn-sm btn-outline-secondary" @onclick="ToggleAsync" aria-expanded="@(_open ? "true" : "false")">
+            <i class="bi bi-phone me-1"></i>W telefonie
+        </button>
+
+        @if (_open)
+        {
+            <div class="cal-feed-panel card shadow">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div class="fw-semibold"><i class="bi bi-calendar-check me-1"></i>Wizyty w kalendarzu telefonu</div>
+                        <button class="btn-close btn-sm" @onclick="() => _open = false" aria-label="Zamknij"></button>
+                    </div>
+                    <p class="text-muted small mb-3">
+                        Subskrybuj raz — wszystkie Twoje wizyty pojawią się w Google, Apple lub Outlook
+                        i będą się same aktualizować.
+                    </p>
+
+                    @if (_feedUrl is null)
+                    {
+                        <div class="text-center py-2"><div class="spinner-border spinner-border-sm"></div></div>
+                    }
+                    else
+                    {
+                        <div class="d-flex flex-column gap-2">
+                            <a class="btn btn-primary btn-sm" href="@_webcalUrl">
+                                <i class="bi bi-apple me-1"></i>iPhone / Mac / Outlook
+                            </a>
+                            <a class="btn btn-outline-primary btn-sm" target="_blank" rel="noopener"
+                               href="@($"https://calendar.google.com/calendar/r?cid={Uri.EscapeDataString(_webcalUrl!)}")">
+                                <i class="bi bi-google me-1"></i>Kalendarz Google
+                            </a>
+                            <div class="input-group input-group-sm">
+                                <input class="form-control" value="@_feedUrl" readonly aria-label="Adres kalendarza" />
+                                <button class="btn btn-outline-secondary" @onclick="CopyAsync" title="Kopiuj">
+                                    <i class="bi @(_copied ? "bi-clipboard-check" : "bi-clipboard")"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="form-text">
+                            Google odświeża subskrypcje co kilka godzin, Apple — zwykle co godzinę.
+                            Link jest prywatny (zawiera dane klientów) — nie udostępniaj go.
+                        </div>
+                        @if (!_https)
+                        {
+                            <div class="alert alert-warning small py-2 mt-2 mb-0">
+                                Aplikacja jest otwarta przez http:// — Google Calendar wymaga adresu https:// (otwórz aplikację przez domenę).
+                            </div>
+                        }
+                        <button class="btn btn-link btn-sm text-danger p-0 mt-2" @onclick="RegenerateAsync">
+                            <i class="bi bi-arrow-repeat me-1"></i>Wygeneruj nowy link (stary przestanie działać)
+                        </button>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private bool _isStaff;
+    private bool _open;
+    private bool _copied;
+    private bool _https;
+    private string _userId = string.Empty;
+    private string? _feedUrl;
+    private string? _webcalUrl;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        _isStaff = user.IsInRole(Roles.Admin) || user.IsInRole(Roles.Trainer) || user.IsInRole(Roles.Subordinate);
+        _userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+        _https = Nav.BaseUri.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task ToggleAsync()
+    {
+        _open = !_open;
+        if (_open && _feedUrl is null)
+            SetUrls(await TrainerConfig.GetOrCreateCalendarFeedTokenAsync(_userId));
+    }
+
+    private async Task RegenerateAsync()
+    {
+        _copied = false;
+        SetUrls(await TrainerConfig.RegenerateCalendarFeedTokenAsync(_userId));
+    }
+
+    private void SetUrls(string token)
+    {
+        _feedUrl = $"{Nav.BaseUri.TrimEnd('/')}/calendar/feed/{token}.ics";
+        _webcalUrl = "webcal://" + _feedUrl[(_feedUrl.IndexOf("://", StringComparison.Ordinal) + 3)..];
+    }
+
+    private async Task CopyAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", _feedUrl);
+            _copied = true;
+        }
+        catch { }
+    }
+}

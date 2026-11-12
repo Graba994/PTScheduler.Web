@@ -1,0 +1,70 @@
+@page "/status"
+@layout PublicLayout
+@inject PTScheduler.Portal.Services.UptimeService UptimeSvc
+
+@* Publiczny status usług (monitory z „Pokazuj na stronie /status”). Strona odświeża się sama co minutę. *@
+
+<PageTitle>Status usług — Hantly</PageTitle>
+<HeadContent>
+    <meta http-equiv="refresh" content="60" />
+    <meta name="robots" content="noindex" />
+</HeadContent>
+
+@{
+    var anyDown = _list.Any(s => s.Monitor.State == UptimeState.Down);
+}
+<section class="st-section">
+    <div class="st-container">
+        <h1 class="st-h1">Status usług</h1>
+        <div class="st-overall @(anyDown ? "is-down" : "is-up")">
+            <i class="bi @(anyDown ? "bi-exclamation-triangle-fill" : "bi-check-circle-fill")"></i>
+            <div>
+                <b>@(_list.Count == 0 ? "Brak danych" : anyDown ? "Część usług ma problem" : "Wszystko działa")</b>
+                <span>@(anyDown ? "Wiemy o tym i już działamy." : "Sprawdzamy dostępność co minutę.") Ostatnia aktualizacja: @DateTime.Now.ToString("HH:mm")</span>
+            </div>
+        </div>
+
+        @foreach (var s in _list)
+        {
+            var m = s.Monitor;
+            var days = _daily.GetValueOrDefault(m.Id) ?? [];
+            var known = days.Where(x => x.Percent is not null).ToList();
+            var total = known.Count == 0 ? (double?)null : Math.Round(known.Average(x => x.Percent!.Value), 2);
+            <article class="st-card">
+                <div class="st-card-head">
+                    <span class="st-name">@m.Name</span>
+                    <span class="st-pill @(m.State == UptimeState.Down ? "down" : m.State == UptimeState.Up ? "up" : "wait")">@(m.State == UptimeState.Down ? "Nie działa" : m.State == UptimeState.Up ? "Działa" : "Sprawdzamy")</span>
+                </div>
+                <div class="st-bars" role="img" aria-label="@($"Dostępność z {Days} dni: {UptimeRules.Show(total)}")">
+                    @foreach (var (day, pct) in days)
+                    {
+                        <i class="@Tone(pct)" title="@($"{day:dd.MM}: {(pct is null ? "brak danych" : UptimeRules.Show(pct))}")"></i>
+                    }
+                </div>
+                <div class="st-axis"><span>@Days dni temu</span><span>@UptimeRules.Show(total)</span><span>dziś</span></div>
+            </article>
+        }
+
+        <p class="st-foot">Problem, którego tu nie widać? Napisz do nas przez stronę główną — sprawdzimy od razu.</p>
+    </div>
+</section>
+
+@code {
+    private const int Days = 60;
+    private List<UptimeService.Summary> _list = [];
+    private Dictionary<int, List<(DateTime Day, double? Percent)>> _daily = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _list = await UptimeSvc.SummariesAsync(beats: 1, publicOnly: true);
+        _daily = await UptimeSvc.DailyAsync(_list.Select(s => s.Monitor.Id), Days);
+    }
+
+    private static string Tone(double? pct) => pct switch
+    {
+        null => "none",
+        >= 99.5 => "ok",
+        >= 95 => "warn",
+        _ => "bad"
+    };
+}

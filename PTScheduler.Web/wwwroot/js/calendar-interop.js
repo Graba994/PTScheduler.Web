@@ -2,14 +2,24 @@ let calendar = null;
 let summaryEl = null;
 
 export function initCalendar(dotnetRef, el, canEdit) {
+    if (typeof FullCalendar === 'undefined') {
+        // Biblioteka się nie wczytała — komunikat zamiast wyjątku, który zamykał obwód.
+        el.innerHTML = '<div class="alert alert-warning m-3">Nie udało się wczytać kalendarza. Odśwież stronę.</div>';
+        return;
+    }
     const isMobile = window.innerWidth < 768;
+
+    const now = new Date();
+    const scrollHour = Math.max(0, now.getHours() - 1);
+    const scrollTime = String(scrollHour).padStart(2, '0') + ':00:00';
 
     calendar = new FullCalendar.Calendar(el, {
         initialView: isMobile ? 'listWeek' : 'timeGridWeek',
         locale: 'pl',
         firstDay: 1,
-        height: isMobile ? 'auto' : 'calc(100vh - 168px)',
+        height: isMobile ? 'auto' : 'calc(100vh - 108px)',
         nowIndicator: true,
+        scrollTime: scrollTime,
         slotMinTime: '06:00:00',
         slotMaxTime: '22:00:00',
         slotDuration: '00:30:00',
@@ -27,7 +37,16 @@ export function initCalendar(dotnetRef, el, canEdit) {
             month: 'Miesiąc',
             week: 'Tydzień',
             day: 'Dzień',
-            list: 'Lista'
+            // Klucze per widok mają pierwszeństwo przed ogólnym „list” —
+            // bez nich oba przyciski listy na telefonie miały podpis „Lista”.
+            listDay: 'Dzień',
+            listWeek: 'Tydzień'
+        },
+        views: {
+            // Na liście tylko godzina początku — długość wizyty jest w kafelku, a „10:00 - 10:30”
+            // łamało się w wąskiej kolumnie na trzy linijki.
+            listDay: { buttonText: 'Dzień', displayEventEnd: false },
+            listWeek: { buttonText: 'Tydzień', displayEventEnd: false }
         },
         events: async (info, success, failure) => {
             try {
@@ -36,11 +55,21 @@ export function initCalendar(dotnetRef, el, canEdit) {
             } catch (e) { failure(e); }
         },
         dateClick: canEdit ? info => dotnetRef.invokeMethodAsync('OnDateClick', info.dateStr) : undefined,
+        // Przeciąganie: tylko zaplanowane wizyty (każde zdarzenie ma własne „editable”), długość się nie zmienia.
+        editable: false,
+        eventDurationEditable: false,
+        eventAllow: dropInfo => dropInfo.start >= new Date(),
+        eventDrop: async info => {
+            const error = await dotnetRef.invokeMethodAsync('OnEventDrop', parseInt(info.event.id), localIso(info.event.start));
+            if (error) { info.revert(); showCalToast(error, true); }
+            else { showCalToast('Przeniesiono na ' + info.event.start.toLocaleString('pl-PL', { weekday: 'short', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' }) + '. Klient dostanie informację.', false); }
+        },
         eventContent: renderEventContent,
         eventClick: info => dotnetRef.invokeMethodAsync('OnEventClick', parseInt(info.event.id)),
         eventDidMount: info => {
-            info.el.style.cursor = 'pointer';
             const ep = info.event.extendedProps;
+            if (ep.busy) { info.el.title = 'Zajęte w Google Calendar'; return; }
+            info.el.style.cursor = 'pointer';
             info.el.title = `${ep.clientName} — ${ep.sessionType}`;
         },
         eventsSet: updateDaySummary
@@ -59,6 +88,7 @@ export function initCalendar(dotnetRef, el, canEdit) {
 
 function updateDaySummary(events) {
     if (!summaryEl) return;
+    events = (events || []).filter(e => !e.extendedProps.busy);
     if (!events || events.length === 0) { summaryEl.style.display = 'none'; return; }
 
     const view = calendar.view;
@@ -94,6 +124,7 @@ function updateDaySummary(events) {
 function renderEventContent(arg) {
     const { event, view } = arg;
     const ep = event.extendedProps;
+    if (ep.busy) return { html: '<span class="cal-busy-label">Google: zajęte</span>' };
     const statusCls = 'status-' + (ep.status || 'scheduled').toLowerCase();
     const isList = view.type.startsWith('list');
     const isMonth = view.type === 'dayGridMonth';
@@ -148,4 +179,20 @@ export function destroyCalendar() {
     if (summaryEl) { summaryEl.remove(); summaryEl = null; }
     calendar?.destroy();
     calendar = null;
+}
+
+// Zegar ścienny bez strefy (tak jak StartTime w bazie): 2026-10-17T10:30:00
+function localIso(d) {
+    const p = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:00`;
+}
+
+function showCalToast(text, isError) {
+    let el = document.querySelector('.cal-toast');
+    if (!el) { el = document.createElement('div'); el.className = 'cal-toast'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
+    el.textContent = text;
+    el.classList.toggle('is-error', !!isError);
+    el.classList.add('show');
+    clearTimeout(el._t);
+    el._t = setTimeout(() => el.classList.remove('show'), isError ? 6000 : 3500);
 }

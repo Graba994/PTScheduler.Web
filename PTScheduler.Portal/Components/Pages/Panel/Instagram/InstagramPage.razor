@@ -1,0 +1,139 @@
+@page "/panel/instagram"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject InstagramService Ig
+@inject NavigationManager Nav
+@rendermode InteractiveServer
+
+@* Instagram marki: prosty Przegląd na co dzień i zakładki zaawansowane (plan, pomysły AI, komentarze, statystyki,
+   autopilot, połączenie). Logika: InstagramService; publikacja i synchronizacja w tle: InstagramBackgroundService. *@
+
+<PageTitle>Instagram — Hantly Portal</PageTitle>
+
+<PanelHeader Title="Instagram" Icon="bi-instagram" IconClass="pp-icon-pink"
+             Subtitle="Posty, plan publikacji, komentarze i wyniki profilu marki w jednym miejscu. Autopilot z AI przygotuje tydzień postów — Ty tylko akceptujesz.">
+    <Actions>
+        @if (_account is not null)
+        {
+            <a class="btn btn-outline-secondary btn-sm" href="@($"https://www.instagram.com/{_account.Username}/")" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i>@@@_account.Username</a>
+        }
+        <button class="btn btn-primary btn-sm" @onclick="NewPostAsync"><i class="bi bi-plus-lg me-1"></i>Nowy post</button>
+    </Actions>
+</PanelHeader>
+
+@if (_flash is not null)
+{
+    <div class="alert @(_flashOk ? "alert-success" : "alert-danger") py-2 small d-flex align-items-center gap-2" role="status">
+        <i class="bi @(_flashOk ? "bi-check-circle" : "bi-exclamation-triangle")"></i><span>@_flash</span>
+        <button type="button" class="btn-close ms-auto" aria-label="Zamknij" @onclick="() => _flash = null"></button>
+    </div>
+}
+
+<ul class="nav pp-tabs mb-3" role="tablist">
+    @foreach (var (key, label, icon) in Tabs)
+    {
+        <li class="nav-item" role="presentation">
+            <button type="button" role="tab" class="nav-link @(_tab == key ? "active" : "")" aria-selected="@(_tab == key ? "true" : "false")" @onclick="() => GoAsync((key, null))">
+                <i class="bi @icon me-1"></i>@label
+                @if (key == "plan" && _toApprove > 0) { <span class="ig-count">@_toApprove</span> }
+                @if (key == "komentarze" && _openComments > 0) { <span class="ig-count">@_openComments</span> }
+            </button>
+        </li>
+    }
+</ul>
+
+@if (_tab == "plan" && _postId is int pid)
+{
+    <IgEditor PostId="pid" Go="GoAsync" Flash="FlashAsync" @key="pid" />
+}
+else if (_tab == "plan")
+{
+    <IgPlan Go="GoAsync" Flash="FlashAsync" />
+}
+else if (_tab == "pomysly")
+{
+    <IgIdeas Go="GoAsync" Flash="FlashAsync" />
+}
+else if (_tab == "komentarze")
+{
+    <IgComments Flash="FlashAsync" Changed="RefreshCountsAsync" />
+}
+else if (_tab == "statystyki")
+{
+    <IgStats Flash="FlashAsync" />
+}
+else if (_tab == "autopilot")
+{
+    <IgAutopilot Go="GoAsync" Flash="FlashAsync" />
+}
+else if (_tab == "polaczenie")
+{
+    <IgConnect Flash="FlashAsync" Changed="RefreshCountsAsync" />
+}
+else
+{
+    <IgOverview Go="GoAsync" Flash="FlashAsync" />
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "t")] public string? TabQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "post")] public int? PostQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "ok")] public string? OkQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "err")] public string? ErrQuery { get; set; }
+
+    private static readonly (string Key, string Label, string Icon)[] Tabs =
+    [
+        ("przeglad", "Przegląd", "bi-speedometer2"),
+        ("plan", "Plan i posty", "bi-calendar-week"),
+        ("pomysly", "Pomysły", "bi-lightbulb"),
+        ("komentarze", "Komentarze", "bi-chat-dots"),
+        ("statystyki", "Statystyki", "bi-graph-up"),
+        ("autopilot", "Autopilot", "bi-robot"),
+        ("polaczenie", "Połączenie", "bi-plug"),
+    ];
+
+    private string _tab = "przeglad";
+    private int? _postId;
+    private InstagramAccount? _account;
+    private int _toApprove, _openComments;
+    private string? _flash;
+    private bool _flashOk;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _tab = Tabs.Any(t => t.Key == TabQuery) ? TabQuery! : "przeglad";
+        _postId = PostQuery;
+        if (!string.IsNullOrEmpty(OkQuery)) (_flash, _flashOk) = (OkQuery, true);
+        else if (!string.IsNullOrEmpty(ErrQuery)) (_flash, _flashOk) = (ErrQuery, false);
+        await RefreshCountsAsync();
+    }
+
+    private async Task RefreshCountsAsync()
+    {
+        _account = await Ig.AccountAsync();
+        var o = await Ig.OverviewAsync();
+        _toApprove = o.ToApprove;
+        _openComments = o.OpenComments;
+    }
+
+    private async Task GoAsync((string Tab, int? Post) to)
+    {
+        _tab = to.Tab;
+        _postId = to.Post;
+        var url = to.Post is int p ? $"/panel/instagram?t={to.Tab}&post={p}" : $"/panel/instagram?t={to.Tab}";
+        Nav.NavigateTo(url, replace: true);
+        await RefreshCountsAsync();
+    }
+
+    private async Task FlashAsync((bool Ok, string Message) m)
+    {
+        (_flash, _flashOk) = (m.Message, m.Ok);
+        await RefreshCountsAsync();
+    }
+
+    private async Task NewPostAsync()
+    {
+        var id = await Ig.CreatePostAsync(InstagramPostKind.Image);
+        await GoAsync(("plan", id));
+    }
+}

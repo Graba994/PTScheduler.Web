@@ -1,0 +1,281 @@
+@page "/panel/bledy"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject BugReportService BugService
+@inject SiteSettingsService SiteSettings
+@rendermode InteractiveServer
+
+<PageTitle>Zgłoszenia błędów — Hantly Portal</PageTitle>
+
+<PanelHeader Title="Zgłoszenia błędów" Icon="bi-bug" IconClass="pp-tone-danger" Subtitle="Co trenerzy zgłosili przyciskiem „Zgłoś błąd” w aplikacji: opis, zrzut ekranu i dane przeglądarki.">
+    <Actions>
+        <div class="form-check form-switch mb-0 me-2 small" title="E-mail na adres powiadomień administratora przy każdym nowym zgłoszeniu">
+            <input class="form-check-input" type="checkbox" id="bug-notify" checked="@_notify" @onchange="ToggleNotifyAsync" />
+            <label class="form-check-label" for="bug-notify">E-mail o nowym zgłoszeniu</label>
+        </div>
+        <button class="btn btn-sm btn-outline-secondary" @onclick="LoadAsync"><i class="bi bi-arrow-clockwise me-1"></i>Odśwież</button>
+    </Actions>
+</PanelHeader>
+
+<div class="pp-seg mb-3" role="tablist" aria-label="Stan zgłoszeń">
+    @foreach (var (st, label) in Filters)
+    {
+        <button role="tab" aria-selected="@(_filter == st)" class="@(_filter == st ? "active" : "")" @onclick="() => FilterAsync(st)">
+            @label @if (Count(st) > 0) { <span class="bug-count">@Count(st)</span> }
+        </button>
+    }
+</div>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (_rows.Count == 0)
+{
+    <PanelCard>
+        <div class="pp-empty">
+            <i class="bi bi-bug"></i>
+            <div class="pp-empty-title">@(_filter == BugReportStatus.New ? "Brak nowych zgłoszeń" : "Nic tu nie ma")</div>
+            <p>Trener zgłasza błąd ikoną robaczka w aplikacji (pasek boczny, menu konta albo „Więcej” na telefonie). Zgłoszenie trafia tutaj z opisem i zrzutem ekranu.</p>
+        </div>
+    </PanelCard>
+}
+else
+{
+    <div class="bug @(_open is not null ? "has-open" : "")">
+        <ul class="bug-list" aria-label="Zgłoszenia">
+            @foreach (var r in _rows)
+            {
+                <li>
+                    <button class="bug-item @(_open?.Id == r.Id ? "is-active" : "")" @onclick="() => Open(r)">
+                        <span class="bug-thumb">
+                            @if (r.HasScreenshot)
+                            {
+                                <img src="/panel/bledy/@r.Id/zrzut" alt="" loading="lazy" />
+                            }
+                            else
+                            {
+                                <i class="bi bi-image" aria-hidden="true"></i>
+                            }
+                        </span>
+                        <span class="bug-item-body">
+                            <span class="bug-item-top">
+                                <b>@r.Tenant</b>
+                                <span class="bug-time">@Ago(r.CreatedAt)</span>
+                            </span>
+                            <span class="bug-item-text">@r.Comment</span>
+                            <span class="bug-item-meta">
+                                <span class="pp-chip @Tone(r.Status)">@Label(r.Status)</span>
+                                @if (!string.IsNullOrEmpty(r.PageUrl)) { <code>@Path(r.PageUrl)</code> }
+                            </span>
+                        </span>
+                    </button>
+                </li>
+            }
+        </ul>
+
+        @if (_open is { } o)
+        {
+            <section class="bug-detail" aria-label="Zgłoszenie #@o.Id">
+                <div class="bug-detail-head">
+                    <button class="btn btn-sm btn-link px-0 bug-back" @onclick="() => _open = null"><i class="bi bi-arrow-left me-1"></i>Lista</button>
+                    <div>
+                        <div class="bug-detail-title">#@o.Id · <a href="/panel/tenants/@o.TenantId">@o.Tenant</a></div>
+                        <div class="small text-muted">
+                            @(o.AuthorName ?? o.AuthorEmail ?? "—")@(string.IsNullOrEmpty(o.AuthorRole) ? "" : $" · {o.AuthorRole}") · @o.CreatedAt.ToLocalTime().ToString("d MMMM yyyy, HH:mm", Pl)
+                        </div>
+                    </div>
+                    <span class="pp-chip @Tone(o.Status) ms-auto">@Label(o.Status)</span>
+                </div>
+
+                <p class="bug-comment">@o.Comment</p>
+
+                @if (o.HasScreenshot)
+                {
+                    <a class="bug-shot" href="/panel/bledy/@o.Id/zrzut" target="_blank" rel="noopener" title="Otwórz zrzut w pełnym rozmiarze">
+                        <img src="/panel/bledy/@o.Id/zrzut" alt="Zrzut ekranu ze zgłoszenia #@o.Id" />
+                    </a>
+                }
+                else
+                {
+                    <div class="bug-noshot"><i class="bi bi-image me-1"></i>Bez zrzutu ekranu@(o.ClosedAt is not null ? " (zrzuty zamkniętych zgłoszeń znikają po 90 dniach)" : "")</div>
+                }
+
+                <dl class="bug-kv">
+                    <div><dt>Strona</dt><dd>@(o.PageTitle is { Length: > 0 } t ? $"{t} — " : "")<code>@(o.PageUrl ?? "—")</code></dd></div>
+                    <div><dt>Przeglądarka</dt><dd>@Browser(o.UserAgent) @if (!string.IsNullOrEmpty(o.Viewport)) { <span class="text-muted">· @o.Viewport</span> }</dd></div>
+                    <div><dt>Wersja aplikacji</dt><dd><code>@(o.AppVersion ?? "—")</code></dd></div>
+                    @if (!string.IsNullOrEmpty(o.AuthorEmail))
+                    {
+                        <div><dt>Kontakt</dt><dd><a href="@($"mailto:{o.AuthorEmail}?subject={Uri.EscapeDataString($"Zgłoszenie błędu #{o.Id}")}")">@o.AuthorEmail</a></dd></div>
+                    }
+                </dl>
+
+                @if (!string.IsNullOrEmpty(o.ClientErrors))
+                {
+                    <details class="bug-errors" open>
+                        <summary>Błędy w przeglądarce przed zgłoszeniem</summary>
+                        <pre>@o.ClientErrors</pre>
+                    </details>
+                }
+                @if (!string.IsNullOrEmpty(o.UserAgent))
+                {
+                    <details class="bug-errors">
+                        <summary>Pełny opis przeglądarki</summary>
+                        <pre>@o.UserAgent</pre>
+                    </details>
+                }
+
+                <div class="bug-actions">
+                    <label class="form-label small fw-semibold" for="bug-note">Notatka (dla Ciebie; przy „Naprawione” trafi też w e-mailu do zgłaszającego)</label>
+                    <textarea id="bug-note" class="form-control form-control-sm" rows="2" maxlength="2000" @bind="_note"></textarea>
+                    <div class="d-flex flex-wrap gap-2 align-items-center mt-2">
+                        <button class="btn btn-sm btn-outline-primary" disabled="@_busy" @onclick="() => SetAsync(BugReportStatus.InProgress)"><i class="bi bi-hourglass-split me-1"></i>W toku</button>
+                        <button class="btn btn-sm btn-success" disabled="@_busy" @onclick="() => SetAsync(BugReportStatus.Fixed)"><i class="bi bi-check2-circle me-1"></i>Naprawione</button>
+                        @if (!string.IsNullOrEmpty(o.AuthorEmail))
+                        {
+                            <div class="form-check mb-0 small">
+                                <input class="form-check-input" type="checkbox" id="bug-tell" @bind="_tell" />
+                                <label class="form-check-label" for="bug-tell">napisz do zgłaszającego</label>
+                            </div>
+                        }
+                        <button class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="() => SetAsync(BugReportStatus.Closed)">Zamknij bez zmian</button>
+                        @if (o.Status != BugReportStatus.New)
+                        {
+                            <button class="btn btn-sm btn-link text-muted" disabled="@_busy" @onclick="() => SetAsync(BugReportStatus.New)">Przywróć jako nowe</button>
+                        }
+                        <button class="btn btn-sm btn-link text-danger ms-auto" disabled="@_busy" @onclick="DeleteAsync">@(_confirmDelete ? "Na pewno usunąć?" : "Usuń")</button>
+                    </div>
+                    @if (_message is not null)
+                    {
+                        <div class="small text-success mt-2">@_message</div>
+                    }
+                </div>
+            </section>
+        }
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "id")] public int? OpenId { get; set; }
+
+    private static readonly System.Globalization.CultureInfo Pl = System.Globalization.CultureInfo.GetCultureInfo("pl-PL");
+    private static readonly (BugReportStatus? Status, string Label)[] Filters =
+        [(BugReportStatus.New, "Nowe"), (BugReportStatus.InProgress, "W toku"), (BugReportStatus.Fixed, "Naprawione"), (BugReportStatus.Closed, "Zamknięte"), (null, "Wszystkie")];
+
+    private bool _loading = true, _busy, _notify = true, _tell = true, _confirmDelete;
+    private BugReportStatus? _filter = BugReportStatus.New;
+    private List<BugReportService.Row> _rows = [];
+    private Dictionary<BugReportStatus, int> _counts = [];
+    private BugReportService.Row? _open;
+    private string? _note, _message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var s = await SiteSettings.GetAllAsync(SiteSettingsService.Keys.NotifyBugsEmail);
+        _notify = s[SiteSettingsService.Keys.NotifyBugsEmail] != "false";
+        // Link z e-maila (?id=…): pokaż zgłoszenie od razu, niezależnie od filtra.
+        if (OpenId is { } id && await BugService.GetAsync(id) is { } r)
+        {
+            _filter = r.Status;
+            await LoadAsync();
+            Open(_rows.FirstOrDefault(x => x.Id == id) ?? r);
+            return;
+        }
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _rows = await BugService.ListAsync(_filter);
+        _counts = await BugService.CountsAsync();
+        if (_open is not null) _open = _rows.FirstOrDefault(r => r.Id == _open.Id);
+        _loading = false;
+    }
+
+    private Task FilterAsync(BugReportStatus? st)
+    {
+        _filter = st;
+        _open = null;
+        return LoadAsync();
+    }
+
+    private void Open(BugReportService.Row r)
+    {
+        _open = r;
+        _note = r.AdminNote;
+        _message = null;
+        _confirmDelete = false;
+        _tell = true;
+    }
+
+    private async Task SetAsync(BugReportStatus status)
+    {
+        if (_open is null) return;
+        _busy = true;
+        var id = _open.Id;
+        (_, _message) = await BugService.SetStatusAsync(id, status, _note, _tell);
+        var msg = _message;
+        await LoadAsync();
+        // Zgłoszenie zmieniło stan, więc znika z bieżącego filtra — szczegóły zostają otwarte.
+        _open = _rows.FirstOrDefault(r => r.Id == id) ?? await BugService.GetAsync(id);
+        _message = msg;
+        _busy = false;
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_open is null) return;
+        if (!_confirmDelete) { _confirmDelete = true; return; }
+        await BugService.DeleteAsync(_open.Id);
+        _open = null;
+        await LoadAsync();
+    }
+
+    private async Task ToggleNotifyAsync(ChangeEventArgs e)
+    {
+        _notify = e.Value is true;
+        await SiteSettings.SetAsync(SiteSettingsService.Keys.NotifyBugsEmail, _notify ? "true" : "false");
+    }
+
+    private int Count(BugReportStatus? st) => st is { } s ? _counts.GetValueOrDefault(s) : 0;
+
+    private static string Label(BugReportStatus s) => s switch
+    {
+        BugReportStatus.New => "nowe",
+        BugReportStatus.InProgress => "w toku",
+        BugReportStatus.Fixed => "naprawione",
+        _ => "zamknięte"
+    };
+
+    private static string Tone(BugReportStatus s) => s switch
+    {
+        BugReportStatus.New => "pp-tone-danger",
+        BugReportStatus.InProgress => "pp-tone-warn",
+        BugReportStatus.Fixed => "pp-tone-ok",
+        _ => "pp-tone-muted"
+    };
+
+    private static string Path(string url) => url.Length > 48 ? url[..47] + "…" : url;
+
+    private static string Ago(DateTime utc)
+    {
+        var d = DateTime.UtcNow - utc;
+        if (d.TotalMinutes < 1) return "przed chwilą";
+        if (d.TotalHours < 1) return $"{(int)d.TotalMinutes} min temu";
+        if (d.TotalDays < 1) return $"{(int)d.TotalHours} godz. temu";
+        return utc.ToLocalTime().ToString("d MMM", Pl);
+    }
+
+    /// <summary>Krótko: przeglądarka i system z User-Agent (pełny tekst jest niżej).</summary>
+    private static string Browser(string? ua)
+    {
+        if (string.IsNullOrEmpty(ua)) return "—";
+        var browser = ua.Contains("Edg/") ? "Edge" : ua.Contains("OPR/") ? "Opera" : ua.Contains("Firefox/") ? "Firefox"
+            : ua.Contains("CriOS/") || ua.Contains("Chrome/") ? "Chrome" : ua.Contains("Safari/") ? "Safari" : "Przeglądarka";
+        var os = ua.Contains("iPhone") || ua.Contains("iPad") ? "iOS" : ua.Contains("Android") ? "Android" : ua.Contains("Windows") ? "Windows"
+            : ua.Contains("Mac OS X") ? "macOS" : ua.Contains("Linux") ? "Linux" : "";
+        return os.Length > 0 ? $"{browser} · {os}" : browser;
+    }
+}

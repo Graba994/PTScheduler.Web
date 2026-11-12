@@ -1,0 +1,162 @@
+@page "/my/referrals"
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.Marketing
+@using PTScheduler.Domain.Enums
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = PTScheduler.Domain.Constants.Roles.Client)]
+@inject IReferralService Referrals
+@inject IMarketingSettingsService MarketingSettings
+@inject IClientService ClientService
+@inject IBrandingService Branding
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject IAppClock Clock
+@inject EntitlementService Entitlements
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Poleć znajomym" />
+
+<div class="page-header mb-3">
+    <h4 class="page-title mb-0"><i class="bi bi-gift me-2" style="color:var(--c-primary)"></i>Poleć znajomym</h4>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (!_enabled || _mine is null)
+{
+    <div class="empty-state">
+        <div class="empty-state-icon">🎁</div>
+        <div class="empty-state-title">Program poleceń jest wyłączony</div>
+        <div class="empty-state-desc">Twój trener nie prowadzi teraz programu poleceń.</div>
+    </div>
+}
+else
+{
+    @if (_mine.WelcomeCouponCode is not null)
+    {
+        <div class="alert alert-success d-flex align-items-center gap-2 flex-wrap">
+            <i class="bi bi-stars"></i>
+            <span>Rabat z polecenia: <strong>-@_mine.WelcomeDiscountPercent%</strong> na pierwszy zakup. Kod:</span>
+            <code class="fs-6">@_mine.WelcomeCouponCode</code>
+        </div>
+    }
+
+    <div class="card referral-hero mb-3">
+        <div class="card-body">
+            <div class="referral-reward">
+                <i class="bi bi-gift-fill"></i>
+                <div>
+                    <div class="fw-semibold">Za każdego znajomego, który odbędzie pierwszy trening, dostajesz <span class="text-nowrap">@_settings.RewardLabel</span>.</div>
+                    @if (_settings.FriendDiscountPercent > 0)
+                    {
+                        <div class="small text-muted">Znajomy dostaje -@_settings.FriendDiscountPercent% na pierwszy zakup.</div>
+                    }
+                    @if (_settings.MaxRewardsPerClient > 0)
+                    {
+                        <div class="small text-muted">Maksymalnie @_settings.MaxRewardsPerClient nagród na osobę.</div>
+                    }
+                </div>
+            </div>
+
+            <label class="form-label small text-muted mt-3 mb-1">Twój link polecający</label>
+            <div class="input-group">
+                <input class="form-control font-monospace" value="@_link" readonly aria-label="Link polecający" />
+                <button class="btn btn-outline-secondary" @onclick="CopyAsync" title="Kopiuj"><i class="bi @(_copied ? "bi-check2" : "bi-copy")"></i></button>
+            </div>
+            <button class="btn btn-primary w-100 mt-2" @onclick="ShareAsync"><i class="bi bi-share me-1"></i>Wyślij znajomemu</button>
+            <div class="small text-muted mt-2">
+                Znajomy otwiera link, a potem zakłada konto albo rezerwuje pierwszą wizytę — polecenie zapisze się samo.
+            </div>
+        </div>
+    </div>
+
+    <h6 class="fw-semibold mb-2">Twoje polecenia</h6>
+    @if (_mine.Referrals.Count == 0)
+    {
+        <p class="text-muted small">Nie masz jeszcze poleceń. Wyślij link znajomym, którzy chcą zacząć trenować.</p>
+    }
+    else
+    {
+        <div class="list-group mb-3">
+            @foreach (var r in _mine.Referrals)
+            {
+                <div class="list-group-item d-flex justify-content-between align-items-center gap-2">
+                    <div class="min-w-0">
+                        <div class="fw-semibold text-truncate">@ShortName(r.ReferredName)</div>
+                        <div class="small text-muted">
+                            @Clock.ToWallClock(r.CreatedAt).ToString("d MMM yyyy")
+                            @if (r.RewardCouponCode is not null) { <span> · kod <code>@r.RewardCouponCode</code></span> }
+                        </div>
+                    </div>
+                    <span class="badge @StatusCss(r.Status)">@StatusLabel(r)</span>
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    private bool _loading = true;
+    private bool _enabled;
+    private MarketingSettingsDto _settings = new();
+    private MyReferralsDto? _mine;
+    private string _link = "";
+    private string _company = "";
+    private bool _copied;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _settings = await MarketingSettings.GetAsync();
+        _enabled = Entitlements.IsAllowed("ReferralProgram") && _settings.ReferralEnabled;
+        if (_enabled)
+        {
+            var auth = await AuthState.GetAuthenticationStateAsync();
+            var uid = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+            var client = await ClientService.GetClientByUserIdAsync(uid);
+            if (client is not null)
+            {
+                _mine = await Referrals.GetMineAsync(client.Id);
+                _link = Nav.BaseUri.TrimEnd('/') + "/r/" + _mine.Code;
+            }
+            try { _company = (await Branding.GetAsync()).CompanyName ?? ""; } catch { }
+        }
+        _loading = false;
+    }
+
+    private async Task CopyAsync()
+    {
+        _copied = await JS.InvokeAsync<bool>("ptShare.copy", _link);
+    }
+
+    private async Task ShareAsync()
+    {
+        var text = string.IsNullOrWhiteSpace(_company)
+            ? "Trenuję z moim trenerem i polecam! Zapisz się przez mój link:"
+            : $"Trenuję w {_company} i polecam! Zapisz się przez mój link:";
+        var result = await JS.InvokeAsync<string>("ptShare.share", "Poleć trenera", text, _link);
+        _copied = result == "copied";
+    }
+
+    // Prywatność poleconych: tylko imię i inicjał nazwiska.
+    private static string ShortName(string full)
+    {
+        var parts = full.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2 ? $"{parts[0]} {parts[^1][0]}." : full;
+    }
+
+    private static string StatusCss(ReferralStatus s) => s switch
+    {
+        ReferralStatus.Rewarded => "bg-success-subtle text-success-emphasis",
+        ReferralStatus.Pending => "bg-warning-subtle text-warning-emphasis",
+        _ => "bg-light text-muted border"
+    };
+
+    private static string StatusLabel(ReferralDto r) => r.Status switch
+    {
+        ReferralStatus.Rewarded => "Nagroda: " + (r.RewardCouponCode is null ? r.RewardDescription : "kupon"),
+        ReferralStatus.Pending => "Czeka na 1. trening",
+        _ => "Bez nagrody"
+    };
+}
