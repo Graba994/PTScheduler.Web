@@ -65,13 +65,16 @@ public class RendererClient(IHttpClientFactory httpFactory, IConfiguration confi
     public sealed record Skipped(string Path, string Reason);
     public sealed record ScreensResult(List<Shot> Shots, List<Skipped> Skipped);
 
-    /// <summary>Zrzuty aplikacji: wejście jednorazowymi linkami (trener / klient) na konto demo.</summary>
-    public Task<ScreensResult> ScreensAsync(string dir, string? trainerUrl, string? clientUrl, IEnumerable<string> hideEmails,
+    /// <summary>
+    /// Zrzuty jednego widoku aplikacji (role: trainer | client) przez jednorazowy link wejścia na konto demo.
+    /// Renderer podmienia tylko pliki tego widoku — drugi zostaje.
+    /// </summary>
+    public Task<ScreensResult> ScreensAsync(string dir, string role, string entryUrl, IEnumerable<string> hideEmails,
         IEnumerable<ScreenPage> pages, CancellationToken ct) =>
         PostAsync<ScreensResult>("/screens", new
         {
-            dir, mode = "sso",
-            entries = new { trainer = trainerUrl, client = clientUrl },
+            dir, mode = "sso", role,
+            entries = role == "client" ? (object)new { client = entryUrl } : new { trainer = entryUrl },
             hideEmails, pages,
         }, TimeSpan.FromMinutes(20), ct);
 

@@ -103,6 +103,14 @@ public class PublicDemoService(
         return TenantSso.DemoUrl(await tenants.PublicUrlAsync(tenant), token);
     }
 
+    /// <summary>
+    /// Studio reklam: włącza tryb demo w instancji konta testowego (blokady wysyłki i płatności, wejście przez jednorazowy
+    /// link), NIE włączając przycisku „Wypróbuj demo” na hantly.pl. Wywołuj tylko, gdy instancja nie jest w trybie demo.
+    /// </summary>
+    public Task<(bool Ok, string Message)> EnableDemoModeForStudioAsync(Tenant tenant) =>
+        tenant.IsTestAccount ? SetModeAsync(tenant, true, PortalUrls.Public(config) + "/register")
+            : Task.FromResult((false, "Tryb demo można włączyć tylko na koncie testowym."));
+
     /// <summary>Czy pora na nocny reset (czas polski, raz na dobę).</summary>
     public static bool ResetDue(Config cfg, DateTime utcNow, TimeZoneInfo tz)
     {

@@ -172,6 +172,8 @@ public class StudioService(
                 k.DoNotSay = k.DoNotSay.Concat(R.AlwaysDoNotSay).Distinct().ToList();
                 k.UpdatedAt = DateTime.UtcNow;
                 await SaveKnowledgeAsync(k);
+                // Nowa wiedza = nowe nazwy funkcji i nowe ekrany — zrzuty odświeżają się w kolejce filmów.
+                await StudioJobs.EnqueueAsync(dbFactory, "screens");
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

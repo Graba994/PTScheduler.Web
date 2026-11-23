@@ -32,7 +32,12 @@ public class StudioJobs(
     public static DateTime? RetryAt(int attempts, DateTime now) => attempts >= MaxAttempts ? null : now.AddMinutes(2 * attempts);
 
     /// <summary>Dodaje zadanie. Jeśli takie samo (rodzaj + film) już czeka albo trwa — zwraca istniejące.</summary>
-    public async Task<int> EnqueueAsync(string type, int? videoId = null, string? payloadJson = null, DateTime? runAfter = null)
+    public Task<int> EnqueueAsync(string type, int? videoId = null, string? payloadJson = null, DateTime? runAfter = null) =>
+        EnqueueAsync(dbFactory, type, videoId, payloadJson, runAfter);
+
+    /// <summary>To samo bez całej kolejki — dla usług, które tylko zlecają (np. po przebudowie wiedzy).</summary>
+    public static async Task<int> EnqueueAsync(IDbContextFactory<PortalDbContext> dbFactory, string type, int? videoId = null,
+        string? payloadJson = null, DateTime? runAfter = null)
     {
         await using var db = await dbFactory.CreateDbContextAsync();
         var existing = await db.StudioJobs.Where(j => j.Type == type && j.VideoId == videoId

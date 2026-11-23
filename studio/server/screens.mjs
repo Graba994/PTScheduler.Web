@@ -51,12 +51,18 @@ async function enter(page, { mode, startUrl, entries }, role, log) {
   return now.origin;
 }
 
+/** Pliki widoku klienta kończą się na „-klient” (także „-klient-2”), reszta to widok trenera. */
+export const roleOfFile = (file) => (/-klient(-\d+)?\.png$/.test(file) ? "client" : "trainer");
+
 /**
  * pages: [{path, as?: "client"}] – ścieżki z {param} (np. /clients/{Id:int}) są rozwiązywane
  * z linków znalezionych na wcześniej odwiedzonych stronach.
+ * role: "trainer" | "client" – tylko jeden widok; podmieniane są wyłącznie jego pliki (drugi widok zostaje).
+ * Portal woła osobno dla trenera i klienta, żeby każdy jednorazowy link (ważny 2 min) był świeży.
  */
 export async function captureScreens(DATA, opts, log) {
   const { dir, mode = "sso", startUrl, entries, pages = [], width = 390, height = 844, maxHeight = 3 } = opts;
+  const only = opts.role === "client" || opts.role === "trainer" ? opts.role : null;
   const hideEmails = (Array.isArray(opts.hideEmails) ? opts.hideEmails : []).filter((e) => typeof e === "string" && e.includes("@"));
   const puppeteer = (await import("puppeteer-core")).default;
   const outDir = path.join(DATA, "sources", dir, "screens");
@@ -69,7 +75,7 @@ export async function captureScreens(DATA, opts, log) {
   });
   const shots = [], skipped = [];
   try {
-    for (const role of ["trainer", "client"]) {
+    for (const role of only ? [only] : ["trainer", "client"]) {
       const list = pages.filter((p) => (p.as === "client" ? "client" : "trainer") === role);
       if (!list.length) continue;
       if (mode === "sso" && !entries?.[role]) {
@@ -152,7 +158,15 @@ export async function captureScreens(DATA, opts, log) {
     await fs.rm(tmpDir, { recursive: true, force: true });
     throw fail("Nie udało się zrobić żadnego screena: " + skipped.slice(0, 3).map((s) => `${s.path}: ${s.reason}`).join("; "));
   }
-  await fs.rm(outDir, { recursive: true, force: true });
-  await fs.rename(tmpDir, outDir);
+  if (!only) {
+    await fs.rm(outDir, { recursive: true, force: true });
+    await fs.rename(tmpDir, outDir);
+    return { shots, skipped };
+  }
+  // jeden widok: usuń jego stare pliki, przenieś nowe, pliki drugiego widoku zostają
+  await fs.mkdir(outDir, { recursive: true });
+  for (const f of await fs.readdir(outDir)) if (f.endsWith(".png") && roleOfFile(f) === only) await fs.rm(path.join(outDir, f), { force: true });
+  for (const f of await fs.readdir(tmpDir)) await fs.rename(path.join(tmpDir, f), path.join(outDir, f));
+  await fs.rm(tmpDir, { recursive: true, force: true });
   return { shots, skipped };
 }

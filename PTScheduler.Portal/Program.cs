@@ -124,6 +124,8 @@ builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.RendererClient>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.StudioNotifier>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.StudioJobs>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.IStudioJobHandler, PTScheduler.Portal.Services.Studio.SoundsJobHandler>();
+builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.StudioScreens>();
+builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.IStudioJobHandler, PTScheduler.Portal.Services.Studio.ScreensJobHandler>();
 builder.Services.AddHostedService<PTScheduler.Portal.Services.Studio.StudioJobsBackgroundService>();
 builder.Services.AddHostedService<SuspensionReportBackgroundService>();
 builder.Services.AddScoped<BackupService>();
@@ -740,6 +742,11 @@ app.MapGet("/api/panel/studio/{id:int}/reklamy.csv", async (int id, PTScheduler.
     await studio.GetAsync(id) is { } p && PTScheduler.Portal.Services.Studio.StudioService.AdsOf(p) is { } ads
         ? Results.File(PTScheduler.Portal.Services.Studio.StudioRules.Csv(ads), "text/csv; charset=utf-8", $"reklamy-hantly-{id}.csv")
         : Results.NotFound()).RequireAuthorization(p => p.RequireRole("Admin"));
+
+// Studio reklam: miniatury zrzutów aplikacji (konto demo) do galerii w panelu.
+app.MapGet("/api/panel/studio/screens/{file}", (string file, PTScheduler.Portal.Services.Studio.StudioScreens screens) =>
+    screens.ThumbPath(file) is { } path ? Results.File(path, "image/jpeg") : Results.NotFound())
+    .RequireAuthorization(p => p.RequireRole("Admin"));
 
 // ── Garmin Connect (plan Starter) ──
 // Powrót z logowania do Garmina → z powrotem do aplikacji studia (adres studia + zapamiętana ścieżka).

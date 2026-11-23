@@ -17,7 +17,11 @@ public class TenantDemoService(IDbContextFactory<PortalDbContext> dbFactory, ICo
 
     public sealed record Scenario(string Key, string Name, string Description, int Months, int Clients);
     public sealed record State(bool Reachable, bool Loaded, string? Scenario, string? ScenarioName, DateTime? LoadedAt, string? Plan,
-        Dictionary<string, int> Counts, List<Scenario> Scenarios, string? Error);
+        Dictionary<string, int> Counts, List<Scenario> Scenarios, string? Error)
+    {
+        /// <summary>Czy instancja jest w trybie demo (wejście przez /demo/start działa; blokady wysyłki i płatności).</summary>
+        public bool DemoMode { get; init; }
+    }
     public sealed record Outcome(bool Ok, string Message, Dictionary<string, int> Counts, List<string> Skipped, List<string> Logins);
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -40,7 +44,7 @@ public class TenantDemoService(IDbContextFactory<PortalDbContext> dbFactory, ICo
             if (!resp.IsSuccessStatusCode) return Unreachable($"Instancja odpowiedziała {(int)resp.StatusCode} — może działać starsza wersja aplikacji.");
             var s = await resp.Content.ReadFromJsonAsync<RemoteState>(Json);
             return s is null ? Unreachable("Pusta odpowiedź instancji.")
-                : new State(true, s.Loaded, s.Scenario, s.ScenarioName, s.LoadedAt, s.Plan, s.Counts ?? [], s.Scenarios ?? [], null);
+                : new State(true, s.Loaded, s.Scenario, s.ScenarioName, s.LoadedAt, s.Plan, s.Counts ?? [], s.Scenarios ?? [], null) { DemoMode = s.PublicDemo };
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
         {
@@ -102,6 +106,6 @@ public class TenantDemoService(IDbContextFactory<PortalDbContext> dbFactory, ICo
     private static State Unreachable(string error) => new(false, false, null, null, null, null, [], [], error);
     private static Outcome Fail(string message) => new(false, message, [], [], []);
 
-    private sealed record RemoteState(bool Loaded, string? Scenario, string? ScenarioName, DateTime? LoadedAt, Dictionary<string, int>? Counts, string? Plan, List<Scenario>? Scenarios);
+    private sealed record RemoteState(bool Loaded, string? Scenario, string? ScenarioName, DateTime? LoadedAt, Dictionary<string, int>? Counts, string? Plan, List<Scenario>? Scenarios, bool PublicDemo = false);
     private sealed record RemoteOutcome(bool Ok, string? Message, Dictionary<string, int>? Counts, List<string>? Skipped, List<string>? Logins);
 }

@@ -81,9 +81,16 @@ public class AiService(
     /// Jedno krótkie zapytanie do modelu. Zwraca tekst albo błąd (nigdy wyjątek) — wywołujący
     /// ma zawsze gotowy tekst zapasowy. <paramref name="ignoreSwitch"/> = test z Panelu przy wyłączonym AI.
     /// </summary>
+    /// <param name="imagesJpegBase64">Obrazy JPEG (base64) dołączone do wiadomości użytkownika — dla modeli, które widzą obrazy
+    /// (np. opis zrzutów ekranu, kontrola klatek filmu). Bez obrazów wiadomość jest zwykłym tekstem.</param>
     public async Task<Result> CompleteAsync(string feature, int? tenantId, string system, string user,
-        int maxTokens = 220, bool ignoreSwitch = false, CancellationToken ct = default, string? modelOverride = null, int timeoutSeconds = 25)
+        int maxTokens = 220, bool ignoreSwitch = false, CancellationToken ct = default, string? modelOverride = null, int timeoutSeconds = 25,
+        IReadOnlyList<string>? imagesJpegBase64 = null)
     {
+        object userContent = imagesJpegBase64 is not { Count: > 0 } images ? user
+            : new object[] { new { type = "text", text = user } }
+                .Concat(images.Select(b64 => (object)new { type = "image_url", image_url = new { url = "data:image/jpeg;base64," + b64 } }))
+                .ToArray();
         // Model z ustawień; moduł (np. Studio reklam) może mieć własny — pusty = ten z ustawień AI.
         var model = string.IsNullOrWhiteSpace(modelOverride) ? (await settings.GetAsync(K.AiModel)).Trim() : modelOverride.Trim();
         if (await UnavailableReasonAsync(ignoreSwitch) is { } reason) return new(null, reason, 0, model);
@@ -100,7 +107,7 @@ public class AiService(
                 Content = JsonContent.Create(new
                 {
                     model,
-                    messages = new object[] { new { role = "system", content = system }, new { role = "user", content = user } },
+                    messages = new object[] { new { role = "system", content = system }, new { role = "user", content = userContent } },
                     max_tokens = maxTokens,
                     temperature = 0.7,
                     usage = new { include = true }
