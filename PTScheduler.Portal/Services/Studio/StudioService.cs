@@ -479,6 +479,45 @@ public class StudioService(
             diskFree is null ? null : Math.Round(diskFree.Value, 0), load, minutes, at);
     }
 
+    // ── Miejsce na filmy (duży dysk serwera) ─────────────────────────
+
+    /// <summary>Katalog Studia w kontenerze — na serwerze podpięty z dużego dysku (deploy/update-portal.sh, STUDIO_DIR).</summary>
+    public string DataDir => config["Studio:DataDir"] is { Length: > 0 } d ? d : "/opt/ptscheduler/studio";
+
+    public sealed record Storage(string Tone, string Message, string Path, double? FreeGb, double? TotalGb);
+
+    /// <summary>Czy katalog na filmy jest podpięty z osobnego dysku, zapisywalny i ile ma miejsca.</summary>
+    public Storage StorageCheck()
+    {
+        const double Gb = 1024d * 1024 * 1024;
+        var path = DataDir;
+        if (!Directory.Exists(path))
+            return new("warn", "Miejsce na filmy nie jest jeszcze podpięte — filmy nie będą miały gdzie się zapisać.", path, null, null);
+        try
+        {
+            var probe = System.IO.Path.Combine(path, ".zapis-test");
+            File.WriteAllText(probe, "ok");
+            File.Delete(probe);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new("danger", "Katalog na filmy jest podpięty, ale Portal nie może w nim zapisywać (uprawnienia).", path, null, null);
+        }
+        try
+        {
+            var drive = new DriveInfo(path);
+            var free = drive.AvailableFreeSpace / Gb;
+            var total = drive.TotalSize / Gb;
+            if (drive.RootDirectory.FullName == "/")
+                return new("warn", "Katalog na filmy leży wewnątrz kontenera Portalu — przy aktualizacji zniknie. Podepnij duży dysk.", path, Math.Round(free), Math.Round(total));
+            return new(free < 20 ? "warn" : "ok", free < 20 ? "Podpięte, ale zostało mało miejsca." : "Podpięte — filmy, głos i zrzuty zapisują się na dużym dysku.", path, Math.Round(free), Math.Round(total));
+        }
+        catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException)
+        {
+            return new("ok", "Podpięte i zapisywalne.", path, null, null);
+        }
+    }
+
     private static string? NullIfEmpty(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
     private static string? Trim(string? s, int max) => s is null ? null : s.Length <= max ? s : s[..max];
 

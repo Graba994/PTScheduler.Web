@@ -221,6 +221,22 @@
                 @if (sv.At is { } at) { <div class="small text-muted">Pomiar: @InstagramRules.ToWarsaw(at).ToString("dd.MM HH:mm") · <a href="/panel/resources">Serwer i zasoby</a></div> }
             }
         </PanelCard>
+
+        <PanelCard Title="Miejsce na filmy" Icon="bi-hdd-stack" IconClass="@($"pp-tone-{_storage?.Tone ?? "muted"}")" Subtitle="filmy, głos i zrzuty ekranów">
+            @if (_storage is { } st)
+            {
+                <div class="fw-semibold small mb-1">@st.Message</div>
+                @if (st.FreeGb is { } free)
+                {
+                    <div class="st-counts mb-2"><span><b>@free.ToString("N0")</b> z @(st.TotalGb?.ToString("N0") ?? "?") GB wolne</span></div>
+                }
+                @if (st.Tone != "ok")
+                {
+                    <div class="small text-muted">Na serwerze (raz):</div>
+                    <code class="st-code">SKIP_BUILD=1 STUDIO_DIR=/mnt/user/hantly-studio bash /mnt/user/appdata/hantly-repo/deploy/update-portal.sh</code>
+                }
+            }
+        </PanelCard>
     </div>
 </div>
 
@@ -243,6 +259,7 @@
     private R.Knowledge? _kEdit;
     private StudioService.Options _opt = new("", "manual", false);
     private StudioService.ServerCheck? _server;
+    private StudioService.Storage? _storage;
     private readonly Dictionary<int, string> _comments = [];
     private Timer? _timer;
 
@@ -253,6 +270,7 @@
         _model = _opt.Model;
         _gdef = _garmin = _opt.GarminDefault;
         _server = await Studio.ServerAsync();
+        _storage = Studio.StorageCheck();
         await LoadAsync();
         _timer = new Timer(_ => InvokeAsync(TickAsync), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
     }

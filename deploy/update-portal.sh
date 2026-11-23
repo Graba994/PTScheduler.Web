@@ -69,9 +69,11 @@ if [[ -n "$RECOVER_ADMIN" ]]; then
     ok "Odzyskiwanie dostępu dla: $RECOVER_ADMIN"
 fi
 
+STUDIO_TARGET="/opt/ptscheduler/studio"
 while IFS='|' read -r type src dst rw; do
     [[ -z "$dst" ]] && continue
     [[ "$dst" == "$REPO_TARGET" ]] && continue   # repozytorium podpinamy niżej — zawsze to, z którego budujemy
+    [[ -n "${STUDIO_DIR:-}" && "$dst" == "$STUDIO_TARGET" ]] && continue   # nowe miejsce na filmy zastępuje stare
     spec="$src:$dst"
     [[ "$rw" == "false" ]] && spec="$spec:ro"
     ARGS+=(-v "$spec")
@@ -79,6 +81,14 @@ done < <(docker inspect -f '{{range .Mounts}}{{.Type}}|{{if eq .Type "volume"}}{
 # Portal pokazuje wersję kodu na serwerze i kopiuje .env do kopii zapasowej — podpinamy mu to samo repozytorium.
 ARGS+=(-v "$REPO_DIR:$REPO_TARGET")
 ok "Podpinam repozytorium: $REPO_DIR → $REPO_TARGET"
+
+# Studio reklam: filmy, głos i zrzuty ekranów na dużym dysku (np. udział Unraida na macierzy).
+# STUDIO_DIR=/mnt/user/hantly-studio — raz podane zostaje (Guardian przenosi podpięcie przy aktualizacjach).
+if [[ -n "${STUDIO_DIR:-}" ]]; then
+    mkdir -p "$STUDIO_DIR"
+    ARGS+=(-v "$STUDIO_DIR:$STUDIO_TARGET")
+    ok "Podpinam miejsce na filmy: $STUDIO_DIR → $STUDIO_TARGET"
+fi
 
 while IFS= read -r p; do
     [[ -n "$p" ]] && ARGS+=(-p "$p")
