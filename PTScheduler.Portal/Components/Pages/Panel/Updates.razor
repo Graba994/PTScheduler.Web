@@ -333,6 +333,53 @@
     </div>
 </div>
 
+@* ── Renderer Studia reklam ──────────────────────────────── *@
+@if (_guardianAvailable)
+{
+    <section class="upd-card upd-action mb-3">
+        <div class="upd-action-head">
+            <div class="upd-action-icon upd-action-icon-alt"><i class="bi bi-film"></i></div>
+            <div>
+                <h6 class="fw-bold mb-0">Renderer filmów</h6>
+                <div class="small text-muted">Studio reklam · @RendererState</div>
+            </div>
+            <span class="upd-chip upd-chip-muted ms-auto">@(_renderer is { Exists: true } ? "3–5 min" : "ok. 10 min")</span>
+        </div>
+        <div class="upd-what">Co się stanie</div>
+        <ol class="upd-list">
+            <li>Pobieramy zmiany i budujemy renderer (Remotion i przeglądarka do nagrywania filmów, głosu i zrzutów aplikacji).</li>
+            @if (_renderer is { Exists: true })
+            {
+                <li>Jeśli właśnie renderuje film, Guardian poczeka, aż skończy (do 15 min).</li>
+                <li>Podmienia kontener, a jeśli nowa wersja nie wstanie — wraca do poprzedniej.</li>
+            }
+            else
+            {
+                <li>Zakłada kontener <code>hantly-renderer</code> w sieci Portalu, bez dostępu z internetu, z miejscem na filmy Portalu.</li>
+            }
+        </ol>
+        <div class="small text-muted mb-3"><i class="bi bi-person-check me-1"></i>Portal, trenerzy i klienci nic nie zauważą.</div>
+
+        @if (_confirm == "renderer")
+        {
+            <div class="upd-confirm">
+                <div class="fw-semibold mb-2">@(_renderer is { Exists: true } ? "Zaktualizować renderer teraz?" : "Zbudować i uruchomić renderer?")</div>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-primary btn-sm" @onclick="ConfirmRenderer"><i class="bi bi-film me-1"></i>Tak, buduj</button>
+                    <button class="btn btn-link btn-sm" @onclick="() => _confirm = null">Anuluj</button>
+                </div>
+            </div>
+        }
+        else
+        {
+            <button class="btn @(RendererPending ? "btn-primary" : "btn-outline-primary") w-100" @onclick='() => _confirm = "renderer"' disabled="@Busy">
+                @if (_upgradingRenderer) { <span class="spinner-border spinner-border-sm me-1"></span><span>Trwa budowanie…</span> }
+                else { <i class="bi bi-film me-1"></i><span>@(_renderer is { Exists: true } ? (RendererPending ? "Aktualizuj renderer" : "Zbuduj renderer ponownie") : "Zbuduj i uruchom renderer")</span> }
+            </button>
+        }
+    </section>
+}
+
 @* ── Historia ────────────────────────────────────────────── *@
 @if (_guardianAvailable && _jobHistory is { Count: > 0 })
 {
@@ -434,6 +481,8 @@
     private bool _portalBehind;
     private bool _upgrading;
     private bool _upgradingPortal;
+    private bool _upgradingRenderer;
+    private RendererStatusDto? _renderer;
     private bool _rebuildImage = true;
     private bool _reprovision = true;
     private bool _rollingUpdate = true;
@@ -459,6 +508,7 @@
         if (_guardianAvailable)
         {
             _jobHistory = await UpdateSvc.GetGuardianHistoryAsync();
+            _renderer = await UpdateSvc.GetRendererStatusAsync();
 
             // Strona obiecuje „możesz ją zamknąć” — po powrocie pokaż trwające zadanie dalej.
             if (_guardianStatus!.ActiveJob is { Status: "Running", Id: { Length: > 0 } activeId })
@@ -523,6 +573,26 @@
         {
             _result = await UpdateSvc.UpgradePortalAsync();
             _upgradingPortal = false;
+        }
+    }
+
+    // ── Renderer Studia reklam ──────────────────────────────
+
+    private async Task UpgradeRenderer()
+    {
+        _upgradingRenderer = true;
+        _result = null;
+        _activeGuardianJob = null;
+        var resp = await UpdateSvc.StartRendererUpgradeViaGuardianAsync();
+        if (resp is { Started: true, JobId: { } jobId })
+        {
+            _currentJobId = jobId;
+            StartPolling();
+        }
+        else if (!await TryResumeActiveJobAsync())
+        {
+            _result = new UpgradeResult(false, resp?.Error ?? "Guardian nie odpowiedział (może jest w starszej wersji — najpierw zaktualizuj Guardiana).", []);
+            _upgradingRenderer = false;
         }
     }
 
@@ -663,6 +733,8 @@
 
                     _upgrading = false;
                     _upgradingPortal = false;
+                    _upgradingRenderer = false;
+                    if (job.Target == "Renderer") _renderer = await UpdateSvc.GetRendererStatusAsync();
                     _portal = await UpdateSvc.GetCurrentAsync();
                     _tenant = await UpdateSvc.GetTenantBuildAsync();
                     _jobHistory = await UpdateSvc.GetGuardianHistoryAsync();
@@ -715,7 +787,30 @@
 
     private string? _confirm;
     private static readonly System.Globalization.CultureInfo Pl = System.Globalization.CultureInfo.GetCultureInfo("pl-PL");
-    private bool Busy => _upgrading || _upgradingPortal || _activeGuardianJob?.Status == "Running";
+    private bool Busy => _upgrading || _upgradingPortal || _upgradingRenderer || _activeGuardianJob?.Status == "Running";
+
+    private bool RendererPending => _renderer is not { Exists: true }
+        || (TargetCommit is not null && _renderer.Health?.Commit is { Length: > 0 } rc && !Same(rc, TargetCommit));
+
+    private string RendererState => _renderer switch
+    {
+        null => "Guardian nie podał stanu",
+        { Exists: false } => "jeszcze nie zbudowany",
+        { Running: false } => "zatrzymany",
+        { Health: null } => "działa, ale nie odpowiada",
+        { Health.Busy: { Length: > 0 } busy } => $"pracuje ({RendererJobLabel(busy)})",
+        { Health.Commit: { Length: > 0 } c } => RendererPending ? $"wersja {c} · jest nowsza" : $"aktualny · wersja {c}",
+        _ => "działa",
+    };
+
+    private static string RendererJobLabel(string busy) => busy switch
+    {
+        "render" => "renderuje film",
+        "stills" => "klatki kontrolne",
+        "post" => "grafika posta",
+        "screens" => "zrzuty aplikacji",
+        _ => busy
+    };
 
     private string? TargetCommit => _remote?.Commit is { Length: > 0 } r ? r : _repoHead?.Commit;
     private string TargetShort => TargetCommit is { Length: > 7 } t ? t[..7] : TargetCommit ?? "?";
@@ -765,6 +860,7 @@
         "Portal" => [("Pulling", "Pobranie zmian"), ("Building", "Budowanie"), ("Testing", "Próbne uruchomienie"), ("Swapping", "Podmiana"), ("Verifying", "Sprawdzenie")],
         "Tenant" => [("Pulling", "Pobranie zmian"), ("Building", "Budowanie aplikacji")],
         "TenantRelease" => [("Pulling", "Pobranie zmian"), ("Building", "Budowanie aplikacji"), ("Swapping", "Wdrażanie u trenerów"), ("Done", "Zakończenie")],
+        "Renderer" => [("Pulling", "Pobranie zmian"), ("Building", "Budowanie renderera"), ("Swapping", "Podmiana"), ("Verifying", "Sprawdzenie")],
         _ => [("Swapping", "Wdrażanie na instancje"), ("Done", "Zakończenie")]
     };
 
@@ -787,6 +883,8 @@
         "TenantRolling" => "Wdrażanie u trenerów",
         "TenantRelease" => "Nowa wersja dla trenerów",
         "Maintenance" => "Naprawa (diagnostyka Guardiana)",
+        "PortalRestore" => "Przywracanie Portalu z kopii",
+        "Renderer" => "Renderer filmów (Studio reklam)",
         _ => target
     };
 
@@ -876,6 +974,7 @@
     private async Task ConfirmPortal() { _confirm = null; await UpgradePortal(); }
     private async Task ConfirmTenant() { _confirm = null; await RunUpgrade(); }
     private async Task ConfirmRollback() { _confirm = null; await RollbackPortal(); }
+    private async Task ConfirmRenderer() { _confirm = null; await UpgradeRenderer(); }
 
     public void Dispose()
     {

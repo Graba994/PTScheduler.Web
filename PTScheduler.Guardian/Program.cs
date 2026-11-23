@@ -132,6 +132,15 @@ app.MapPost("/api/upgrade/portal", async (HttpContext ctx) =>
     return StartResult(started, jobId, error);
 });
 
+// Renderer Studia reklam: budowa obrazu i podmiana kontenera (przy pierwszym razie Guardian go zakłada).
+app.MapPost("/api/upgrade/renderer", async (HttpContext ctx) =>
+{
+    var (started, jobId, error) = await orchestrator.StartRendererUpgradeAsync(Caller(ctx));
+    return StartResult(started, jobId, error);
+});
+
+app.MapGet("/api/renderer", async () => Results.Ok(await orchestrator.GetRendererStatusAsync()));
+
 // Obraz aplikacji trenerów; z listą instancji w treści — od razu wdrożenie w tym samym zadaniu.
 app.MapPost("/api/upgrade/tenant", async (HttpContext ctx) =>
 {

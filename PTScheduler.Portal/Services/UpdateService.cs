@@ -610,6 +610,19 @@ public class UpdateService(
         return JsonSerializer.Deserialize<List<GuardianJobDto>>(json, _jsonOpts) ?? [];
     }
 
+    /// <summary>Renderer Studia reklam: Guardian buduje obraz ze studio/ i podmienia kontener (pierwszy raz — zakłada go).</summary>
+    public Task<GuardianStartResponse?> StartRendererUpgradeViaGuardianAsync() =>
+        StartGuardianJobAsync("/api/upgrade/renderer", null);
+
+    /// <summary>Stan renderera; null, gdy Guardian nie odpowiada albo jest w starszej wersji (bez renderera).</summary>
+    public async Task<RendererStatusDto?> GetRendererStatusAsync()
+    {
+        var json = await CallGuardianAsync(HttpMethod.Get, "/api/renderer");
+        if (json is null) return null;
+        try { return JsonSerializer.Deserialize<RendererStatusDto>(json, _jsonOpts); }
+        catch (JsonException) { return null; }
+    }
+
     public Task<GuardianStartResponse?> RollbackPortalViaGuardianAsync() =>
         StartGuardianJobAsync("/api/rollback/portal", null);
 
@@ -630,6 +643,12 @@ public class UpdateService(
 }
 
 public record GuardianStartResponse(bool Started, string? JobId, string? Error);
+
+/// <summary>Stan renderera Studia reklam według Guardiana (kontener hantly-renderer).</summary>
+public record RendererStatusDto(bool Exists, bool Running, string? Image, string? StartedAt, RendererHealthDto? Health);
+
+/// <summary>/health renderera: wersja i bieżąca praca (busy = render, zrzuty, post…).</summary>
+public record RendererHealthDto(bool Ok, string? Commit, string? Busy, int Queued, int Voicing, int Progress);
 public record GuardianActiveResponse(bool Active, GuardianJobDto? Job);
 
 public class GuardianStatusDto

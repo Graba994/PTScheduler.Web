@@ -41,6 +41,21 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./:/deploy
 
+  # Renderer Studia reklam (filmy 9:16, grafiki postów, głos, zrzuty aplikacji). Bez portów — tylko sieć wewnętrzna.
+  # Portal woła go pod http://renderer:3000 i musi mieć ten sam katalog danych w /opt/ptscheduler/studio.
+  # Na Unraidzie (bez compose) zakłada go Guardian: Portal → Aktualizacje → Renderer filmów.
+  renderer:
+    build:
+      context: ..
+      dockerfile: studio/Dockerfile
+    image: hantly-renderer:latest
+    restart: unless-stopped
+    shm_size: 1gb
+    mem_limit: 3g
+    cpus: 3
+    volumes:
+      - ${STUDIO_DIR:-/mnt/user/hantly-studio}:/data
+
 volumes:
   npm_data:
   npm_letsencrypt:

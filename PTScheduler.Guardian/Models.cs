@@ -15,7 +15,9 @@ public enum UpgradeTarget
     /// <summary>Naprawa wykonana przez diagnostykę Guardiana (ręcznie albo automatycznie).</summary>
     Maintenance,
     /// <summary>Przywrócenie bazy Portalu z kopii.</summary>
-    PortalRestore
+    PortalRestore,
+    /// <summary>Renderer Studia reklam (kontener hantly-renderer: filmy, grafiki, głos, zrzuty aplikacji).</summary>
+    Renderer
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
