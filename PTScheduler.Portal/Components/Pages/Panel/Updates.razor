@@ -86,6 +86,32 @@
         else { <span class="upd-chip upd-chip-ok">aktualna</span> }
         <div class="upd-node-meta">@(Known(_tenant) ? $"zbudowana {When(_tenant.BuildTime)}" : "jeszcze nie budowana z tego Portalu")</div>
     </div>
+    @if (_guardianAvailable)
+    {
+        <div class="upd-node">
+            <div class="upd-node-label"><i class="bi bi-film"></i>Renderer filmów</div>
+            <div class="upd-node-commit">@(_renderer?.Health?.Commit is { Length: > 0 } rc ? rc : "—")</div>
+            @switch (RendererChip)
+            {
+                case "ok":
+                    <span class="upd-chip upd-chip-ok">aktualny</span>
+                    break;
+                case "warn":
+                    <span class="upd-chip upd-chip-warn">do aktualizacji</span>
+                    break;
+                case "busy":
+                    <span class="upd-chip upd-chip-info">pracuje</span>
+                    break;
+                case "danger":
+                    <span class="upd-chip upd-chip-danger">nie odpowiada</span>
+                    break;
+                default:
+                    <span class="upd-chip upd-chip-muted">@(_renderer is null ? "brak danych" : "nie zbudowany")</span>
+                    break;
+            }
+            <div class="upd-node-meta">@RendererMeta</div>
+        </div>
+    }
 </section>
 
 @* ── Trwające zadanie ────────────────────────────────────── *@
@@ -535,6 +561,7 @@
     private async Task Refresh()
     {
         _checking = true;
+        if (_guardianAvailable) _renderer = await UpdateSvc.GetRendererStatusAsync();
         _repoHead = await UpdateSvc.GetLocalRepoHeadAsync();
         _remote = await UpdateSvc.CheckRemoteAsync();
         _tenantBehindRepo = UpdateSvc.IsTenantBehindRepo(_tenant, _repoHead);
@@ -800,6 +827,25 @@
         { Health: null } => "działa, ale nie odpowiada",
         { Health.Busy: { Length: > 0 } busy } => $"pracuje ({RendererJobLabel(busy)})",
         { Health.Commit: { Length: > 0 } c } => RendererPending ? $"wersja {c} · jest nowsza" : $"aktualny · wersja {c}",
+        _ => "działa",
+    };
+
+    /// <summary>Kolor chipa na kafelku renderera: ok / warn / busy / danger / muted.</summary>
+    private string RendererChip => _renderer switch
+    {
+        null or { Exists: false } => "muted",
+        { Running: false } or { Health: null } => "danger",
+        { Health.Busy: { Length: > 0 } } => "busy",
+        _ => RendererPending ? "warn" : "ok",
+    };
+
+    private string RendererMeta => _renderer switch
+    {
+        null => "Guardian nie podał stanu renderera.",
+        { Exists: false } => "Zbuduj go w karcie „Renderer filmów” niżej.",
+        { Running: false } => "Kontener jest zatrzymany.",
+        { Health.Busy: { Length: > 0 } busy } => RendererJobLabel(busy),
+        { StartedAt: { Length: > 0 } started } => $"uruchomiony {When(started)}",
         _ => "działa",
     };
 
