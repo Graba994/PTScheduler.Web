@@ -71,10 +71,14 @@ fi
 
 while IFS='|' read -r type src dst rw; do
     [[ -z "$dst" ]] && continue
+    [[ "$dst" == "$REPO_TARGET" ]] && continue   # repozytorium podpinamy niżej — zawsze to, z którego budujemy
     spec="$src:$dst"
     [[ "$rw" == "false" ]] && spec="$spec:ro"
     ARGS+=(-v "$spec")
 done < <(docker inspect -f '{{range .Mounts}}{{.Type}}|{{if eq .Type "volume"}}{{.Name}}{{else}}{{.Source}}{{end}}|{{.Destination}}|{{.RW}}{{println}}{{end}}' "$CONTAINER")
+# Portal pokazuje wersję kodu na serwerze i kopiuje .env do kopii zapasowej — podpinamy mu to samo repozytorium.
+ARGS+=(-v "$REPO_DIR:$REPO_TARGET")
+ok "Podpinam repozytorium: $REPO_DIR → $REPO_TARGET"
 
 while IFS= read -r p; do
     [[ -n "$p" ]] && ARGS+=(-p "$p")
