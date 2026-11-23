@@ -82,9 +82,10 @@ public class AiService(
     /// ma zawsze gotowy tekst zapasowy. <paramref name="ignoreSwitch"/> = test z Panelu przy wyłączonym AI.
     /// </summary>
     public async Task<Result> CompleteAsync(string feature, int? tenantId, string system, string user,
-        int maxTokens = 220, bool ignoreSwitch = false, CancellationToken ct = default)
+        int maxTokens = 220, bool ignoreSwitch = false, CancellationToken ct = default, string? modelOverride = null, int timeoutSeconds = 25)
     {
-        var model = (await settings.GetAsync(K.AiModel)).Trim();
+        // Model z ustawień; moduł (np. Studio reklam) może mieć własny — pusty = ten z ustawień AI.
+        var model = string.IsNullOrWhiteSpace(modelOverride) ? (await settings.GetAsync(K.AiModel)).Trim() : modelOverride.Trim();
         if (await UnavailableReasonAsync(ignoreSwitch) is { } reason) return new(null, reason, 0, model);
         // Limit planu studia — wywołujący ma tekst zapasowy, więc bez AI wszystko dalej działa.
         if (!ignoreSwitch && tenantId is int tid && await TenantUnavailableReasonAsync(tid) is { } planReason) return new(null, planReason, 0, model);
@@ -110,7 +111,7 @@ public class AiService(
             req.Headers.TryAddWithoutValidation("X-Title", await settings.GetAsync(K.BrandName) is { Length: > 0 } brand ? brand : ReferralService.PlatformName);
 
             var http = httpFactory.CreateClient();
-            http.Timeout = TimeSpan.FromSeconds(25);
+            http.Timeout = TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 10, 300));
             using var resp = await http.SendAsync(req, ct);
             var body = await resp.Content.ReadAsStringAsync(ct);
             if (!resp.IsSuccessStatusCode)

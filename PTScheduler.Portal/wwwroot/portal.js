@@ -169,3 +169,17 @@ window.PTLeo = {
     load: function () { try { return localStorage.getItem('pt-leo') || ''; } catch (e) { return ''; } },
     save: function (json) { try { localStorage.setItem('pt-leo', json); } catch (e) { } }
 };
+
+// Kopiowanie tekstu (Studio reklam) — działa też po http (execCommand), z zapasem na Clipboard API.
+window.ptCopy = function (text) {
+    try {
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        if (ok) return true;
+    } catch (e) { /* zapas niżej */ }
+    if (navigator.clipboard) { navigator.clipboard.writeText(text); return true; }
+    return false;
+};

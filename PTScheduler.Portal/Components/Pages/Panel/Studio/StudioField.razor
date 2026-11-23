@@ -1,0 +1,43 @@
+@inject IJSRuntime JS
+
+@* Pole tekstowe Studia: licznik znaków (na czerwono ponad limit) i przycisk „Kopiuj”. *@
+<div class="sf @(Over ? "is-over" : "")">
+    <div class="sf-head">
+        <label for="@_id">@Label</label>
+        <span class="sf-count">@Value.Length@(Max is int m ? $" / {m}" : "")</span>
+        <button type="button" class="sf-copy" title="Kopiuj" aria-label="Kopiuj: @Label" @onclick="CopyAsync"><i class="bi @(_copied ? "bi-check2" : "bi-copy")"></i></button>
+    </div>
+    @if (Rows > 1)
+    {
+        <textarea id="@_id" class="form-control form-control-sm" rows="@Rows" value="@Value" @oninput="OnInput" readonly="@ReadOnly"></textarea>
+    }
+    else
+    {
+        <input id="@_id" class="form-control form-control-sm" value="@Value" @oninput="OnInput" readonly="@ReadOnly" />
+    }
+    @if (Hint is not null) { <div class="sf-hint">@Hint</div> }
+</div>
+
+@code {
+    [Parameter] public string Label { get; set; } = "";
+    [Parameter] public string Value { get; set; } = "";
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    [Parameter] public int? Max { get; set; }
+    [Parameter] public int Rows { get; set; } = 1;
+    [Parameter] public string? Hint { get; set; }
+    [Parameter] public bool ReadOnly { get; set; }
+
+    private readonly string _id = "sf" + Guid.NewGuid().ToString("N")[..8];
+    private bool _copied;
+    private bool Over => Max is int m && Value.Length > m;
+
+    private Task OnInput(ChangeEventArgs e) => ValueChanged.InvokeAsync(e.Value?.ToString() ?? "");
+
+    private async Task CopyAsync()
+    {
+        try { _copied = await JS.InvokeAsync<bool>("ptCopy", Value); } catch (JSException) { _copied = false; }
+        StateHasChanged();
+        await Task.Delay(1500);
+        _copied = false;
+    }
+}

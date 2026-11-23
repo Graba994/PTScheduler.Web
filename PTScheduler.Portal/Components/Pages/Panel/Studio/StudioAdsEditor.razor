@@ -1,0 +1,92 @@
+@using PTScheduler.Portal.Services.Studio
+@using R = PTScheduler.Portal.Services.Studio.StudioRules
+@inject StudioService Studio
+
+@* Teksty reklam: 3 warianty Meta i zestaw Google Ads (reklama elastyczna). Każde pole edytowalne, z licznikiem i „Kopiuj”. *@
+
+@if (_ads is not null)
+{
+    var issues = R.Check(_ads);
+    @if (issues.Count > 0)
+    {
+        <ul class="st-issues">@foreach (var i in issues) { <li><i class="bi bi-exclamation-circle me-1"></i><b>@i.Field:</b> @i.Problem</li> }</ul>
+    }
+
+    <div class="st-section-title"><i class="bi bi-meta me-1"></i>Meta (Facebook i Instagram) — 3 warianty do testu</div>
+    <div class="st-meta">
+        @for (var n = 0; n < _ads.Meta.Count; n++)
+        {
+            var m = _ads.Meta[n];
+            <div class="st-variant">
+                <div class="st-variant-n">Wariant @(n + 1)</div>
+                <StudioField Label="Kąt" Value="@m.Angle" ValueChanged="v => { m.Angle = v; Dirty(); }" />
+                <StudioField Label="Tekst główny" Value="@m.PrimaryText" ValueChanged="v => { m.PrimaryText = v; Dirty(); }" Rows="5"
+                             Hint="@($"Widać pierwsze {R.Limits.MetaPrimaryVisible} znaków: „{Visible(m.PrimaryText)}”")" />
+                <StudioField Label="Nagłówek" Value="@m.Headline" ValueChanged="v => { m.Headline = v; Dirty(); }" Max="R.Limits.MetaHeadline" />
+                <StudioField Label="Opis" Value="@m.Description" ValueChanged="v => { m.Description = v; Dirty(); }" Max="R.Limits.MetaDescription" />
+            </div>
+        }
+    </div>
+
+    <div class="st-section-title"><i class="bi bi-google me-1"></i>Google Ads — reklama elastyczna</div>
+    <div class="st-google">
+        <div>
+            <div class="small fw-semibold mb-1">Nagłówki (@_ads.Google.Headlines.Count, max @R.Limits.GoogleHeadline znaków)</div>
+            @for (var n = 0; n < _ads.Google.Headlines.Count; n++)
+            {
+                var idx = n;
+                <StudioField Label="@($"Nagłówek {idx + 1}")" Value="@_ads.Google.Headlines[idx]" ValueChanged="v => { _ads.Google.Headlines[idx] = v; Dirty(); }" Max="R.Limits.GoogleHeadline" />
+            }
+            @if (!ReadOnly && _ads.Google.Headlines.Count < R.Limits.GoogleHeadlinesMax)
+            {
+                <button class="btn btn-link btn-sm px-0" @onclick="() => { _ads.Google.Headlines.Add(string.Empty); Dirty(); }"><i class="bi bi-plus me-1"></i>Dodaj nagłówek</button>
+            }
+        </div>
+        <div>
+            <div class="small fw-semibold mb-1">Teksty reklamy (max @R.Limits.GoogleDescription znaków)</div>
+            @for (var n = 0; n < _ads.Google.Descriptions.Count; n++)
+            {
+                var idx = n;
+                <StudioField Label="@($"Tekst {idx + 1}")" Value="@_ads.Google.Descriptions[idx]" ValueChanged="v => { _ads.Google.Descriptions[idx] = v; Dirty(); }" Max="R.Limits.GoogleDescription" Rows="2" />
+            }
+            <StudioField Label="Słowa kluczowe (po przecinku)" Value="@string.Join(", ", _ads.Google.Keywords)" Rows="3"
+                         ValueChanged='v => { _ads.Google.Keywords = v.Split(",", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(); Dirty(); }' />
+            <StudioField Label="Grupy odbiorców (po przecinku)" Value="@string.Join(", ", _ads.Audiences)" Rows="2"
+                         ValueChanged='v => { _ads.Audiences = v.Split(",", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(); Dirty(); }' />
+            <StudioField Label="Plan testu i budżet" Value="@_ads.Notes" ValueChanged="v => { _ads.Notes = v; Dirty(); }" Rows="4" />
+        </div>
+    </div>
+
+    <div class="d-flex flex-wrap gap-2 align-items-center mt-2">
+        <button class="btn btn-primary btn-sm" @onclick="SaveAsync" disabled="@(!_dirty)"><i class="bi bi-save me-1"></i>Zapisz zmiany</button>
+        <a class="btn btn-outline-secondary btn-sm" href="/api/panel/studio/@(Promotion.Id)/reklamy.csv" download><i class="bi bi-filetype-csv me-1"></i>Pobierz CSV (Excel)</a>
+        @if (_dirty) { <span class="small text-warning">Niezapisane zmiany — CSV pobierze się po zapisaniu.</span> }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public StudioPromotion Promotion { get; set; } = default!;
+    [Parameter] public EventCallback<(bool, string)> Flash { get; set; }
+    [Parameter] public bool ReadOnly { get; set; }
+
+    private R.Ads? _ads;
+    private bool _dirty;
+
+    protected override void OnParametersSet()
+    {
+        if (!_dirty) _ads = StudioService.AdsOf(Promotion);
+    }
+
+    private void Dirty() => _dirty = true;
+
+    private static string Visible(string text) => text.Length <= R.Limits.MetaPrimaryVisible ? text : text[..R.Limits.MetaPrimaryVisible] + "…";
+
+    private async Task SaveAsync()
+    {
+        if (_ads is null) return;
+        _ads.Google.Headlines = _ads.Google.Headlines.Where(h => !string.IsNullOrWhiteSpace(h)).ToList();
+        await Studio.SaveResultAsync(Promotion.Id, _ads);
+        _dirty = false;
+        await Flash.InvokeAsync((true, "Zapisano teksty reklam."));
+    }
+}

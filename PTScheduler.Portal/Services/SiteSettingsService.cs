@@ -199,6 +199,16 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         /// <summary>off | suggest (AI podpowiada odpowiedź) | auto (odpowiada sam na proste komentarze)</summary>
         public const string InstagramCommentMode = "instagram_comment_mode";
         public const string InstagramAutopilotRunAt = "instagram_autopilot_run_at";
+        // Studio reklam (Panel → Studio reklam)
+        public const string StudioKnowledge = "studio_knowledge";
+        public const string StudioKnowledgeRequested = "studio_knowledge_requested";
+        public const string StudioKnowledgeError = "studio_knowledge_error";
+        /// <summary>Model AI dla Studia (pusty = ten z ustawień AI).</summary>
+        public const string StudioModel = "studio_model";
+        /// <summary>manual (domyślnie: gotowe materiały czekają na Ciebie) | auto (posty same trafiają do planu Instagrama)</summary>
+        public const string StudioPublishMode = "studio_publish_mode";
+        /// <summary>Domyślny stan pola „Pokaż integrację z Garminem” przy nowych materiałach.</summary>
+        public const string StudioGarminDefault = "studio_garmin_default";
         // Kopie zapasowe: test odtworzenia i kopia poza serwerem
         /// <summary>„weekly” — co niedzielę Portal odtwarza najnowsze kopie do tymczasowej bazy; „off” — bez testu.</summary>
         public const string BackupVerify = "backup_verify";

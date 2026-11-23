@@ -1,0 +1,127 @@
+@using PTScheduler.Portal.Services.Studio
+@using R = PTScheduler.Portal.Services.Studio.StudioRules
+@inject StudioService Studio
+@inject IJSRuntime JS
+
+@* Post 4:5: pola z licznikami, podgląd grafiki w kolorach marki, opis do skopiowania i przekazanie do planu Instagrama. *@
+
+@if (_post is not null)
+{
+    var issues = R.Check(_post);
+    <div class="st-post">
+        <div class="st-post-form">
+            @if (issues.Count > 0)
+            {
+                <ul class="st-issues">@foreach (var i in issues) { <li><i class="bi bi-exclamation-circle me-1"></i><b>@i.Field:</b> @i.Problem</li> }</ul>
+            }
+            <StudioField Label="Nagłówek na grafice" Value="@_post.Headline" ValueChanged="v => { _post.Headline = v; Dirty(); }" Max="R.Limits.PostHeadline" />
+            <StudioField Label="Podtytuł" Value="@_post.Sub" ValueChanged="v => { _post.Sub = v; Dirty(); }" Max="R.Limits.PostSub" />
+            @for (var n = 0; n < _post.Bullets.Count; n++)
+            {
+                var idx = n;
+                <StudioField Label="@($"Korzyść {idx + 1}")" Value="@_post.Bullets[idx]" ValueChanged="v => { _post.Bullets[idx] = v; Dirty(); }" Max="R.Limits.PostBullet" />
+            }
+            <StudioField Label="Opis posta" Value="@_post.Caption" ValueChanged="v => { _post.Caption = v; Dirty(); }" Rows="9" />
+            <StudioField Label="Hashtagi (bez #, po spacji)" Value="@string.Join(" ", _post.Hashtags)" Rows="2"
+                         ValueChanged='v => { _post.Hashtags = v.Split(new[] { " ", ",", "\n" }, StringSplitOptions.RemoveEmptyEntries).Select(t => t.TrimStart((char)35)).ToList(); Dirty(); }' />
+            <StudioField Label="Tekst alternatywny (dla niewidomych)" Value="@_post.AltText" ValueChanged="v => { _post.AltText = v; Dirty(); }" Rows="2" />
+            <div class="d-flex flex-wrap gap-2 mt-2">
+                <button class="btn btn-primary btn-sm" @onclick="SaveAsync" disabled="@(!_dirty)"><i class="bi bi-save me-1"></i>Zapisz zmiany</button>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="CopyCaptionAsync"><i class="bi bi-copy me-1"></i>@(_copied ? "Skopiowano" : "Kopiuj opis z hashtagami")</button>
+            </div>
+        </div>
+        <div class="st-post-side">
+            <div class="ig-chips mb-2">
+                @foreach (var th in InstagramGraphics.Themes)
+                {
+                    var theme = th;
+                    <button type="button" class="ig-swatch @(_theme == theme.Key ? "on" : "")" style="background:linear-gradient(135deg,@theme.From,@theme.To);color:@theme.Ink" title="@theme.Label" aria-label="Motyw @theme.Label" @onclick="() => SetThemeAsync(theme.Key)">Aa</button>
+                }
+            </div>
+            @if (_preview is not null)
+            {
+                <img src="@_preview" alt="@_post.AltText" class="st-post-img" />
+                <a class="btn btn-outline-secondary btn-sm w-100 mt-2" href="@_preview" download="post-hantly-@(Promotion.Id).jpg"><i class="bi bi-download me-1"></i>Pobierz grafikę</a>
+            }
+            else
+            {
+                <div class="ig-designer-empty"><i class="bi bi-image"></i>Wpisz nagłówek i kliknij „Podgląd”</div>
+            }
+            <button class="btn btn-outline-primary btn-sm w-100 mt-2" @onclick="RenderAsync" disabled="@_rendering"><i class="bi bi-arrow-repeat me-1"></i>Podgląd grafiki</button>
+            <div class="st-ig mt-3">
+                @if (Promotion.InstagramPostId is int igId)
+                {
+                    <a class="btn btn-success btn-sm w-100" href="/panel/instagram?t=plan&post=@igId"><i class="bi bi-instagram me-1"></i>Otwórz w planie Instagrama</a>
+                }
+                else
+                {
+                    <button class="btn btn-primary btn-sm w-100 mb-2" @onclick="() => ToIgAsync(false)" disabled="@_busy"><i class="bi bi-instagram me-1"></i>Do Instagrama jako szkic</button>
+                    <button class="btn btn-outline-primary btn-sm w-100" @onclick="() => ToIgAsync(true)" disabled="@_busy"><i class="bi bi-calendar-plus me-1"></i>Zaplanuj w najbliższy termin</button>
+                    <div class="small text-muted mt-1">Publikację i godzinę ustawiasz w module Instagram. Na Facebooku wklej grafikę i opis ręcznie.</div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public StudioPromotion Promotion { get; set; } = default!;
+    [Parameter] public EventCallback<(bool, string)> Flash { get; set; }
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private R.Post? _post;
+    private bool _dirty, _busy, _rendering, _copied;
+    private string _theme = "fiolet";
+    private string? _preview;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_dirty) return;
+        _post = StudioService.PostOf(Promotion);
+        if (_post is not null && _preview is null && !string.IsNullOrWhiteSpace(_post.Headline)) await RenderAsync();
+    }
+
+    private void Dirty() => _dirty = true;
+
+    private async Task SetThemeAsync(string theme) { _theme = theme; await RenderAsync(); }
+
+    private async Task RenderAsync()
+    {
+        if (_post is null || string.IsNullOrWhiteSpace(_post.Headline)) { _preview = null; return; }
+        _rendering = true;
+        try
+        {
+            var post = _post;
+            var jpeg = await Studio.PreviewAsync(post, _theme);
+            _preview = "data:image/jpeg;base64," + Convert.ToBase64String(jpeg);
+        }
+        catch (Exception) { _preview = null; }
+        _rendering = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_post is null) return;
+        await Studio.SaveResultAsync(Promotion.Id, _post);
+        _dirty = false;
+        await RenderAsync();
+        await Flash.InvokeAsync((true, "Zapisano post."));
+    }
+
+    private async Task CopyCaptionAsync()
+    {
+        if (_post is null) return;
+        try { _copied = await JS.InvokeAsync<bool>("ptCopy", R.CaptionWithTags(_post)); } catch (JSException) { }
+    }
+
+    private async Task ToIgAsync(bool schedule)
+    {
+        if (_post is null) return;
+        _busy = true;
+        if (_dirty) { await Studio.SaveResultAsync(Promotion.Id, _post); _dirty = false; }
+        var r = await Studio.ToInstagramAsync(Promotion.Id, _theme, schedule);
+        _busy = false;
+        await Flash.InvokeAsync((r.Ok, r.Message));
+        await Changed.InvokeAsync();
+    }
+}

@@ -115,6 +115,8 @@ builder.Services.AddScoped<InstagramClient>();
 builder.Services.AddScoped<InstagramAi>();
 builder.Services.AddScoped<InstagramService>();
 builder.Services.AddHostedService<InstagramBackgroundService>();
+builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.StudioService>();
+builder.Services.AddHostedService<PTScheduler.Portal.Services.Studio.StudioBackgroundService>();
 builder.Services.AddHostedService<SuspensionReportBackgroundService>();
 builder.Services.AddScoped<BackupService>();
 builder.Services.AddScoped<OffsiteBackupService>();
@@ -724,6 +726,12 @@ app.MapGet("/media/ig/{token}.jpg", async (string token, HttpContext ctx, Instag
     ctx.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
     return Results.File(data, "image/jpeg");
 });
+
+// Studio reklam: teksty reklam do Excela (średnik, UTF-8 z BOM).
+app.MapGet("/api/panel/studio/{id:int}/reklamy.csv", async (int id, PTScheduler.Portal.Services.Studio.StudioService studio) =>
+    await studio.GetAsync(id) is { } p && PTScheduler.Portal.Services.Studio.StudioService.AdsOf(p) is { } ads
+        ? Results.File(PTScheduler.Portal.Services.Studio.StudioRules.Csv(ads), "text/csv; charset=utf-8", $"reklamy-hantly-{id}.csv")
+        : Results.NotFound()).RequireAuthorization(p => p.RequireRole("Admin"));
 
 // ── Garmin Connect (plan Starter) ──
 // Powrót z logowania do Garmina → z powrotem do aplikacji studia (adres studia + zapamiętana ścieżka).

@@ -41,6 +41,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<InstagramMedia> InstagramMedia => Set<InstagramMedia>();
     public DbSet<InstagramDaily> InstagramDaily => Set<InstagramDaily>();
     public DbSet<InstagramComment> InstagramComments => Set<InstagramComment>();
+    public DbSet<StudioPromotion> StudioPromotions => Set<StudioPromotion>();
     public DbSet<TesterFeedback> TesterFeedback => Set<TesterFeedback>();
     public DbSet<TenantOfferItem> TenantOfferItems => Set<TenantOfferItem>();
     public DbSet<TenantSmsCounter> TenantSmsCounters => Set<TenantSmsCounter>();
@@ -563,6 +564,16 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.Property(x => x.Suggestion).HasMaxLength(1000);
             e.HasIndex(x => new { x.Done, x.At });
             e.HasIndex(x => x.MediaId);
+        });
+
+        b.Entity<StudioPromotion>(e =>
+        {
+            e.HasIndex(x => new { x.Status, x.RunAfter });
+            e.HasIndex(x => x.CreatedAt);
+            e.Property(x => x.Brief).HasMaxLength(2000);
+            e.Property(x => x.Comment).HasMaxLength(2000);
+            e.Property(x => x.Error).HasMaxLength(1000);
+            e.Property(x => x.ResultJson).HasColumnType("jsonb");
         });
 
         b.Entity<PlanChangeLog>(e =>

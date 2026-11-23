@@ -1,0 +1,357 @@
+@page "/panel/studio"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@using PTScheduler.Portal.Services.Studio
+@using R = PTScheduler.Portal.Services.Studio.StudioRules
+@inject StudioService Studio
+@inject AiService AiSvc
+@implements IDisposable
+@rendermode InteractiveServer
+
+@* Studio reklam: wiedza o Hantly, teksty reklam Meta/Google, posty do planu Instagrama (później filmy 9:16).
+   AI tylko przygotowuje — publikacja domyślnie ręczna. Logika: StudioService; kolejka: StudioBackgroundService. *@
+
+<PageTitle>Studio reklam — Hantly Portal</PageTitle>
+
+<PanelHeader Title="Studio reklam" Icon="bi-megaphone" IconClass="pp-icon-pink"
+             Subtitle="Teksty reklam i posty z prawdziwej wiedzy o Hantly — tylko prawdziwe funkcje i ceny. AI przygotowuje, Ty decydujesz, co i kiedy idzie do ludzi." />
+
+@if (_flash is not null)
+{
+    <div class="alert @(_flashOk ? "alert-success" : "alert-danger") py-2 small d-flex align-items-center gap-2" role="status">
+        <i class="bi @(_flashOk ? "bi-check-circle" : "bi-exclamation-triangle")"></i><span>@_flash</span>
+        <button type="button" class="btn-close ms-auto" aria-label="Zamknij" @onclick="() => _flash = null"></button>
+    </div>
+}
+
+<div class="ig-grid">
+    <div>
+        <PanelCard Title="Nowy materiał" Icon="bi-plus-square" IconClass="pp-tone-info">
+            <div class="ig-modes mb-3">
+                @foreach (var (kind, label, icon, text) in Kinds)
+                {
+                    var k = kind;
+                    <button type="button" class="ig-mode @(_kind == k ? "on" : "")" disabled="@(k == StudioKind.Video)" aria-pressed="@(_kind == k ? "true" : "false")" @onclick="() => _kind = k">
+                        <i class="bi @icon"></i><b>@label</b><span>@text</span>
+                    </button>
+                }
+            </div>
+            <label class="form-label small fw-semibold" for="st-brief">O czym? (brief)</label>
+            <textarea id="st-brief" class="form-control form-control-sm" rows="3" @bind="_brief" @bind:event="oninput" maxlength="2000"
+                      placeholder="np. Trenerzy tracą wieczory na umawianie klientów — pokaż rezerwacje i przypomnienia. Albo zostaw puste: AI wybierze najmocniejszą korzyść."></textarea>
+            @if (_k.Knowledge is { } kn)
+            {
+                <div class="st-hints">
+                    <span class="small text-muted">Podpowiedzi:</span>
+                    @foreach (var n in kn.Novelties.Take(4))
+                    {
+                        var text = $"Nowość: {n.Title} — {n.Benefit}";
+                        <button type="button" class="ig-chip" title="@n.Benefit" @onclick="() => AddHint(text)"><i class="bi bi-stars me-1"></i>@n.Title</button>
+                    }
+                    @foreach (var pp in kn.PainPoints.Take(4))
+                    {
+                        var text = $"Bolączka: {pp}";
+                        <button type="button" class="ig-chip" @onclick="() => AddHint(text)"><i class="bi bi-emoji-frown me-1"></i>@R.Cut(pp, 40)</button>
+                    }
+                    @foreach (var f in kn.Features.Take(5))
+                    {
+                        var text = $"Funkcja: {f.Name} — {f.Benefit}";
+                        <button type="button" class="ig-chip" title="@f.Benefit" @onclick="() => AddHint(text)"><i class="bi bi-phone me-1"></i>@f.Name</button>
+                    }
+                </div>
+            }
+            <div class="form-check mt-3">
+                <input class="form-check-input" type="checkbox" id="st-garmin" @bind="_garmin" />
+                <label class="form-check-label small" for="st-garmin">
+                    <b>Reklamuj też integrację z Garmin Connect™</b> — zgodnie z zasadami marki Garmin (poprawna nazwa ze znakiem ™, bez sugerowania partnerstwa, z dopiskiem o znakach towarowych).
+                </label>
+            </div>
+            <div class="d-flex flex-wrap gap-2 mt-3 align-items-center">
+                <button class="btn btn-primary btn-sm" @onclick="() => CreateAsync(false)" disabled="@(_busy || _aiOff is not null)" title="@(_aiOff ?? "")"><i class="bi bi-stars me-1"></i>Przygotuj z AI</button>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="() => CreateAsync(true)" disabled="@_busy"><i class="bi bi-pencil me-1"></i>Napiszę sam</button>
+                @if (_aiOff is not null) { <span class="small text-muted">@_aiOff</span> }
+                else if (_k.Knowledge is null) { <span class="small text-warning"><i class="bi bi-info-circle me-1"></i>Najpierw zbuduj wiedzę o Hantly (obok) — bez niej AI zna tylko katalog funkcji.</span> }
+            </div>
+        </PanelCard>
+
+        @if (_list.Count == 0)
+        {
+            <div class="pp-card"><div class="pp-empty"><i class="bi bi-megaphone"></i><div class="pp-empty-title">Jeszcze nic tu nie ma</div><p>Zacznij od tekstów reklam albo posta — gotowe w 1–2 minuty.</p></div></div>
+        }
+        @foreach (var item in _list)
+        {
+            var p = item;
+            <div class="pp-card st-item" @key="p.Id">
+                <div class="st-item-head">
+                    <span class="pp-icon pp-icon-sm pp-tone-info"><i class="bi @(p.Kind == StudioKind.Ads ? "bi-badge-ad" : p.Kind == StudioKind.Post ? "bi-image" : "bi-film")"></i></span>
+                    <div class="min-w-0 flex-grow-1">
+                        <div class="st-item-title">@(p.Kind == StudioKind.Ads ? "Teksty reklam" : p.Kind == StudioKind.Post ? "Post 4:5" : "Film 9:16") @(p.Manual ? "· ręcznie" : "")@(p.Garmin ? " · z Garminem" : "")</div>
+                        <div class="small text-muted text-truncate">@(string.IsNullOrWhiteSpace(p.Brief) ? "bez briefu — najmocniejsza korzyść" : p.Brief)</div>
+                    </div>
+                    <span class="pp-chip pp-tone-@(p.Status switch { StudioStatus.Ready => "ok", StudioStatus.Failed => "danger", _ => "info" })">
+                        @if (p.Status == StudioStatus.Writing) { <span class="spinner-border spinner-border-sm me-1" style="width:.7rem;height:.7rem"></span> }
+                        @(p.Status switch { StudioStatus.Ready => "Gotowe", StudioStatus.Failed => "Błąd", _ => p.Attempts > 0 ? $"Ponawiam ({p.Attempts}/{StudioService.MaxAttempts})" : "AI pisze…" })
+                    </span>
+                    <span class="small text-muted text-nowrap">@InstagramRules.ToWarsaw(p.CreatedAt).ToString("dd.MM HH:mm")</span>
+                    <button class="btn btn-link btn-sm" @onclick="() => Toggle(p.Id)" aria-expanded="@(_open == p.Id ? "true" : "false")">@(_open == p.Id ? "Zwiń" : "Otwórz")</button>
+                </div>
+                @if (p.Error is not null && p.Status != StudioStatus.Ready)
+                {
+                    <div class="small text-danger mt-2"><i class="bi bi-exclamation-triangle me-1"></i>@p.Error</div>
+                }
+                @if (_open == p.Id)
+                {
+                    <div class="mt-3">
+                        @if (p.Status == StudioStatus.Ready && p.Kind == StudioKind.Ads)
+                        {
+                            <StudioAdsEditor Promotion="p" Flash="FlashAsync" />
+                        }
+                        else if (p.Status == StudioStatus.Ready && p.Kind == StudioKind.Post)
+                        {
+                            <StudioPostEditor Promotion="p" Flash="FlashAsync" Changed="LoadAsync" />
+                        }
+                        else if (p.Status == StudioStatus.Writing)
+                        {
+                            <div class="small text-muted"><span class="spinner-border spinner-border-sm me-2"></span>AI pisze — zwykle 1–2 minuty. Strona odświeży się sama.</div>
+                        }
+                        <div class="st-actions">
+                            @if (p.Status == StudioStatus.Ready && _aiOff is null)
+                            {
+                                <div class="input-group input-group-sm st-revise">
+                                    <input class="form-control" placeholder="Co poprawić? np. „Wariant 2 bardziej z humorem”, „krótszy opis”" value="@_comments.GetValueOrDefault(p.Id)"
+                                           @oninput="e => _comments[p.Id] = e.Value?.ToString() ?? string.Empty" aria-label="Uwaga do poprawki" />
+                                    <button class="btn btn-outline-primary" @onclick="() => ReviseAsync(p.Id)"><i class="bi bi-magic me-1"></i>Popraw z AI</button>
+                                </div>
+                            }
+                            @if (p.Status == StudioStatus.Failed)
+                            {
+                                <button class="btn btn-outline-primary btn-sm" @onclick="() => RetryAsync(p.Id)"><i class="bi bi-arrow-repeat me-1"></i>Ponów</button>
+                            }
+                            @if (_confirmDelete == p.Id)
+                            {
+                                <span class="small ms-auto">Usunąć?</span>
+                                <button class="btn btn-danger btn-sm" @onclick="() => DeleteAsync(p.Id)">Usuń</button>
+                                <button class="btn btn-link btn-sm" @onclick="() => _confirmDelete = null">Nie</button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-link btn-sm text-danger ms-auto" @onclick="() => _confirmDelete = p.Id"><i class="bi bi-trash3 me-1"></i>Usuń</button>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+
+    <div>
+        <PanelCard Title="Wiedza o Hantly" Icon="bi-book" IconClass="@(_k.Knowledge is null ? "pp-tone-warn" : "pp-tone-ok")"
+                   Subtitle="@(_k.Knowledge?.UpdatedAt is { } at ? $"Zbudowana {InstagramRules.ToWarsaw(at):dd.MM.yyyy HH:mm}" : "Jeszcze nie zbudowana")">
+            @if (_k.Knowledge is { } kn)
+            {
+                <div class="st-counts">
+                    <span><b>@kn.Features.Count</b> funkcji</span><span><b>@kn.Novelties.Count</b> nowości</span><span><b>@kn.PainPoints.Count</b> bolączek</span>
+                </div>
+                <p class="small mb-2">@kn.OneLiner</p>
+            }
+            else
+            {
+                <p class="small text-muted">AI przeczyta stronę hantly.pl, README, historię zmian z GitHuba i katalog funkcji z cenami, a potem spisze „biblię produktu” dla reklam.</p>
+            }
+            @if (_k.Error is not null) { <div class="small text-danger mb-2"><i class="bi bi-exclamation-triangle me-1"></i>@_k.Error</div> }
+            <div class="d-flex gap-2 flex-wrap">
+                <button class="btn btn-primary btn-sm" @onclick="BuildAsync" disabled="@(_k.Building || _aiOff is not null)">
+                    @if (_k.Building) { <span class="spinner-border spinner-border-sm me-1"></span><span>Buduję (1–3 min)…</span> }
+                    else { <i class="bi bi-arrow-repeat me-1"></i><span>@(_k.Knowledge is null ? "Zbuduj wiedzę" : "Odśwież wiedzę")</span> }
+                </button>
+                @if (_k.Knowledge is not null)
+                {
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => _editKnowledge = !_editKnowledge"><i class="bi bi-pencil me-1"></i>@(_editKnowledge ? "Zamknij" : "Co wie AI / popraw")</button>
+                }
+            </div>
+            @if (_editKnowledge && _kEdit is not null)
+            {
+                <div class="st-kedit">
+                    <StudioField Label="Jednym zdaniem" Value="@_kEdit.OneLiner" ValueChanged="v => _kEdit.OneLiner = v" Rows="2" />
+                    <StudioField Label="Dla kogo" Value="@_kEdit.Audience" ValueChanged="v => _kEdit.Audience = v" Rows="2" />
+                    <StudioField Label="Wezwanie do działania" Value="@_kEdit.Cta" ValueChanged="v => _kEdit.Cta = v" Rows="2" />
+                    <StudioField Label="Ton marki" Value="@_kEdit.Tone" ValueChanged="v => _kEdit.Tone = v" Rows="2" />
+                    <StudioField Label="Bolączki (każda w nowej linii)" Value="@string.Join("\n", _kEdit.PainPoints)" ValueChanged="v => _kEdit.PainPoints = Lines(v)" Rows="5" />
+                    <StudioField Label="Twarde konkrety (ceny, darmowy start…)" Value="@string.Join("\n", _kEdit.ProofPoints)" ValueChanged="v => _kEdit.ProofPoints = Lines(v)" Rows="4" />
+                    <StudioField Label="Czego nie mówić" Value="@string.Join("\n", _kEdit.DoNotSay)" ValueChanged="v => _kEdit.DoNotSay = Lines(v)" Rows="4" />
+                    <StudioField Label="Funkcje: nazwa — korzyść (każda w nowej linii)" Value="@string.Join("\n", _kEdit.Features.Select(f => $"{f.Name} — {f.Benefit}"))" ValueChanged="SetFeatures" Rows="8" />
+                    <div class="small fw-semibold mt-2">Nowości</div>
+                    <ul class="small ps-3 mb-2">@foreach (var n in _kEdit.Novelties) { <li><b>@n.When</b> @n.Title — @n.Benefit</li> }</ul>
+                    <button class="btn btn-primary btn-sm" @onclick="SaveKnowledgeAsync"><i class="bi bi-save me-1"></i>Zapisz wiedzę</button>
+                </div>
+            }
+        </PanelCard>
+
+        <PanelCard Title="Ustawienia" Icon="bi-sliders">
+            <div class="small fw-semibold mb-1">Co z gotowymi postami</div>
+            <div class="pp-seg flex-wrap mb-1" role="group" aria-label="Publikacja">
+                <button type="button" class="@(_opt.PublishMode == "manual" ? "active" : "")" @onclick='() => SetModeAsync("manual")'><i class="bi bi-hand-index"></i>Ręcznie</button>
+                <button type="button" class="@(_opt.PublishMode == "auto" ? "active" : "")" @onclick='() => SetModeAsync("auto")'><i class="bi bi-lightning-charge"></i>Automatycznie</button>
+            </div>
+            <div class="small text-muted mb-3">
+                @(_opt.PublishMode == "auto"
+                    ? "Gotowy post od AI sam trafia do planu Instagrama na najbliższy wolny termin i opublikuje się o tej godzinie. Teksty reklam płatnych zawsze wklejasz sam."
+                    : "Domyślnie: wszystko czeka na Ciebie. Sam przenosisz post do Instagrama i ustawiasz termin; reklamy kopiujesz albo pobierasz jako CSV.")
+            </div>
+            <label class="form-label small fw-semibold" for="st-model">Model AI dla Studia</label>
+            <input id="st-model" class="form-control form-control-sm mb-1" @bind="_model" placeholder="pusty = ten z ustawień AI" />
+            <div class="small text-muted mb-2">Nazwa modelu z OpenRoutera, np. mocniejszy do reklam niż do codziennych podpowiedzi.</div>
+            <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" id="st-gdef" checked="@_opt.GarminDefault" @onchange="e => _gdef = e.Value is true" />
+                <label class="form-check-label small" for="st-gdef">Garmin domyślnie zaznaczony przy nowych materiałach</label>
+            </div>
+            <button class="btn btn-outline-primary btn-sm" @onclick="SaveOptionsAsync"><i class="bi bi-save me-1"></i>Zapisz</button>
+        </PanelCard>
+
+        <PanelCard Title="Serwer pod filmy" Icon="bi-cpu" IconClass="@($"pp-tone-{_server?.Tone ?? "muted"}")" Subtitle="ocena z ostatniego pomiaru serwera">
+            @if (_server is { } sv)
+            {
+                <div class="fw-semibold small mb-1">@sv.Verdict</div>
+                <div class="st-counts mb-2">
+                    @if (sv.Cores is { } c) { <span><b>@c.ToString("0")</b> rdzeni</span> }
+                    @if (sv.MemFreeGb is { } mf) { <span><b>@mf.ToString("0.0")</b> z @(sv.MemTotalGb?.ToString("0") ?? "?") GB RAM wolne</span> }
+                    @if (sv.DiskFreeGb is { } df) { <span><b>@df.ToString("0")</b> GB dysku wolne</span> }
+                </div>
+                <ul class="small ps-3 mb-1">@foreach (var n in sv.Notes) { <li>@n</li> }</ul>
+                @if (sv.At is { } at) { <div class="small text-muted">Pomiar: @InstagramRules.ToWarsaw(at).ToString("dd.MM HH:mm") · <a href="/panel/resources">Serwer i zasoby</a></div> }
+            }
+        </PanelCard>
+    </div>
+</div>
+
+@code {
+    private static readonly (StudioKind Kind, string Label, string Icon, string Text)[] Kinds =
+    [
+        (StudioKind.Ads, "Teksty reklam", "bi-badge-ad", "3 warianty Meta + zestaw Google Ads, liczniki znaków, CSV do Excela."),
+        (StudioKind.Post, "Post 4:5", "bi-image", "Grafika w kolorach marki, opis z hashtagami — prosto do planu Instagrama."),
+        (StudioKind.Video, "Film 9:16", "bi-film", "Wkrótce — po uruchomieniu renderera filmów (Hantelek jako lektor)."),
+    ];
+
+    private StudioKind _kind = StudioKind.Ads;
+    private string _brief = "", _model = "";
+    private bool _garmin, _gdef, _busy, _editKnowledge;
+    private string? _aiOff, _flash;
+    private bool _flashOk;
+    private int? _open, _confirmDelete;
+    private List<StudioPromotion> _list = [];
+    private StudioService.KnowledgeState _k = new(null, false, null);
+    private R.Knowledge? _kEdit;
+    private StudioService.Options _opt = new("", "manual", false);
+    private StudioService.ServerCheck? _server;
+    private readonly Dictionary<int, string> _comments = [];
+    private Timer? _timer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _aiOff = await AiSvc.UnavailableReasonAsync();
+        _opt = await Studio.OptionsAsync();
+        _model = _opt.Model;
+        _gdef = _garmin = _opt.GarminDefault;
+        _server = await Studio.ServerAsync();
+        await LoadAsync();
+        _timer = new Timer(_ => InvokeAsync(TickAsync), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+    }
+
+    private async Task TickAsync()
+    {
+        if (!_k.Building && _list.All(p => p.Status != StudioStatus.Writing)) return;
+        await LoadAsync();
+        StateHasChanged();
+    }
+
+    private async Task LoadAsync()
+    {
+        _list = await Studio.ListAsync();
+        var wasBuilding = _k.Building;
+        _k = await Studio.KnowledgeStateAsync();
+        if (_kEdit is null || (wasBuilding && !_k.Building)) _kEdit = _k.Knowledge is null ? null : Clone(_k.Knowledge);
+    }
+
+    private static R.Knowledge Clone(R.Knowledge k) =>
+        System.Text.Json.JsonSerializer.Deserialize<R.Knowledge>(System.Text.Json.JsonSerializer.Serialize(k, R.Json), R.Json)!;
+
+    private async Task FlashAsync((bool Ok, string Message) m) { (_flash, _flashOk) = (m.Message, m.Ok); await LoadAsync(); }
+
+    private void AddHint(string text) => _brief = string.IsNullOrWhiteSpace(_brief) ? text : $"{_brief.TrimEnd()}\n{text}";
+
+    private void Toggle(int id) => _open = _open == id ? null : id;
+
+    private async Task CreateAsync(bool manual)
+    {
+        _busy = true;
+        var (id, error) = await Studio.CreateAsync(_kind, _brief, _garmin, manual);
+        _busy = false;
+        if (error is not null) { await FlashAsync((false, error)); return; }
+        _brief = "";
+        _open = id;
+        await FlashAsync((true, manual ? "Pusty szablon gotowy — wypełnij pola." : "AI pisze — gotowe zwykle w 1–2 minuty."));
+    }
+
+    private async Task ReviseAsync(int id)
+    {
+        var error = await Studio.ReviseAsync(id, _comments.GetValueOrDefault(id) ?? "");
+        if (error is null) _comments.Remove(id);
+        await FlashAsync(error is null ? (true, "AI poprawia — zmieni tylko to, czego dotyczy uwaga.") : (false, error));
+    }
+
+    private async Task RetryAsync(int id) { await Studio.RetryAsync(id); await FlashAsync((true, "Ponawiam.")); }
+
+    private async Task DeleteAsync(int id)
+    {
+        await Studio.DeleteAsync(id);
+        _confirmDelete = null;
+        await FlashAsync((true, "Usunięto."));
+    }
+
+    private async Task BuildAsync()
+    {
+        await Studio.RequestKnowledgeAsync();
+        await FlashAsync((true, "Buduję wiedzę o Hantly — potrwa 1–3 minuty."));
+    }
+
+    private static List<string> Lines(string v) => v.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+    private void SetFeatures(string v)
+    {
+        if (_kEdit is null) return;
+        var old = _kEdit.Features.ToDictionary(f => f.Name, StringComparer.OrdinalIgnoreCase);
+        _kEdit.Features = Lines(v).Select(line =>
+        {
+            var parts = line.Split('—', 2, StringSplitOptions.TrimEntries);
+            var name = parts[0];
+            var f = old.GetValueOrDefault(name) is { } prev ? prev : new R.Feature { Name = name };
+            f.Benefit = parts.Length > 1 ? parts[1] : f.Benefit;
+            return f;
+        }).ToList();
+    }
+
+    private async Task SaveKnowledgeAsync()
+    {
+        if (_kEdit is null) return;
+        _kEdit.UpdatedAt = DateTime.UtcNow;
+        await Studio.SaveKnowledgeAsync(_kEdit);
+        _editKnowledge = false;
+        await FlashAsync((true, "Zapisano wiedzę — kolejne materiały będą z niej korzystać."));
+    }
+
+    private async Task SetModeAsync(string mode)
+    {
+        _opt = _opt with { PublishMode = mode };
+        await Studio.SaveOptionsAsync(_opt);
+        await FlashAsync((true, mode == "auto" ? "Tryb automatyczny: gotowe posty same trafią do planu Instagrama." : "Tryb ręczny: wszystko czeka na Twoją decyzję."));
+    }
+
+    private async Task SaveOptionsAsync()
+    {
+        _opt = _opt with { Model = _model, GarminDefault = _gdef };
+        await Studio.SaveOptionsAsync(_opt);
+        await FlashAsync((true, "Zapisano ustawienia Studia."));
+    }
+
+    public void Dispose() => _timer?.Dispose();
+}
