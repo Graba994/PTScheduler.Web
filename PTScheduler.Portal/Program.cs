@@ -117,6 +117,14 @@ builder.Services.AddScoped<InstagramService>();
 builder.Services.AddHostedService<InstagramBackgroundService>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.StudioService>();
 builder.Services.AddHostedService<PTScheduler.Portal.Services.Studio.StudioBackgroundService>();
+// Studio reklam — filmy: głos i dźwięk, renderer (kontener hantly-renderer), kolejka zadań
+builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.StudioMedia>();
+builder.Services.AddHttpClient(PTScheduler.Portal.Services.Studio.RendererClient.HttpClientName);
+builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.RendererClient>();
+builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.StudioNotifier>();
+builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.StudioJobs>();
+builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.IStudioJobHandler, PTScheduler.Portal.Services.Studio.SoundsJobHandler>();
+builder.Services.AddHostedService<PTScheduler.Portal.Services.Studio.StudioJobsBackgroundService>();
 builder.Services.AddHostedService<SuspensionReportBackgroundService>();
 builder.Services.AddScoped<BackupService>();
 builder.Services.AddScoped<OffsiteBackupService>();

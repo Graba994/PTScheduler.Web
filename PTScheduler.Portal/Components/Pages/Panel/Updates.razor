@@ -564,6 +564,8 @@
         if (_guardianAvailable) _renderer = await UpdateSvc.GetRendererStatusAsync();
         _repoHead = await UpdateSvc.GetLocalRepoHeadAsync();
         _remote = await UpdateSvc.CheckRemoteAsync();
+        _rendererStudioChanged = TargetCommit is { } target && _renderer?.Health?.Commit is { Length: > 0 } rc
+            ? await UpdateSvc.StudioChangedAsync(rc, target) : null;
         _tenantBehindRepo = UpdateSvc.IsTenantBehindRepo(_tenant, _repoHead);
         _repoBehindRemote = UpdateSvc.IsRepoBehindRemote(_repoHead, _remote);
         _portalBehind = _repoHead is not null
@@ -816,8 +818,11 @@
     private static readonly System.Globalization.CultureInfo Pl = System.Globalization.CultureInfo.GetCultureInfo("pl-PL");
     private bool Busy => _upgrading || _upgradingPortal || _upgradingRenderer || _activeGuardianJob?.Status == "Running";
 
+    /// <summary>Czy od wersji renderera zmienił się kod w studio/ (null = nie wiadomo — wtedy porównanie samych wersji).</summary>
+    private bool? _rendererStudioChanged;
+
     private bool RendererPending => _renderer is not { Exists: true }
-        || (TargetCommit is not null && _renderer.Health?.Commit is { Length: > 0 } rc && !Same(rc, TargetCommit));
+        || (TargetCommit is not null && _renderer.Health?.Commit is { Length: > 0 } rc && (_rendererStudioChanged ?? !Same(rc, TargetCommit)));
 
     private string RendererState => _renderer switch
     {

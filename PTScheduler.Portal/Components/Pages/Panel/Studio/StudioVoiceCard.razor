@@ -1,0 +1,284 @@
+@using PTScheduler.Portal.Services.Studio
+@inject StudioMedia Media
+@inject RendererClient Renderer
+@inject StudioJobs Jobs
+@implements IDisposable
+
+@* Głos lektora i dźwięk filmów: klucze (szyfrowane), głos z odsłuchem, muzyka, efekty, kontrola klatek
+   i biblioteka dźwięków generowanych raz przez ElevenLabs (zadanie „sounds” w kolejce Studia). *@
+
+<PanelCard Title="Głos i dźwięk" Icon="bi-mic" IconClass="@(_voiceOff is null ? "pp-tone-ok" : "pp-tone-warn")" Subtitle="lektor Hantelek, muzyka i efekty w filmach">
+    <div class="small mb-2">
+        <i class="bi bi-film me-1"></i>Renderer:
+        @if (_health is { } h)
+        {
+            <span class="text-success">działa</span>@(h.Commit is { Length: > 0 } c ? $" · wersja {c}" : "")@(h.Busy is { Length: > 0 } b ? $" · pracuje ({b})" : "")
+        }
+        else
+        {
+            <span class="text-danger">nie odpowiada</span> <a href="/panel/updates" class="ms-1">Aktualizacje → Renderer filmów</a>
+        }
+    </div>
+
+    <div class="small fw-semibold mb-1">Dostawca głosu</div>
+    <div class="pp-seg flex-wrap mb-2" role="group" aria-label="Dostawca głosu">
+        <button type="button" class="@(_voice.Provider == "Azure" ? "active" : "")" @onclick='() => SetProvider("Azure")'><i class="bi bi-microsoft"></i>Azure Speech</button>
+        <button type="button" class="@(_voice.Provider == "ElevenLabs" ? "active" : "")" @onclick='() => SetProvider("ElevenLabs")'><i class="bi bi-soundwave"></i>ElevenLabs</button>
+    </div>
+
+    <details class="mb-2" open="@(!_keys.Azure && !_keys.ElevenLabs)">
+        <summary class="small fw-semibold">Klucze API <span class="text-muted fw-normal">(Azure @(_keys.Azure ? "✓" : "—") · ElevenLabs @(_keys.ElevenLabs ? "✓" : "—"))</span></summary>
+        <div class="mt-2">
+            <label class="form-label small mb-1" for="sv-azure">Klucz Azure Speech</label>
+            <input id="sv-azure" type="password" autocomplete="off" class="form-control form-control-sm mb-1" @bind="_azureKey" @bind:event="oninput"
+                   placeholder="@(_keys.Azure ? "zapisany — wpisz nowy, żeby zmienić" : "Azure → Speech service → Keys and Endpoint")" />
+            <label class="form-label small mb-1" for="sv-region">Region Azure</label>
+            <input id="sv-region" class="form-control form-control-sm mb-2" @bind="_region" placeholder="np. westeurope" />
+            <label class="form-label small mb-1" for="sv-eleven">Klucz ElevenLabs</label>
+            <input id="sv-eleven" type="password" autocomplete="off" class="form-control form-control-sm mb-1" @bind="_elevenKey" @bind:event="oninput"
+                   placeholder="@(_keys.ElevenLabs ? "zapisany — wpisz nowy, żeby zmienić" : "zaczyna się od sk_…")" />
+            <div class="small text-muted mb-2">Klucze są szyfrowane w bazie Portalu. ElevenLabs służy też do efektów i muzyki (uprawnienia: Text to Speech, Voices: Read, Sound Effects, Music Generation).</div>
+            <div class="d-flex gap-2 flex-wrap">
+                <button class="btn btn-outline-primary btn-sm" @onclick="SaveKeysAsync"><i class="bi bi-key me-1"></i>Zapisz klucze</button>
+                @if (_keys.Azure) { <button class="btn btn-link btn-sm text-danger" @onclick='() => RemoveKeyAsync("azure")'>Usuń klucz Azure</button> }
+                @if (_keys.ElevenLabs) { <button class="btn btn-link btn-sm text-danger" @onclick='() => RemoveKeyAsync("eleven")'>Usuń klucz ElevenLabs</button> }
+            </div>
+        </div>
+    </details>
+
+    <label class="form-label small fw-semibold mb-1" for="sv-id">@(_voice.Provider == "Azure" ? "Głos Azure" : "Głos ElevenLabs (ID)")</label>
+    <div class="input-group input-group-sm mb-1">
+        <input id="sv-id" class="form-control" @bind="_voiceId" @bind:event="oninput" placeholder="@(_voice.Provider == "Azure" ? "pl-PL-MarekNeural" : "ID głosu")" />
+        @if (_voice.Provider == "ElevenLabs")
+        {
+            <button class="btn btn-outline-secondary" @onclick="LoadVoicesAsync" disabled="@(!_keys.ElevenLabs || _loadingVoices)"><i class="bi bi-list-ul me-1"></i>Moje głosy</button>
+        }
+    </div>
+    @if (_voice.Provider == "ElevenLabs" && _elevenVoices.Count > 0)
+    {
+        <select class="form-select form-select-sm mb-1" aria-label="Wybierz głos ElevenLabs" @onchange="e => _voiceId = e.Value?.ToString() ?? _voiceId">
+            <option value="">— wybierz z listy —</option>
+            @foreach (var v in _elevenVoices)
+            {
+                <option value="@v.Id" selected="@(v.Id == _voiceId)">@v.Name@(v.Category.Length > 0 ? $" ({v.Category})" : "")</option>
+            }
+        </select>
+    }
+    @if (_voice.Provider == "Azure")
+    {
+        <div class="small text-muted mb-2">Polskie głosy: pl-PL-MarekNeural, pl-PL-AgnieszkaNeural, pl-PL-ZofiaNeural.</div>
+        <div class="row g-2 mb-2">
+            <div class="col-6">
+                <label class="form-label small mb-1" for="sv-rate">Tempo</label>
+                <input id="sv-rate" class="form-control form-control-sm" @bind="_rate" placeholder="+6%" />
+            </div>
+            <div class="col-6">
+                <label class="form-label small mb-1" for="sv-pitch">Wysokość</label>
+                <input id="sv-pitch" class="form-control form-control-sm" @bind="_pitch" placeholder="+0Hz" />
+            </div>
+        </div>
+    }
+    else
+    {
+        <details class="mb-2">
+            <summary class="small">Ustawienia ElevenLabs</summary>
+            <div class="row g-2 mt-1">
+                <div class="col-6"><label class="form-label small mb-1" for="sv-speed">Szybkość (0.7–1.2)</label><input id="sv-speed" class="form-control form-control-sm" @bind="_rate" placeholder="1.0" /></div>
+                <div class="col-6"><label class="form-label small mb-1" for="sv-model">Model</label><input id="sv-model" class="form-control form-control-sm" @bind="_model" /></div>
+                <div class="col-4"><label class="form-label small mb-1" for="sv-stab">Stabilność</label><input id="sv-stab" type="number" step="0.05" min="0" max="1" class="form-control form-control-sm" @bind="_stability" /></div>
+                <div class="col-4"><label class="form-label small mb-1" for="sv-sim">Podobieństwo</label><input id="sv-sim" type="number" step="0.05" min="0" max="1" class="form-control form-control-sm" @bind="_similarity" /></div>
+                <div class="col-4"><label class="form-label small mb-1" for="sv-style">Styl</label><input id="sv-style" type="number" step="0.05" min="0" max="1" class="form-control form-control-sm" @bind="_style" /></div>
+            </div>
+        </details>
+    }
+    <div class="d-flex gap-2 flex-wrap mb-2">
+        <button class="btn btn-outline-primary btn-sm" @onclick="SaveVoiceAsync" disabled="@string.IsNullOrWhiteSpace(_voiceId)"><i class="bi bi-save me-1"></i>Zapisz głos</button>
+    </div>
+
+    <label class="form-label small fw-semibold mb-1" for="sv-sample">Odsłuch</label>
+    <textarea id="sv-sample" class="form-control form-control-sm mb-1" rows="2" maxlength="400" @bind="_sample" @bind:event="oninput"></textarea>
+    <div class="d-flex gap-2 align-items-center flex-wrap mb-1">
+        <button class="btn btn-outline-secondary btn-sm" @onclick="PreviewAsync" disabled="@(_previewing || _health is null || string.IsNullOrWhiteSpace(_sample))">
+            @if (_previewing) { <span class="spinner-border spinner-border-sm me-1"></span><span>Nagrywam…</span> }
+            else { <i class="bi bi-play-circle me-1"></i><span>Odsłuchaj zapisany głos</span> }
+        </button>
+        @if (_voiceOff is not null) { <span class="small text-warning">@_voiceOff</span> }
+    </div>
+    @if (_audio is not null)
+    {
+        <audio controls autoplay src="@_audio" class="w-100 mb-2"></audio>
+    }
+
+    <hr class="my-3" />
+
+    <div class="small fw-semibold mb-1">Muzyka w tle</div>
+    <select class="form-select form-select-sm mb-2" aria-label="Muzyka w tle" @bind="_music">
+        <option value="losowo">Losowo z biblioteki</option>
+        <option value="brak">Bez muzyki</option>
+        @foreach (var s in StudioMedia.Library.Where(x => x.Kind == StudioMedia.SoundKind.Music))
+        {
+            <option value="@s.Key">@s.Name@(_available.Contains(s.Key) ? "" : " (jeszcze nie ma)")</option>
+        }
+    </select>
+    <label class="form-label small mb-1" for="sv-vol">Głośność muzyki: @_volume.ToString("0.00")</label>
+    <input id="sv-vol" type="range" class="form-range mb-2" min="0" max="0.3" step="0.01" @bind="_volume" @bind:event="oninput" />
+    <div class="form-check form-switch mb-1">
+        <input class="form-check-input" type="checkbox" id="sv-sfx" @bind="_sfx" />
+        <label class="form-check-label small" for="sv-sfx">Efekty dźwiękowe (świst przy zmianie sceny, dzwonek wiadomości, konfetti…)</label>
+    </div>
+    <div class="form-check form-switch mb-2">
+        <input class="form-check-input" type="checkbox" id="sv-qa" @bind="_qa" />
+        <label class="form-check-label small" for="sv-qa">Po renderze AI ogląda klatki i zgłasza usterki (ok. 15 gr za film)</label>
+    </div>
+    <button class="btn btn-outline-primary btn-sm mb-3" @onclick="SaveSoundAsync"><i class="bi bi-save me-1"></i>Zapisz dźwięk</button>
+
+    <div class="small fw-semibold mb-1">Biblioteka dźwięków <span class="text-muted fw-normal">(@_available.Count z @StudioMedia.Library.Length)</span></div>
+    <ul class="list-unstyled small mb-2 sv-lib">
+        @foreach (var s in StudioMedia.Library)
+        {
+            var have = _available.Contains(s.Key);
+            <li><i class="bi @(have ? "bi-check-circle-fill text-success" : "bi-circle text-muted") me-1"></i>@s.Name</li>
+        }
+    </ul>
+    @if (_soundsJob is { Status: StudioJobStatus.Failed, Error: { } err })
+    {
+        <div class="small text-danger mb-2"><i class="bi bi-exclamation-triangle me-1"></i>@err</div>
+    }
+    @if (_available.Count < StudioMedia.Library.Length)
+    {
+        <button class="btn btn-outline-secondary btn-sm" @onclick="GenerateSoundsAsync" disabled="@(_soundsQueued || !_keys.ElevenLabs)">
+            @if (_soundsQueued) { <span class="spinner-border spinner-border-sm me-1"></span><span>Generuję (kilka minut)…</span> }
+            else { <i class="bi bi-music-note-beamed me-1"></i><span>Wygeneruj brakujące (ElevenLabs, raz)</span> }
+        </button>
+        @if (!_keys.ElevenLabs) { <div class="small text-muted mt-1">Potrzebny klucz ElevenLabs.</div> }
+    }
+    else
+    {
+        <div class="small text-muted">Wszystkie dźwięki są gotowe — każdy film z nich korzysta.</div>
+    }
+</PanelCard>
+
+@code {
+    [Parameter] public EventCallback<(bool Ok, string Message)> Flash { get; set; }
+
+    private StudioMedia.KeysState _keys = new(false, "", false);
+    private StudioMedia.Voice _voice = new();
+    private RendererClient.Health? _health;
+    private string? _voiceOff, _audio, _azureKey, _elevenKey;
+    private string _region = "", _voiceId = "", _rate = "", _pitch = "", _model = "", _music = "losowo";
+    private string _sample = "Cześć! Jestem Hantelek, Twój asystent w Hantly. Grafik, płatności i plany treningowe? Spokojnie, mam to.";
+    private double _stability, _similarity, _style, _volume;
+    private bool _sfx, _qa, _previewing, _loadingVoices, _soundsQueued;
+    private List<StudioMedia.ElevenLabsVoice> _elevenVoices = [];
+    private HashSet<string> _available = [];
+    private StudioJob? _soundsJob;
+    private Timer? _timer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        _health = await Renderer.HealthAsync();
+        _timer = new Timer(_ => InvokeAsync(TickAsync), null, TimeSpan.FromSeconds(6), TimeSpan.FromSeconds(6));
+    }
+
+    private async Task LoadAsync()
+    {
+        _keys = await Media.KeysStateAsync();
+        _region = _keys.AzureRegion;
+        _voice = await Media.VoiceAsync();
+        (_voiceId, _rate, _pitch, _model, _stability, _similarity, _style) = (_voice.VoiceId, _voice.Rate, _voice.Pitch, _voice.Model, _voice.Stability, _voice.Similarity, _voice.Style);
+        var o = await Media.SoundOptionsAsync();
+        (_music, _volume, _sfx, _qa) = (o.Music, o.MusicVolume, o.Sfx, o.Qa);
+        _voiceOff = await Media.VoiceUnavailableAsync();
+        await LoadSoundsAsync();
+    }
+
+    private async Task LoadSoundsAsync()
+    {
+        _available = Media.AvailableSounds();
+        _soundsQueued = await Jobs.IsQueuedAsync("sounds");
+        _soundsJob = await Jobs.LastAsync("sounds");
+    }
+
+    private async Task TickAsync()
+    {
+        if (!_soundsQueued) return;
+        await LoadSoundsAsync();
+        StateHasChanged();
+    }
+
+    private void SetProvider(string provider)
+    {
+        if (_voice.Provider == provider) return;
+        _voice = _voice with { Provider = provider };
+        // domyślne wartości dla drugiego dostawcy — żeby nie zostało „+6%” jako szybkość ElevenLabs
+        (_voiceId, _rate, _pitch) = provider == "Azure" ? ("pl-PL-MarekNeural", "+6%", "+0Hz") : ("", "", "+0Hz");
+        _audio = null;
+    }
+
+    private async Task SaveKeysAsync()
+    {
+        await Media.SaveKeysAsync(string.IsNullOrWhiteSpace(_azureKey) ? null : _azureKey, _region, string.IsNullOrWhiteSpace(_elevenKey) ? null : _elevenKey);
+        _azureKey = _elevenKey = null;
+        await LoadAsync();
+        await Flash.InvokeAsync((true, "Zapisano klucze (zaszyfrowane)."));
+    }
+
+    private async Task RemoveKeyAsync(string which)
+    {
+        await Media.SaveKeysAsync(which == "azure" ? "" : null, _region, which == "eleven" ? "" : null);
+        await LoadAsync();
+        await Flash.InvokeAsync((true, "Usunięto klucz."));
+    }
+
+    private async Task LoadVoicesAsync()
+    {
+        _loadingVoices = true;
+        var (voices, error) = await Media.ElevenLabsVoicesAsync();
+        _loadingVoices = false;
+        _elevenVoices = voices;
+        if (error is not null) await Flash.InvokeAsync((false, error));
+        else if (voices.Count == 0) await Flash.InvokeAsync((false, "Na koncie ElevenLabs nie ma głosów — dodaj głos w ElevenLabs → Voices."));
+    }
+
+    private async Task SaveVoiceAsync()
+    {
+        var v = _voice with { VoiceId = _voiceId, Rate = _rate, Pitch = _pitch, Model = _model, Stability = _stability, Similarity = _similarity, Style = _style };
+        var error = await Media.SaveVoiceAsync(v);
+        if (error is not null) { await Flash.InvokeAsync((false, error)); return; }
+        await LoadAsync();
+        await Flash.InvokeAsync((true, "Zapisano głos lektora."));
+    }
+
+    private async Task PreviewAsync()
+    {
+        if (await Media.VoiceUnavailableAsync() is { } reason) { await Flash.InvokeAsync((false, reason)); return; }
+        _previewing = true;
+        _audio = null;
+        try
+        {
+            var mp3 = await Renderer.PreviewVoiceAsync(StudioMedia.RendererVoice(await Media.VoiceAsync()), await Media.CredentialsAsync(), _sample.Trim());
+            _audio = "data:audio/mpeg;base64," + Convert.ToBase64String(mp3);
+        }
+        catch (Exception ex) when (ex is RendererException or HttpRequestException or TaskCanceledException)
+        {
+            await Flash.InvokeAsync((false, $"Odsłuch nie zadziałał: {ex.Message}"));
+        }
+        finally { _previewing = false; }
+    }
+
+    private async Task SaveSoundAsync()
+    {
+        await Media.SaveSoundOptionsAsync(new(_music, _volume, _sfx, _qa));
+        await Flash.InvokeAsync((true, "Zapisano ustawienia dźwięku."));
+    }
+
+    private async Task GenerateSoundsAsync()
+    {
+        await Jobs.EnqueueAsync("sounds");
+        await LoadSoundsAsync();
+        await Flash.InvokeAsync((true, "Generuję brakujące dźwięki w tle — muzyka trwa najdłużej (do kilku minut)."));
+    }
+
+    public void Dispose() => _timer?.Dispose();
+}

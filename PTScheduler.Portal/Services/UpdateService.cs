@@ -101,6 +101,46 @@ public class UpdateService(
         }
     }
 
+    /// <summary>
+    /// Czy między wersją renderera a <paramref name="target"/> zmieniło się coś w studio/ (kod renderera).
+    /// Najpierw lokalne repozytorium, potem porównanie przez GitHuba; null = nie wiadomo.
+    /// Dzięki temu zmiany samego Portalu nie każą przebudowywać renderera.
+    /// </summary>
+    public async Task<bool?> StudioChangedAsync(string rendererCommit, string target)
+    {
+        if (!IsSha(rendererCommit) || !IsSha(target)) return null;
+        if (target.StartsWith(rendererCommit, StringComparison.OrdinalIgnoreCase) || rendererCommit.StartsWith(target, StringComparison.OrdinalIgnoreCase)) return false;
+        if (Directory.Exists(RepoDir))
+        {
+            try
+            {
+                var (ok, output) = await RunAsync("git", $"diff --name-only {rendererCommit} {target} --", RepoDir);
+                if (ok) return TouchesStudio(output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            }
+            catch { /* brak gita albo nieznany commit — spróbuj przez GitHuba */ }
+        }
+        try
+        {
+            var (owner, repo, _, token) = await GetGitHubConfigAsync();
+            using var req = new HttpRequestMessage(HttpMethod.Get, $"https://api.github.com/repos/{owner}/{repo}/compare/{rendererCommit}...{target}");
+            req.Headers.UserAgent.ParseAdd("Hantly-Portal");
+            if (!string.IsNullOrEmpty(token))
+                req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+            using var resp = await _http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode) return null;
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+            if (!doc.RootElement.TryGetProperty("files", out var files)) return null;
+            return TouchesStudio(files.EnumerateArray().Select(f => f.TryGetProperty("filename", out var n) ? n.GetString() ?? "" : ""));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException) { return null; }
+    }
+
+    /// <summary>Czy lista zmienionych plików dotyczy renderera (katalog studio/ albo jego wpis w .dockerignore).</summary>
+    public static bool TouchesStudio(IEnumerable<string> files) =>
+        files.Any(f => f.StartsWith("studio/", StringComparison.Ordinal) || f == ".dockerignore");
+
+    private static bool IsSha(string s) => s.Length is >= 7 and <= 40 && s.All(Uri.IsHexDigit);
+
     public async Task<(bool Ok, string Message)> TestConnectionAsync()
     {
         try

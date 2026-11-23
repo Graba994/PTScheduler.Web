@@ -42,6 +42,9 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<InstagramDaily> InstagramDaily => Set<InstagramDaily>();
     public DbSet<InstagramComment> InstagramComments => Set<InstagramComment>();
     public DbSet<StudioPromotion> StudioPromotions => Set<StudioPromotion>();
+    public DbSet<StudioVideo> StudioVideos => Set<StudioVideo>();
+    public DbSet<StudioScene> StudioScenes => Set<StudioScene>();
+    public DbSet<StudioJob> StudioJobs => Set<StudioJob>();
     public DbSet<TesterFeedback> TesterFeedback => Set<TesterFeedback>();
     public DbSet<TenantOfferItem> TenantOfferItems => Set<TenantOfferItem>();
     public DbSet<TenantSmsCounter> TenantSmsCounters => Set<TenantSmsCounter>();
@@ -574,6 +577,45 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.Property(x => x.Comment).HasMaxLength(2000);
             e.Property(x => x.Error).HasMaxLength(1000);
             e.Property(x => x.ResultJson).HasColumnType("jsonb");
+        });
+
+        b.Entity<StudioVideo>(e =>
+        {
+            e.HasIndex(x => x.Slug).IsUnique();
+            e.HasIndex(x => x.Status);
+            e.HasIndex(x => x.PromotionId);
+            e.Property(x => x.Slug).HasMaxLength(64);
+            e.Property(x => x.Brief).HasMaxLength(2000);
+            e.Property(x => x.Title).HasMaxLength(200);
+            e.Property(x => x.Description).HasMaxLength(2000);
+            e.Property(x => x.PinnedComment).HasMaxLength(1000);
+            e.Property(x => x.ReviewComment).HasMaxLength(2000);
+            e.Property(x => x.LastError).HasMaxLength(2000);
+            e.Property(x => x.TagsJson).HasColumnType("jsonb");
+            e.Property(x => x.SourcesJson).HasColumnType("jsonb");
+            e.Property(x => x.HooksJson).HasColumnType("jsonb");
+            e.Property(x => x.QaJson).HasColumnType("jsonb");
+            e.HasMany(x => x.Scenes).WithOne(s => s.Video).HasForeignKey(s => s.VideoId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<StudioScene>(e =>
+        {
+            e.HasIndex(x => new { x.VideoId, x.Order });
+            e.Property(x => x.Kind).HasMaxLength(16);
+            e.Property(x => x.Headline).HasMaxLength(120);
+            e.Property(x => x.Icon).HasMaxLength(16);
+            e.Property(x => x.Text).HasMaxLength(1000);
+            e.Property(x => x.SpeechText).HasMaxLength(1500);
+            e.Property(x => x.StoryJson).HasColumnType("jsonb");
+        });
+
+        b.Entity<StudioJob>(e =>
+        {
+            e.HasIndex(x => new { x.Status, x.RunAfter });
+            e.HasIndex(x => x.VideoId);
+            e.Property(x => x.Type).HasMaxLength(32);
+            e.Property(x => x.Error).HasMaxLength(2000);
+            e.Property(x => x.PayloadJson).HasColumnType("jsonb");
         });
 
         b.Entity<PlanChangeLog>(e =>

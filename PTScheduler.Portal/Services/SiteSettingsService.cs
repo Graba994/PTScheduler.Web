@@ -209,6 +209,20 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string StudioPublishMode = "studio_publish_mode";
         /// <summary>Domyślny stan pola „Pokaż integrację z Garminem” przy nowych materiałach.</summary>
         public const string StudioGarminDefault = "studio_garmin_default";
+        /// <summary>Klucz Azure Speech (zaszyfrowany Data Protection).</summary>
+        public const string StudioAzureKey = "studio_azure_key";
+        public const string StudioAzureRegion = "studio_azure_region";
+        /// <summary>Klucz ElevenLabs (zaszyfrowany Data Protection) — głos, efekty dźwiękowe i muzyka.</summary>
+        public const string StudioElevenLabsKey = "studio_elevenlabs_key";
+        /// <summary>Głos lektora (JSON: dostawca, voiceId, tempo, wysokość, model, ustawienia ElevenLabs).</summary>
+        public const string StudioVoice = "studio_voice";
+        /// <summary>Muzyka w tle filmów: „losowo” | „brak” | klucz utworu z biblioteki.</summary>
+        public const string StudioMusic = "studio_music";
+        public const string StudioMusicVolume = "studio_music_volume";
+        /// <summary>„true” — efekty dźwiękowe (whoosh, pop, ding…) w filmach.</summary>
+        public const string StudioSfx = "studio_sfx";
+        /// <summary>„true” — po renderze AI ogląda klatki kontrolne i zgłasza usterki (ok. 15 gr za film).</summary>
+        public const string StudioQa = "studio_qa";
         // Kopie zapasowe: test odtworzenia i kopia poza serwerem
         /// <summary>„weekly” — co niedzielę Portal odtwarza najnowsze kopie do tymczasowej bazy; „off” — bez testu.</summary>
         public const string BackupVerify = "backup_verify";
@@ -390,6 +404,11 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         [Keys.LeoReportEnabled] = "true",
         [Keys.LeoReportHour] = "7",
         [Keys.LeoWeeklyEnabled] = "true",
+        [Keys.StudioAzureRegion] = "westeurope",
+        [Keys.StudioMusic] = "losowo",
+        [Keys.StudioMusicVolume] = "0.09",
+        [Keys.StudioSfx] = "true",
+        [Keys.StudioQa] = "true",
         [Keys.FinanceAutoIssue] = "true",
         [Keys.FinanceEmailDocs] = "true",
         [Keys.FinanceProvider] = "local",
