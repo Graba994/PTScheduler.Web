@@ -173,6 +173,15 @@ public class StudioVideoQueueTests
         (await media.VoiceUnavailableAsync()).Should().Contain("ElevenLabs", "bez klucza nie da się nagrać");
     }
 
+    [Theory]
+    [InlineData(401, """{"detail":{"message":"The API key you used is missing the permission text_to_speech to execute this operation."}}""", "nie ma uprawnienia „Text to Speech”")]
+    [InlineData(401, """{"detail":{"message":"The API key you used is missing the permission sound_generation to execute this operation."}}""", "nie ma uprawnienia „Sound Effects”")]
+    [InlineData(401, """{"detail":{"status":"api_key_id_used_as_api_key"}}""", "identyfikator klucza")]
+    [InlineData(429, "{}", "limit")]
+    [InlineData(500, "{}", "ElevenLabs odpowiedział 500.")]
+    public void ElevenLabsError_TellsWhatToFix(int status, string body, string expected) =>
+        StudioMedia.ElevenLabsError(status, body, "Voices: Read").Should().Contain(expected);
+
     // ── Dźwięk w filmie ───────────────────────────────────────────────
 
     [Fact]

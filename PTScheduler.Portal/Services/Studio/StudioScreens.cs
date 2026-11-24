@@ -42,7 +42,8 @@ public class StudioScreens(
         new("/trainer/retencja", "trainer"), new("/trainer/asystent", "trainer"), new("/trainer/styl", "trainer"),
         new("/stats/business", "trainer"), new("/finance", "trainer"), new("/finance/ksiegowa", "trainer"),
         new("/pakiety-koncza", "trainer"), new("/packages", "trainer"), new("/admin/package-offers", "trainer"),
-        new("/lab/miesnie", "trainer"), new("/chat", "trainer"), new("/admin/site", "trainer"),
+        // /admin/site (strona studia) — tylko dla właściciela, konto demo trenera dostaje „brak dostępu”
+        new("/lab/miesnie", "trainer"), new("/chat", "trainer"),
         new("/trainer/availability", "trainer"), new("/okienka", "trainer"),
         new("/app", "client"), new("/book", "client"), new("/my/workouts", "client"), new("/my/stats", "client"), new("/my/garmin", "client"),
     ];
@@ -242,31 +243,48 @@ public class StudioScreens(
         var features = await FeatureNamesAsync();
         var system = $"""
             Oglądasz zrzuty ekranu polskiej aplikacji Hantly (dla trenerów personalnych i ich klientów) zrobione na telefonie, na koncie demo z fikcyjnymi danymi.
-            Do każdego zrzutu napisz po polsku: co konkretnie widać (sekcje, liczby, przyciski), którą funkcję produktu ilustruje
-            (użyj nazwy z listy funkcji, jeśli pasuje), czy nadaje się do reklamy i 1–3 miejsca warte pokazania dymkiem.
-            good = false, gdy ekran jest pusty („brak danych”), pokazuje błąd, logowanie, jest nudny albo ma testowe śmieci (np. „test (kopia)”).
+            Do każdego zrzutu napisz po polsku: co konkretnie widać (sekcje, liczby, przyciski — najwyżej 160 znaków), którą funkcję produktu
+            ilustruje (użyj nazwy z listy funkcji, jeśli pasuje), czy nadaje się do reklamy i 1–3 miejsca warte pokazania dymkiem.
+            good = false, gdy główna część ekranu to pusty stan albo komunikat o braku czegoś („Dziś bez wizyt”, „brak danych”,
+            „nic nie zaplanowano”, „rezerwacja niedostępna”), błąd, logowanie, brak dostępu, ekran nudny albo testowe śmieci (np. „test (kopia)”).
             highlights: label do 30 znaków (krótko, po ludzku), y = położenie od góry zrzutu 0–1.
             Funkcje produktu: {string.Join("; ", features)}
             Odpowiadasz wyłącznie poprawnym JSON-em, bez komentarzy i bez ```.
             """;
+        // Paczka, której odpowiedź się nie odczytała (np. urwana na limicie), idzie jeszcze raz w dwóch połowach.
+        var pending = new Queue<(Screen[] Batch, bool Retry)>(screens.Chunk(DescribeBatch).Select(b => (b, false)));
         var failed = 0;
-        foreach (var batch in screens.Chunk(DescribeBatch))
+        while (pending.TryDequeue(out var item))
         {
-            var thumbs = batch.Select(s => shots.First(x => x.File == s.File).Thumb).ToList();
-            var sb = new StringBuilder("Zrzuty (w tej samej kolejności co obrazy):\n");
-            foreach (var (s, i) in batch.Select((s, i) => (s, i)))
-            {
-                var shot = shots.First(x => x.File == s.File);
-                sb.AppendLine($"{i + 1}. plik: {s.File}; trasa: {s.Path}; widok: {(s.As == "client" ? "klienta" : "trenera")}; tytuł: {shot.Title}; tekst strony: {R.Cut(shot.Text, 500)}");
-            }
-            sb.AppendLine("""Schemat: {"screens":[{"file":"nazwa pliku","shows":"co widać","feature":"nazwa funkcji","good":true,"highlights":[{"label":"…","y":0.3}]}]}""");
-            var r = await ai.CompleteAsync(StudioService.Feature, null, system, sb.ToString(), maxTokens: 2500, ct: ct,
-                modelOverride: model, timeoutSeconds: 180, imagesJpegBase64: thumbs);
-            if (r.Text is null || R.Parse<AiScreens>(r.Text) is not { Screens.Count: > 0 } parsed) { failed += batch.Length; continue; }
-            foreach (var d in parsed.Screens)
-                if (batch.FirstOrDefault(s => s.File == d.File) is { } s) Apply(s, d);
+            var ok = await DescribeBatchAsync(item.Batch, shots, system, model, ct);
+            if (ok) continue;
+            if (!item.Retry && item.Batch.Length > 1)
+                foreach (var half in item.Batch.Chunk((item.Batch.Length + 1) / 2)) pending.Enqueue((half, true));
+            else failed += item.Batch.Length;
         }
         return failed > 0 ? $"AI nie opisało {failed} z {screens.Count} zrzutów — mają tylko tytuł strony." : null;
+    }
+
+    private async Task<bool> DescribeBatchAsync(Screen[] batch, List<RendererClient.Shot> shots, string system, string model, CancellationToken ct)
+    {
+        var thumbs = batch.Select(s => shots.First(x => x.File == s.File).Thumb).ToList();
+        var sb = new StringBuilder("Zrzuty (w tej samej kolejności co obrazy):\n");
+        foreach (var (s, i) in batch.Select((s, i) => (s, i)))
+        {
+            var shot = shots.First(x => x.File == s.File);
+            sb.AppendLine($"{i + 1}. plik: {s.File}; trasa: {s.Path}; widok: {(s.As == "client" ? "klienta" : "trenera")}; tytuł: {shot.Title}; tekst strony: {R.Cut(shot.Text, 500)}");
+        }
+        sb.AppendLine("""Schemat: {"screens":[{"file":"nazwa pliku","shows":"co widać","feature":"nazwa funkcji","good":true,"highlights":[{"label":"…","y":0.3}]}]}""");
+        var r = await ai.CompleteAsync(StudioService.Feature, null, system, sb.ToString(), maxTokens: 6000, ct: ct,
+            modelOverride: model, timeoutSeconds: 180, imagesJpegBase64: thumbs);
+        if (r.Text is null || R.Parse<AiScreens>(r.Text) is not { Screens.Count: > 0 } parsed)
+        {
+            logger.LogWarning("Studio: opis {Count} zrzutów nieudany: {Error}", batch.Length, r.Error ?? "odpowiedź nie jest poprawnym JSON-em");
+            return false;
+        }
+        foreach (var d in parsed.Screens)
+            if (batch.FirstOrDefault(s => s.File == d.File) is { } s) Apply(s, d);
+        return batch.All(s => s.Described);
     }
 
     private static void Apply(Screen s, AiScreen d)

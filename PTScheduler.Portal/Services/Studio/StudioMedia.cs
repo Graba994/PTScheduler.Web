@@ -184,10 +184,28 @@ public partial class StudioMedia(
         }
     }
 
-    internal static string ElevenLabsError(int status, string body, string permission) =>
-        body.Contains("api_key_id_used_as_api_key") ? "Zapisany jest identyfikator klucza ElevenLabs zamiast samego klucza (prawdziwy zaczyna się od „sk_”)."
-        : status is 401 or 403 || body.Contains("permission") ? $"ElevenLabs odrzucił klucz — sprawdź, czy ma uprawnienie „{permission}”."
-        : $"ElevenLabs odpowiedział {status}.";
+    public static string ElevenLabsError(int status, string body, string permission)
+    {
+        if (body.Contains("api_key_id_used_as_api_key")) return "Zapisany jest identyfikator klucza ElevenLabs zamiast samego klucza (prawdziwy zaczyna się od „sk_”).";
+        if (MissingPermission().Match(body) is { Success: true } m)
+            return $"Klucz ElevenLabs nie ma uprawnienia „{PermissionName(m.Groups[1].Value)}”. Włącz je w ElevenLabs → Developers → API Keys → edycja klucza "
+                 + "(dla Studia: Text to Speech, Voices: Read, Sound Effects, Music Generation).";
+        if (status is 401 or 403 || body.Contains("permission")) return $"ElevenLabs odrzucił klucz — sprawdź, czy ma uprawnienie „{permission}”.";
+        if (status == 429) return "ElevenLabs: wyczerpany limit albo za dużo zapytań naraz — sprawdź plan konta.";
+        return $"ElevenLabs odpowiedział {status}.";
+    }
+
+    private static string PermissionName(string code) => code switch
+    {
+        "text_to_speech" => "Text to Speech",
+        "voices_read" => "Voices: Read",
+        "sound_generation" => "Sound Effects",
+        "music_generation" => "Music Generation",
+        _ => code,
+    };
+
+    [GeneratedRegex(@"missing the permission (\w+)")]
+    private static partial Regex MissingPermission();
 
     // ── Biblioteka dźwięków ───────────────────────────────────────────
 

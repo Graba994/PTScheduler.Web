@@ -3,6 +3,25 @@
 // credentials: {azureKey, azureRegion, elevenLabsKey}
 // Zwraca {audio: Buffer (mp3), words: [{text,startMs,endMs}], durationMs}
 
+const PERMISSIONS = {
+  text_to_speech: "Text to Speech",
+  voices_read: "Voices: Read",
+  sound_generation: "Sound Effects",
+  music_generation: "Music Generation",
+};
+
+/** Czytelny komunikat zamiast surowej odpowiedzi ElevenLabs (np. brak uprawnienia klucza). */
+export function elevenLabsError(status, body) {
+  if (body.includes("api_key_id_used_as_api_key"))
+    return "W Studiu jest zapisany identyfikator klucza ElevenLabs zamiast samego klucza (prawdziwy zaczyna się od sk_).";
+  const missing = /missing the permission (\w+)/.exec(body)?.[1];
+  if (missing)
+    return `Klucz ElevenLabs nie ma uprawnienia „${PERMISSIONS[missing] ?? missing}”. Włącz je w ElevenLabs → Developers → API Keys → edycja klucza (dla Studia: Text to Speech, Voices: Read, Sound Effects, Music Generation).`;
+  if (status === 401) return "ElevenLabs odrzucił klucz — sprawdź, czy jest aktualny (Studio reklam → Głos i dźwięk).";
+  if (status === 429) return "ElevenLabs: wyczerpany limit znaków albo za dużo zapytań naraz — sprawdź plan konta.";
+  return `ElevenLabs ${status}: ${body.slice(0, 200)}`;
+}
+
 const xml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 export async function synthesize(voice, credentials, text) {
@@ -62,11 +81,7 @@ async function elevenLabs(voice, { elevenLabsKey } = {}, text) {
     headers: { "xi-api-key": elevenLabsKey, "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    const body = await res.text();
-    if (body.includes("api_key_id_used_as_api_key")) throw new Error("W Ustawieniach jest ID klucza ElevenLabs zamiast samego klucza (prawdziwy zaczyna się od sk_).");
-    throw new Error(`ElevenLabs ${res.status}: ${body.slice(0, 300)}`);
-  }
+  if (!res.ok) throw Object.assign(new Error(elevenLabsError(res.status, await res.text())), { status: 400 });
   const data = await res.json();
   const audio = Buffer.from(data.audio_base64, "base64");
   const a = data.alignment ?? data.normalized_alignment;
