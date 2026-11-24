@@ -1,0 +1,453 @@
+@page "/panel/studio/film/{Id:int}"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@using System.Text.Json
+@using System.Text.Json.Nodes
+@using PTScheduler.Portal.Services.Studio
+@inject StudioVideos Videos
+@inject StudioJobs Jobs
+@inject AiService AiSvc
+@inject NavigationManager Nav
+@implements IDisposable
+@rendermode InteractiveServer
+
+@* Film reklamowy 9:16: scenariusz (edycja i ujęcia), akceptacja tekstu → głos → render → kontrola klatek → akceptacja wideo → pobranie.
+   Logika: StudioVideos + zadania kolejki (write, voice, render, qa). *@
+
+<PageTitle>Film 9:16 — Studio reklam</PageTitle>
+
+<div class="mb-2"><a href="/panel/studio" class="small"><i class="bi bi-arrow-left me-1"></i>Studio reklam</a></div>
+
+@if (_v is null)
+{
+    <div class="pp-card"><div class="pp-empty"><i class="bi bi-film"></i><div class="pp-empty-title">Nie ma takiego filmu</div></div></div>
+}
+else
+{
+    <div class="fm-head">
+        <div class="min-w-0">
+            <h4 class="fw-bold mb-1 text-break">@(string.IsNullOrWhiteSpace(_v.Title) ? "Nowa reklama" : _v.Title)</h4>
+            <div class="small text-muted">
+                Film 9:16@(_v.Manual ? " · ręcznie" : "")@(_v.Garmin ? " · z Garminem" : "") · @InstagramRules.ToWarsaw(_v.CreatedAt).ToString("dd.MM.yyyy HH:mm")
+                @if (_v.VideoSeconds is { } sec) { <span> · @sec.ToString("0") s</span> }
+            </div>
+        </div>
+        <span class="pp-chip pp-tone-@Tone">@if (Working) { <span class="spinner-border spinner-border-sm me-1" style="width:.7rem;height:.7rem"></span> }@StatusLabel</span>
+    </div>
+
+    <ol class="fm-steps" aria-label="Etapy">
+        @foreach (var (key, label) in Steps)
+        {
+            <li class="fm-step fm-@StepState(key)">@label</li>
+        }
+    </ol>
+
+    @if (_flash is not null)
+    {
+        <div class="alert @(_flashOk ? "alert-success" : "alert-danger") py-2 small d-flex align-items-center gap-2" role="status">
+            <span>@_flash</span><button type="button" class="btn-close ms-auto" aria-label="Zamknij" @onclick="() => _flash = null"></button>
+        </div>
+    }
+
+    @if (_v.Status == StudioVideoStatus.Failed)
+    {
+        <div class="alert alert-danger small">
+            <div class="fw-semibold mb-1"><i class="bi bi-exclamation-triangle me-1"></i>Etap się nie udał</div>
+            <div class="mb-2">@_v.LastError</div>
+            <button class="btn btn-outline-danger btn-sm" @onclick="RetryAsync" disabled="@_busy"><i class="bi bi-arrow-repeat me-1"></i>Ponów od miejsca, w którym stanęło</button>
+        </div>
+    }
+    else if (Working)
+    {
+        <div class="pp-card mb-3 small">
+            <span class="spinner-border spinner-border-sm me-2"></span>@WorkingText
+            @if (_job is { Attempts: > 0, Error: { } err, Status: StudioJobStatus.Pending }) { <div class="text-muted mt-1">Ponowię za chwilę: @err</div> }
+            <div class="text-muted mt-1">Strona odświeża się sama — możesz ją zamknąć, dostaniesz e-mail.</div>
+        </div>
+    }
+
+    @* ── Wideo ── *@
+    @if (_hasVideo && _v.Status is StudioVideoStatus.VideoReview or StudioVideoStatus.ReadyToPublish or StudioVideoStatus.Published or StudioVideoStatus.Failed or StudioVideoStatus.ScriptReview)
+    {
+        <div class="fm-video-wrap">
+            <video class="fm-video" controls playsinline preload="metadata" src="/api/panel/studio/film/@_v.Id/video.mp4?v=@(_v.RenderedAt?.Ticks ?? 0)"></video>
+            <div class="fm-video-side">
+                @if (_qa is { } qa)
+                {
+                    <PanelCard Title="Kontrola klatek (AI)" Icon="bi-eye" IconClass="@(qa.Issues.Count == 0 ? "pp-tone-ok" : "pp-tone-warn")">
+                        <p class="small mb-2">@qa.Summary</p>
+                        @if (qa.Issues.Count > 0)
+                        {
+                            <ul class="small ps-3 mb-0">
+                                @foreach (var i in qa.Issues)
+                                {
+                                    <li><b>Scena @(i.Scene + 1)</b> (@i.Severity): @i.Problem <span class="text-muted">→ @i.Fix</span></li>
+                                }
+                            </ul>
+                        }
+                    </PanelCard>
+                }
+                @if (_v.Status == StudioVideoStatus.VideoReview)
+                {
+                    <PanelCard Title="Akceptacja wideo" Icon="bi-check2-circle" IconClass="pp-tone-info">
+                        <button class="btn btn-success btn-sm w-100 mb-2" @onclick="ApproveVideoAsync" disabled="@_busy"><i class="bi bi-check-lg me-1"></i>Akceptuję wideo</button>
+                        <textarea class="form-control form-control-sm mb-2" rows="2" placeholder="Co poprawić? np. „scena 3 za długa”, „mocniejszy hak” — AI zmieni tylko to"
+                                  @bind="_comment" @bind:event="oninput" aria-label="Uwaga do poprawki"></textarea>
+                        <button class="btn btn-outline-primary btn-sm w-100" @onclick="RewriteAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_comment) || _aiOff is not null)"><i class="bi bi-magic me-1"></i>Popraw scenariusz z AI</button>
+                        <div class="small text-muted mt-2">Animację (ujęcia) możesz też poprawić sam niżej i wyrenderować ponownie — bez nowego głosu.</div>
+                    </PanelCard>
+                }
+                @if (_v.Status is StudioVideoStatus.ReadyToPublish or StudioVideoStatus.Published)
+                {
+                    <PanelCard Title="Do publikacji" Icon="bi-box-arrow-up" IconClass="pp-tone-ok" Subtitle="publikujesz sam — w aplikacji Instagrama, TikToka albo YouTube">
+                        <a class="btn btn-primary btn-sm w-100 mb-2" href="/api/panel/studio/film/@_v.Id/video.mp4?download=true" download><i class="bi bi-download me-1"></i>Pobierz film (mp4)</a>
+                        <a class="btn btn-outline-primary btn-sm w-100 mb-2" href="/api/panel/studio/film/@_v.Id/opis.txt" download><i class="bi bi-file-text me-1"></i>Pobierz opis (opis.txt)</a>
+                        @if (_v.Status == StudioVideoStatus.ReadyToPublish)
+                        {
+                            <button class="btn btn-outline-success btn-sm w-100" @onclick="MarkPublishedAsync"><i class="bi bi-send-check me-1"></i>Opublikowane — zaznacz</button>
+                        }
+                        else
+                        {
+                            <div class="small text-success"><i class="bi bi-send-check me-1"></i>Opublikowane @(_v.PublishedAt is { } p ? InstagramRules.ToWarsaw(p).ToString("dd.MM.yyyy") : "")</div>
+                        }
+                    </PanelCard>
+                }
+            </div>
+        </div>
+    }
+
+    @* ── Scenariusz ── *@
+    @if (_v.Scenes.Count > 0)
+    {
+        <PanelCard Title="Scenariusz" Icon="bi-card-text" IconClass="pp-tone-info"
+                   Subtitle="@($"{_scenes.Count} scen · {Words} słów lektora · ok. {Seconds} s")">
+            @if (_v.Status == StudioVideoStatus.ScriptReview)
+            {
+                <div class="fm-approve">
+                    <div class="small mb-2">Przeczytaj, popraw ręcznie albo poproś AI o zmianę. Po akceptacji Hantelek nagra głos i powstanie film (ok. 6–8 min).</div>
+                    <div class="d-flex flex-wrap gap-2 mb-2">
+                        <button class="btn btn-success btn-sm" @onclick="ApproveScriptAsync" disabled="@_busy"><i class="bi bi-check-lg me-1"></i>Akceptuję tekst — nagraj i wyrenderuj</button>
+                    </div>
+                    <div class="input-group input-group-sm">
+                        <input class="form-control" placeholder="Co zmienić? np. „hak o płatnościach”, „więcej humoru w scenie 2”" @bind="_comment" @bind:event="oninput" aria-label="Uwaga do poprawki" />
+                        <button class="btn btn-outline-primary" @onclick="RewriteAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_comment) || _aiOff is not null)"><i class="bi bi-magic me-1"></i>Przepisz z AI</button>
+                    </div>
+                    @if (_voiceOff is not null) { <div class="small text-warning mt-2"><i class="bi bi-mic-mute me-1"></i>@_voiceOff</div> }
+                </div>
+            }
+
+            <div class="row g-2 mb-3">
+                <div class="col-12">
+                    <label class="form-label small fw-semibold mb-1" for="fm-title">Tytuł</label>
+                    <input id="fm-title" class="form-control form-control-sm" @bind="_title" disabled="@(!Editable)" maxlength="100" />
+                </div>
+                <div class="col-12 col-md-7">
+                    <label class="form-label small fw-semibold mb-1" for="fm-desc">Opis (z hashtagami)</label>
+                    <textarea id="fm-desc" class="form-control form-control-sm" rows="3" @bind="_description" disabled="@(!Editable)"></textarea>
+                </div>
+                <div class="col-12 col-md-5">
+                    <label class="form-label small fw-semibold mb-1" for="fm-pin">Komentarz do przypięcia</label>
+                    <textarea id="fm-pin" class="form-control form-control-sm" rows="3" @bind="_pinned" disabled="@(!Editable)"></textarea>
+                </div>
+            </div>
+            @if (_hooks.Count > 0)
+            {
+                <details class="mb-3">
+                    <summary class="small fw-semibold">Inne pomysły na otwarcie (@_hooks.Count)</summary>
+                    <ul class="small ps-3 mb-0 mt-1">@foreach (var h in _hooks) { <li>@h</li> }</ul>
+                </details>
+            }
+
+            @foreach (var s in _scenes)
+            {
+                var scene = s;
+                <div class="fm-scene" @key="scene.Id">
+                    <div class="fm-scene-head">
+                        <span class="fm-scene-no">@(scene.Order + 1)</span>
+                        <input class="form-control form-control-sm fm-icon" @bind="scene.Icon" disabled="@(!Editable)" aria-label="Ikona sceny" />
+                        <input class="form-control form-control-sm" @bind="scene.Headline" disabled="@(!Editable)" aria-label="Etykieta sceny" />
+                        <span class="pp-chip pp-tone-muted text-nowrap">@scene.Template</span>
+                        @if (scene.NeedsVoice && _hasVideo) { <span class="pp-chip pp-tone-warn text-nowrap" title="Tekst zmienił się od nagrania">nowy głos</span> }
+                    </div>
+                    <textarea class="form-control form-control-sm mt-2" rows="2" @bind="scene.Text" @bind:event="oninput" disabled="@(!Editable)" aria-label="Tekst lektora"></textarea>
+                    <div class="small text-muted mt-1">Lektor · @WordCount(scene.Text) słów@(scene.SpeechText.Length > 0 && scene.SpeechText != scene.Text ? $" · czyta: „{scene.SpeechText}”" : "")</div>
+                    <details class="mt-2">
+                        <summary class="small">Ujęcie (animacja) — @Summary(scene)</summary>
+                        <textarea class="form-control form-control-sm font-monospace mt-1 fm-story" rows="7" @bind="scene.StoryJson" disabled="@(!Editable)" aria-label="Ujęcie w JSON" spellcheck="false"></textarea>
+                        <div class="small text-muted mt-1">Szablony: @string.Join(", ", AdRules.Templates). *gwiazdki* = słowa wyróżnione kolorem.</div>
+                    </details>
+                </div>
+            }
+
+            @if (Editable)
+            {
+                <div class="d-flex flex-wrap gap-2 mt-3">
+                    <button class="btn btn-outline-primary btn-sm" @onclick="() => SaveAsync(false)" disabled="@_busy"><i class="bi bi-save me-1"></i>Zapisz zmiany</button>
+                    @if (_v.Status is StudioVideoStatus.VideoReview or StudioVideoStatus.ReadyToPublish or StudioVideoStatus.Failed && _hasVideo)
+                    {
+                        <button class="btn btn-primary btn-sm" @onclick="() => SaveAsync(true)" disabled="@_busy"><i class="bi bi-film me-1"></i>Zapisz i wyrenderuj ponownie</button>
+                        <span class="small text-muted align-self-center">Zmienione teksty lektora dostaną nowy głos, reszta zostaje.</span>
+                    }
+                </div>
+            }
+        </PanelCard>
+    }
+
+    <div class="d-flex justify-content-end mt-3">
+        @if (_confirmDelete)
+        {
+            <span class="small me-2 align-self-center">Usunąć film razem z plikami?</span>
+            <button class="btn btn-danger btn-sm me-1" @onclick="DeleteAsync">Usuń</button>
+            <button class="btn btn-link btn-sm" @onclick="() => _confirmDelete = false">Nie</button>
+        }
+        else
+        {
+            <button class="btn btn-link btn-sm text-danger" @onclick="() => _confirmDelete = true" disabled="@Working"><i class="bi bi-trash3 me-1"></i>Usuń film</button>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private sealed class EditScene
+    {
+        public int Id { get; init; }
+        public int Order { get; init; }
+        public string Headline { get; set; } = "";
+        public string Icon { get; set; } = "";
+        public string Text { get; set; } = "";
+        public string SpeechText { get; init; } = "";
+        public string StoryJson { get; set; } = "{}";
+        public bool NeedsVoice { get; init; }
+        public string Template => Story()?["template"]?.ToString() ?? "?";
+        public JsonObject? Story() { try { return JsonNode.Parse(StoryJson) as JsonObject; } catch (JsonException) { return null; } }
+    }
+
+    private sealed record QaIssue(int Scene, string Severity, string Problem, string Fix);
+    private sealed record Qa(bool Ok, string Summary, List<QaIssue> Issues);
+
+    private StudioVideo? _v;
+    private List<EditScene> _scenes = [];
+    private List<string> _hooks = [];
+    private string _title = "", _description = "", _pinned = "", _comment = "";
+    private string? _flash, _aiOff, _voiceOff;
+    private bool _flashOk, _busy, _hasVideo, _confirmDelete;
+    private Qa? _qa;
+    private StudioJob? _job;
+    private Timer? _timer;
+
+    private static readonly (string Key, string Label)[] Steps =
+        [("write", "Scenariusz"), ("script", "Akceptacja tekstu"), ("voice", "Głos"), ("render", "Render"), ("video", "Akceptacja wideo"), ("ready", "Do publikacji")];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _aiOff = await AiSvc.UnavailableReasonAsync();
+        await LoadAsync(full: true);
+        _timer = new Timer(_ => InvokeAsync(TickAsync), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+    }
+
+    private async Task LoadAsync(bool full)
+    {
+        _v = await Videos.GetAsync(Id);
+        if (_v is null) return;
+        _hasVideo = Videos.HasVideo(_v);
+        _voiceOff = _v.Status == StudioVideoStatus.ScriptReview ? await ScopedVoiceOffAsync() : null;
+        _job = Working ? await Jobs.LastAsync(_v.Status switch { StudioVideoStatus.Writing => "write", StudioVideoStatus.Voicing => "voice", _ => _v.QaJson is null && _v.RenderedAt is not null ? "qa" : "render" }, _v.Id) : null;
+        _qa = ParseQa(_v.QaJson);
+        if (!full) return;
+        (_title, _description, _pinned) = (_v.Title, _v.Description, _v.PinnedComment);
+        _hooks = StudioVideos.List(_v.HooksJson);
+        _scenes = _v.Scenes.OrderBy(s => s.Order).Select(s => new EditScene
+        {
+            Id = s.Id, Order = s.Order, Headline = s.Headline, Icon = s.Icon, Text = s.Text, SpeechText = s.SpeechText, NeedsVoice = s.NeedsVoice,
+            StoryJson = Pretty(s.StoryJson),
+        }).ToList();
+    }
+
+    [Inject] private StudioMedia Media { get; set; } = default!;
+    private Task<string?> ScopedVoiceOffAsync() => Media.VoiceUnavailableAsync();
+
+    private async Task TickAsync()
+    {
+        if (_v is null || !Working) return;
+        var before = _v.Status;
+        await LoadAsync(full: false);
+        if (_v is not null && _v.Status != before) await LoadAsync(full: true); // nowy etap = nowy scenariusz albo film
+        StateHasChanged();
+    }
+
+    private bool Working => _v?.Status is StudioVideoStatus.Writing or StudioVideoStatus.Voicing or StudioVideoStatus.Rendering;
+    private bool Editable => _v?.Status is StudioVideoStatus.ScriptReview or StudioVideoStatus.VideoReview or StudioVideoStatus.ReadyToPublish or StudioVideoStatus.Failed;
+    private int Words => AdRules.Length(_scenes.Select(s => s.Text)).Words;
+    private double Seconds => AdRules.Length(_scenes.Select(s => s.Text)).Seconds;
+    private static int WordCount(string t) => AdRules.Length([t]).Words;
+
+    private string StatusLabel => _v?.Status switch
+    {
+        StudioVideoStatus.Writing => "AI pisze",
+        StudioVideoStatus.ScriptReview => "Czeka na akceptację tekstu",
+        StudioVideoStatus.Voicing => "Nagrywam głos",
+        StudioVideoStatus.Rendering => _v.RenderedAt is not null && _v.QaJson is null && _job?.Type == "qa" ? "Kontrola klatek" : "Renderuję",
+        StudioVideoStatus.VideoReview => "Czeka na akceptację wideo",
+        StudioVideoStatus.ReadyToPublish => "Gotowy do publikacji",
+        StudioVideoStatus.Published => "Opublikowany",
+        StudioVideoStatus.Rejected => "Odrzucony",
+        StudioVideoStatus.Failed => "Błąd",
+        _ => "",
+    };
+
+    private string Tone => _v?.Status switch
+    {
+        StudioVideoStatus.Failed => "danger",
+        StudioVideoStatus.ScriptReview or StudioVideoStatus.VideoReview => "warn",
+        StudioVideoStatus.ReadyToPublish or StudioVideoStatus.Published => "ok",
+        _ => "info",
+    };
+
+    private string WorkingText => _v?.Status switch
+    {
+        StudioVideoStatus.Writing => "AI pisze scenariusz, sprawdza fakty i redaguje polszczyznę — zwykle 2–4 minuty.",
+        StudioVideoStatus.Voicing => "Hantelek nagrywa głos — kilkadziesiąt sekund.",
+        _ => _job?.Type == "qa" ? "AI ogląda klatki filmu i szuka usterek — ok. minuty." : "Renderer składa film — około 5–8 minut (jeden film naraz).",
+    };
+
+    private string StepState(string key)
+    {
+        var order = new[] { "write", "script", "voice", "render", "video", "ready" };
+        var current = _v?.Status switch
+        {
+            StudioVideoStatus.Writing => "write",
+            StudioVideoStatus.ScriptReview => "script",
+            StudioVideoStatus.Voicing => "voice",
+            StudioVideoStatus.Rendering => "render",
+            StudioVideoStatus.VideoReview => "video",
+            StudioVideoStatus.ReadyToPublish or StudioVideoStatus.Published => "done",
+            _ => "",
+        };
+        if (current == "done") return "done";
+        if (current == "") return "todo";
+        var c = Array.IndexOf(order, current);
+        var k = Array.IndexOf(order, key);
+        return k < c ? "done" : k == c ? "current" : "todo";
+    }
+
+    private static string Summary(EditScene s)
+    {
+        var o = s.Story();
+        if (o is null) return "błędny JSON";
+        string Get(string k) => o[k] is JsonValue v && v.TryGetValue<string>(out var x) ? x : "";
+        return s.Template switch
+        {
+            "ad-screen" => $"zrzut {Get("screen")}",
+            "ad-hook" => $"hak „{Get("big")}”",
+            "ad-mascot" => $"Hantelek: „{Get("bubble")}”",
+            "ad-assistant" => "czat z asystentem",
+            "ad-compare" => "przed / po",
+            "ad-benefits" => "lista korzyści",
+            "ad-cta" => $"finał „{Get("button")}”",
+            _ => s.Template,
+        };
+    }
+
+    private static string Pretty(string json)
+    {
+        try { return JsonNode.Parse(json)?.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }) ?? json; }
+        catch (JsonException) { return json; }
+    }
+
+    private static Qa? ParseQa(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            var o = JsonNode.Parse(json) as JsonObject;
+            if (o is null) return null;
+            var issues = (o["issues"] as JsonArray ?? []).OfType<JsonObject>().Select(i => new QaIssue(
+                i["scene"] is JsonValue sv && sv.TryGetValue<int>(out var n) ? n : 0,
+                AdRules.Str(i["severity"]), AdRules.Str(i["problem"]), AdRules.Str(i["fix"]))).ToList();
+            return new Qa(o["ok"] is JsonValue ov && ov.TryGetValue<bool>(out var ok) && ok, AdRules.Str(o["summary"]), issues);
+        }
+        catch (JsonException) { return null; }
+    }
+
+    private void Flash(string? error, string okText)
+    {
+        (_flash, _flashOk) = error is null ? (okText, true) : (error, false);
+    }
+
+    private async Task<bool> SaveCoreAsync()
+    {
+        var error = await Videos.SaveScenesAsync(Id, _title, _description, _pinned,
+            _scenes.Select(s => new StudioVideos.SceneEdit(s.Id, s.Headline, s.Icon, s.Text, s.StoryJson)).ToList());
+        if (error is not null) { Flash(error, ""); return false; }
+        return true;
+    }
+
+    private async Task SaveAsync(bool rerender)
+    {
+        _busy = true;
+        try
+        {
+            if (!await SaveCoreAsync()) return;
+            if (rerender) Flash(await Videos.RerenderAsync(Id), "Zapisano — renderuję ponownie (zmienione teksty dostaną nowy głos).");
+            else Flash(null, "Zapisano scenariusz.");
+            await LoadAsync(full: true);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task ApproveScriptAsync()
+    {
+        _busy = true;
+        try
+        {
+            if (!await SaveCoreAsync()) return;
+            Flash(await Videos.ApproveScriptAsync(Id), "Zaakceptowano — Hantelek nagrywa głos, potem render (ok. 6–8 min).");
+            await LoadAsync(full: true);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task RewriteAsync()
+    {
+        _busy = true;
+        try
+        {
+            if (_v?.Status == StudioVideoStatus.ScriptReview && !await SaveCoreAsync()) return;
+            var error = await Videos.RewriteAsync(Id, _comment);
+            if (error is null) _comment = "";
+            Flash(error, "AI poprawia scenariusz — zmieni tylko to, czego dotyczy uwaga.");
+            await LoadAsync(full: true);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task ApproveVideoAsync()
+    {
+        Flash(await Videos.ApproveVideoAsync(Id), "Wideo zaakceptowane — pobierz film i opis, a potem opublikuj w aplikacji.");
+        await LoadAsync(full: true);
+    }
+
+    private async Task MarkPublishedAsync()
+    {
+        Flash(await Videos.MarkPublishedAsync(Id), "Zaznaczono jako opublikowany.");
+        await LoadAsync(full: true);
+    }
+
+    private async Task RetryAsync()
+    {
+        _busy = true;
+        Flash(await Videos.RetryAsync(Id), "Ponawiam.");
+        await LoadAsync(full: true);
+        _busy = false;
+    }
+
+    private async Task DeleteAsync()
+    {
+        await Videos.DeleteAsync(Id);
+        Nav.NavigateTo("/panel/studio");
+    }
+
+    public void Dispose() => _timer?.Dispose();
+}

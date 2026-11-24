@@ -126,6 +126,12 @@ builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.StudioJobs>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.IStudioJobHandler, PTScheduler.Portal.Services.Studio.SoundsJobHandler>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.StudioScreens>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.IStudioJobHandler, PTScheduler.Portal.Services.Studio.ScreensJobHandler>();
+builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.AdWriter>();
+builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.StudioVideos>();
+builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.IStudioJobHandler, PTScheduler.Portal.Services.Studio.WriteVideoJobHandler>();
+builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.IStudioJobHandler, PTScheduler.Portal.Services.Studio.VoiceJobHandler>();
+builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.IStudioJobHandler, PTScheduler.Portal.Services.Studio.RenderJobHandler>();
+builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.IStudioJobHandler, PTScheduler.Portal.Services.Studio.QaJobHandler>();
 builder.Services.AddHostedService<PTScheduler.Portal.Services.Studio.StudioJobsBackgroundService>();
 builder.Services.AddHostedService<SuspensionReportBackgroundService>();
 builder.Services.AddScoped<BackupService>();
@@ -747,6 +753,17 @@ app.MapGet("/api/panel/studio/{id:int}/reklamy.csv", async (int id, PTScheduler.
 app.MapGet("/api/panel/studio/screens/{file}", (string file, PTScheduler.Portal.Services.Studio.StudioScreens screens) =>
     screens.ThumbPath(file) is { } path ? Results.File(path, "image/jpeg") : Results.NotFound())
     .RequireAuthorization(p => p.RequireRole("Admin"));
+
+// Studio reklam: gotowy film (odtwarzacz w panelu i pobieranie) oraz opis do ręcznej publikacji.
+app.MapGet("/api/panel/studio/film/{id:int}/video.mp4", async (int id, bool? download, PTScheduler.Portal.Services.Studio.StudioVideos videos) =>
+    await videos.GetAsync(id) is { } v && videos.HasVideo(v)
+        ? Results.File(videos.VideoFile(v), "video/mp4", download == true ? $"{v.Slug}.mp4" : null, enableRangeProcessing: true)
+        : Results.NotFound()).RequireAuthorization(p => p.RequireRole("Admin"));
+app.MapGet("/api/panel/studio/film/{id:int}/opis.txt", async (int id, PTScheduler.Portal.Services.Studio.StudioVideos videos, PTScheduler.Portal.Services.Studio.AdWriter writer) =>
+    await videos.GetAsync(id) is { } v
+        ? Results.File(System.Text.Encoding.UTF8.GetPreamble().Concat(System.Text.Encoding.UTF8.GetBytes(await videos.DescriptionTxtAsync(v, await writer.WebsiteAsync()))).ToArray(),
+            "text/plain; charset=utf-8", $"{v.Slug}-opis.txt")
+        : Results.NotFound()).RequireAuthorization(p => p.RequireRole("Admin"));
 
 // ── Garmin Connect (plan Starter) ──
 // Powrót z logowania do Garmina → z powrotem do aplikacji studia (adres studia + zapamiętana ścieżka).

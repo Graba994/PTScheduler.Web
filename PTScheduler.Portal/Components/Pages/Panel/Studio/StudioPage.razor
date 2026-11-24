@@ -4,7 +4,9 @@
 @using PTScheduler.Portal.Services.Studio
 @using R = PTScheduler.Portal.Services.Studio.StudioRules
 @inject StudioService Studio
+@inject StudioVideos Videos
 @inject AiService AiSvc
+@inject NavigationManager Nav
 @implements IDisposable
 @rendermode InteractiveServer
 
@@ -13,8 +15,78 @@
 
 <PageTitle>Studio reklam — Hantly Portal</PageTitle>
 
-<PanelHeader Title="Studio reklam" Icon="bi-megaphone" IconClass="pp-icon-pink"
-             Subtitle="Teksty reklam i posty z prawdziwej wiedzy o Hantly — tylko prawdziwe funkcje i ceny. AI przygotowuje, Ty decydujesz, co i kiedy idzie do ludzi." />
+<div class="st-top">
+    <PanelHeader Title="Studio reklam" Icon="bi-megaphone" IconClass="pp-icon-pink"
+                 Subtitle="Filmy, teksty reklam i posty z prawdziwej wiedzy o Hantly — tylko prawdziwe funkcje i ceny. AI przygotowuje, Ty decydujesz, co i kiedy idzie do ludzi." />
+    <button type="button" class="btn btn-outline-secondary btn-sm st-gear" @onclick="() => _settingsOpen = true" aria-label="Ustawienia Studia" title="Ustawienia Studia (głos, klucze, model AI, serwer)">
+        <i class="bi bi-gear"></i><span class="d-none d-sm-inline ms-1">Ustawienia</span>
+    </button>
+</div>
+
+@if (_settingsOpen)
+{
+    <div class="st-backdrop" @onclick="() => _settingsOpen = false"></div>
+    <aside class="st-drawer" role="dialog" aria-label="Ustawienia Studia">
+        <div class="st-drawer-head">
+            <h5 class="fw-bold mb-0"><i class="bi bi-gear me-2"></i>Ustawienia Studia</h5>
+            <button type="button" class="btn-close" aria-label="Zamknij" @onclick="() => _settingsOpen = false"></button>
+        </div>
+        <div class="small text-muted mb-3">Ustawiasz raz — potem wszystko działa samo.</div>
+
+        <PanelCard Title="Publikacja i model AI" Icon="bi-sliders">
+            <div class="small fw-semibold mb-1">Co z gotowymi postami</div>
+            <div class="pp-seg flex-wrap mb-1" role="group" aria-label="Publikacja">
+                <button type="button" class="@(_opt.PublishMode == "manual" ? "active" : "")" @onclick='() => SetModeAsync("manual")'><i class="bi bi-hand-index"></i>Ręcznie</button>
+                <button type="button" class="@(_opt.PublishMode == "auto" ? "active" : "")" @onclick='() => SetModeAsync("auto")'><i class="bi bi-lightning-charge"></i>Automatycznie</button>
+            </div>
+            <div class="small text-muted mb-3">
+                @(_opt.PublishMode == "auto"
+                    ? "Gotowy post od AI sam trafia do planu Instagrama na najbliższy wolny termin i opublikuje się o tej godzinie. Filmy i teksty reklam płatnych zawsze publikujesz sam."
+                    : "Domyślnie: wszystko czeka na Ciebie. Sam przenosisz post do Instagrama, filmy pobierasz i publikujesz, reklamy kopiujesz albo pobierasz jako CSV.")
+            </div>
+            <label class="form-label small fw-semibold" for="st-model">Model AI dla Studia</label>
+            <input id="st-model" class="form-control form-control-sm mb-1" @bind="_model" placeholder="pusty = ten z ustawień AI" />
+            <div class="small text-muted mb-2">Nazwa modelu z OpenRoutera. Do filmów potrzebny model, który widzi obrazy (opis zrzutów, kontrola klatek).</div>
+            <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" id="st-gdef" checked="@_opt.GarminDefault" @onchange="e => _gdef = e.Value is true" />
+                <label class="form-check-label small" for="st-gdef">Garmin domyślnie zaznaczony przy nowych materiałach</label>
+            </div>
+            <button class="btn btn-outline-primary btn-sm" @onclick="SaveOptionsAsync"><i class="bi bi-save me-1"></i>Zapisz</button>
+        </PanelCard>
+
+        <StudioVoiceCard Flash="FlashAsync" />
+
+        <PanelCard Title="Serwer pod filmy" Icon="bi-cpu" IconClass="@($"pp-tone-{_server?.Tone ?? "muted"}")" Subtitle="ocena z ostatniego pomiaru serwera">
+            @if (_server is { } sv)
+            {
+                <div class="fw-semibold small mb-1">@sv.Verdict</div>
+                <div class="st-counts mb-2">
+                    @if (sv.Cores is { } c) { <span><b>@c.ToString("0")</b> rdzeni</span> }
+                    @if (sv.MemFreeGb is { } mf) { <span><b>@mf.ToString("0.0")</b> z @(sv.MemTotalGb?.ToString("0") ?? "?") GB RAM wolne</span> }
+                    @if (sv.DiskFreeGb is { } df) { <span><b>@df.ToString("0")</b> GB dysku wolne</span> }
+                </div>
+                <ul class="small ps-3 mb-1">@foreach (var n in sv.Notes) { <li>@n</li> }</ul>
+                @if (sv.At is { } at) { <div class="small text-muted">Pomiar: @InstagramRules.ToWarsaw(at).ToString("dd.MM HH:mm") · <a href="/panel/resources">Serwer i zasoby</a></div> }
+            }
+        </PanelCard>
+
+        <PanelCard Title="Miejsce na filmy" Icon="bi-hdd-stack" IconClass="@($"pp-tone-{_storage?.Tone ?? "muted"}")" Subtitle="filmy, głos i zrzuty ekranów">
+            @if (_storage is { } st)
+            {
+                <div class="fw-semibold small mb-1">@st.Message</div>
+                @if (st.FreeGb is { } free)
+                {
+                    <div class="st-counts mb-2"><span><b>@free.ToString("N0")</b> z @(st.TotalGb?.ToString("N0") ?? "?") GB wolne</span></div>
+                }
+                @if (st.Tone != "ok")
+                {
+                    <div class="small text-muted">Na serwerze (raz):</div>
+                    <code class="st-code">SKIP_BUILD=1 STUDIO_DIR=/mnt/user/hantly-studio bash /mnt/user/appdata/hantly-repo/deploy/update-portal.sh</code>
+                }
+            }
+        </PanelCard>
+    </aside>
+}
 
 @if (_flash is not null)
 {
@@ -31,7 +103,7 @@
                 @foreach (var (kind, label, icon, text) in Kinds)
                 {
                     var k = kind;
-                    <button type="button" class="ig-mode @(_kind == k ? "on" : "")" disabled="@(k == StudioKind.Video)" aria-pressed="@(_kind == k ? "true" : "false")" @onclick="() => _kind = k">
+                    <button type="button" class="ig-mode @(_kind == k ? "on" : "")" aria-pressed="@(_kind == k ? "true" : "false")" @onclick="() => _kind = k">
                         <i class="bi @icon"></i><b>@label</b><span>@text</span>
                     </button>
                 }
@@ -88,12 +160,25 @@
                         <div class="st-item-title">@(p.Kind == StudioKind.Ads ? "Teksty reklam" : p.Kind == StudioKind.Post ? "Post 4:5" : "Film 9:16") @(p.Manual ? "· ręcznie" : "")@(p.Garmin ? " · z Garminem" : "")</div>
                         <div class="small text-muted text-truncate">@(string.IsNullOrWhiteSpace(p.Brief) ? "bez briefu — najmocniejsza korzyść" : p.Brief)</div>
                     </div>
-                    <span class="pp-chip pp-tone-@(p.Status switch { StudioStatus.Ready => "ok", StudioStatus.Failed => "danger", _ => "info" })">
-                        @if (p.Status == StudioStatus.Writing) { <span class="spinner-border spinner-border-sm me-1" style="width:.7rem;height:.7rem"></span> }
-                        @(p.Status switch { StudioStatus.Ready => "Gotowe", StudioStatus.Failed => "Błąd", _ => p.Attempts > 0 ? $"Ponawiam ({p.Attempts}/{StudioService.MaxAttempts})" : "AI pisze…" })
-                    </span>
-                    <span class="small text-muted text-nowrap">@InstagramRules.ToWarsaw(p.CreatedAt).ToString("dd.MM HH:mm")</span>
-                    <button class="btn btn-link btn-sm" @onclick="() => Toggle(p.Id)" aria-expanded="@(_open == p.Id ? "true" : "false")">@(_open == p.Id ? "Zwiń" : "Otwórz")</button>
+                    @if (p.Kind == StudioKind.Video)
+                    {
+                        var film = _films.GetValueOrDefault(p.Id);
+                        <span class="pp-chip pp-tone-@FilmTone(film)">
+                            @if (film?.Status is StudioVideoStatus.Writing or StudioVideoStatus.Voicing or StudioVideoStatus.Rendering) { <span class="spinner-border spinner-border-sm me-1" style="width:.7rem;height:.7rem"></span> }
+                            @FilmLabel(film)
+                        </span>
+                        <span class="small text-muted text-nowrap">@InstagramRules.ToWarsaw(p.CreatedAt).ToString("dd.MM HH:mm")</span>
+                        @if (film is not null) { <a class="btn btn-link btn-sm" href="/panel/studio/film/@film.Id">Otwórz</a> }
+                    }
+                    else
+                    {
+                        <span class="pp-chip pp-tone-@(p.Status switch { StudioStatus.Ready => "ok", StudioStatus.Failed => "danger", _ => "info" })">
+                            @if (p.Status == StudioStatus.Writing) { <span class="spinner-border spinner-border-sm me-1" style="width:.7rem;height:.7rem"></span> }
+                            @(p.Status switch { StudioStatus.Ready => "Gotowe", StudioStatus.Failed => "Błąd", _ => p.Attempts > 0 ? $"Ponawiam ({p.Attempts}/{StudioService.MaxAttempts})" : "AI pisze…" })
+                        </span>
+                        <span class="small text-muted text-nowrap">@InstagramRules.ToWarsaw(p.CreatedAt).ToString("dd.MM HH:mm")</span>
+                        <button class="btn btn-link btn-sm" @onclick="() => Toggle(p.Id)" aria-expanded="@(_open == p.Id ? "true" : "false")">@(_open == p.Id ? "Zwiń" : "Otwórz")</button>
+                    }
                 </div>
                 @if (p.Error is not null && p.Status != StudioStatus.Ready)
                 {
@@ -187,60 +272,7 @@
             }
         </PanelCard>
 
-        <PanelCard Title="Ustawienia" Icon="bi-sliders">
-            <div class="small fw-semibold mb-1">Co z gotowymi postami</div>
-            <div class="pp-seg flex-wrap mb-1" role="group" aria-label="Publikacja">
-                <button type="button" class="@(_opt.PublishMode == "manual" ? "active" : "")" @onclick='() => SetModeAsync("manual")'><i class="bi bi-hand-index"></i>Ręcznie</button>
-                <button type="button" class="@(_opt.PublishMode == "auto" ? "active" : "")" @onclick='() => SetModeAsync("auto")'><i class="bi bi-lightning-charge"></i>Automatycznie</button>
-            </div>
-            <div class="small text-muted mb-3">
-                @(_opt.PublishMode == "auto"
-                    ? "Gotowy post od AI sam trafia do planu Instagrama na najbliższy wolny termin i opublikuje się o tej godzinie. Teksty reklam płatnych zawsze wklejasz sam."
-                    : "Domyślnie: wszystko czeka na Ciebie. Sam przenosisz post do Instagrama i ustawiasz termin; reklamy kopiujesz albo pobierasz jako CSV.")
-            </div>
-            <label class="form-label small fw-semibold" for="st-model">Model AI dla Studia</label>
-            <input id="st-model" class="form-control form-control-sm mb-1" @bind="_model" placeholder="pusty = ten z ustawień AI" />
-            <div class="small text-muted mb-2">Nazwa modelu z OpenRoutera, np. mocniejszy do reklam niż do codziennych podpowiedzi.</div>
-            <div class="form-check form-switch mb-2">
-                <input class="form-check-input" type="checkbox" id="st-gdef" checked="@_opt.GarminDefault" @onchange="e => _gdef = e.Value is true" />
-                <label class="form-check-label small" for="st-gdef">Garmin domyślnie zaznaczony przy nowych materiałach</label>
-            </div>
-            <button class="btn btn-outline-primary btn-sm" @onclick="SaveOptionsAsync"><i class="bi bi-save me-1"></i>Zapisz</button>
-        </PanelCard>
-
         <StudioScreensCard Flash="FlashAsync" />
-
-        <StudioVoiceCard Flash="FlashAsync" />
-
-        <PanelCard Title="Serwer pod filmy" Icon="bi-cpu" IconClass="@($"pp-tone-{_server?.Tone ?? "muted"}")" Subtitle="ocena z ostatniego pomiaru serwera">
-            @if (_server is { } sv)
-            {
-                <div class="fw-semibold small mb-1">@sv.Verdict</div>
-                <div class="st-counts mb-2">
-                    @if (sv.Cores is { } c) { <span><b>@c.ToString("0")</b> rdzeni</span> }
-                    @if (sv.MemFreeGb is { } mf) { <span><b>@mf.ToString("0.0")</b> z @(sv.MemTotalGb?.ToString("0") ?? "?") GB RAM wolne</span> }
-                    @if (sv.DiskFreeGb is { } df) { <span><b>@df.ToString("0")</b> GB dysku wolne</span> }
-                </div>
-                <ul class="small ps-3 mb-1">@foreach (var n in sv.Notes) { <li>@n</li> }</ul>
-                @if (sv.At is { } at) { <div class="small text-muted">Pomiar: @InstagramRules.ToWarsaw(at).ToString("dd.MM HH:mm") · <a href="/panel/resources">Serwer i zasoby</a></div> }
-            }
-        </PanelCard>
-
-        <PanelCard Title="Miejsce na filmy" Icon="bi-hdd-stack" IconClass="@($"pp-tone-{_storage?.Tone ?? "muted"}")" Subtitle="filmy, głos i zrzuty ekranów">
-            @if (_storage is { } st)
-            {
-                <div class="fw-semibold small mb-1">@st.Message</div>
-                @if (st.FreeGb is { } free)
-                {
-                    <div class="st-counts mb-2"><span><b>@free.ToString("N0")</b> z @(st.TotalGb?.ToString("N0") ?? "?") GB wolne</span></div>
-                }
-                @if (st.Tone != "ok")
-                {
-                    <div class="small text-muted">Na serwerze (raz):</div>
-                    <code class="st-code">SKIP_BUILD=1 STUDIO_DIR=/mnt/user/hantly-studio bash /mnt/user/appdata/hantly-repo/deploy/update-portal.sh</code>
-                }
-            }
-        </PanelCard>
     </div>
 </div>
 
@@ -249,12 +281,13 @@
     [
         (StudioKind.Ads, "Teksty reklam", "bi-badge-ad", "3 warianty Meta + zestaw Google Ads, liczniki znaków, CSV do Excela."),
         (StudioKind.Post, "Post 4:5", "bi-image", "Grafika w kolorach marki, opis z hashtagami — prosto do planu Instagrama."),
-        (StudioKind.Video, "Film 9:16", "bi-film", "Wkrótce — po uruchomieniu renderera filmów (Hantelek jako lektor)."),
+        (StudioKind.Video, "Film 9:16", "bi-film", "Reels/TikTok/Shorts 25–40 s: Hantelek jako lektor, prawdziwe ekrany aplikacji, dwie akceptacje."),
     ];
 
     private StudioKind _kind = StudioKind.Ads;
     private string _brief = "", _model = "";
-    private bool _garmin, _gdef, _busy, _editKnowledge;
+    private bool _garmin, _gdef, _busy, _editKnowledge, _settingsOpen;
+    private Dictionary<int, StudioVideo> _films = [];
     private string? _aiOff, _flash;
     private bool _flashOk;
     private int? _open, _confirmDelete;
@@ -281,7 +314,8 @@
 
     private async Task TickAsync()
     {
-        if (!_k.Building && _list.All(p => p.Status != StudioStatus.Writing)) return;
+        if (!_k.Building && _list.All(p => p.Status != StudioStatus.Writing)
+            && _films.Values.All(f => f.Status is not (StudioVideoStatus.Writing or StudioVideoStatus.Voicing or StudioVideoStatus.Rendering))) return;
         await LoadAsync();
         StateHasChanged();
     }
@@ -289,6 +323,7 @@
     private async Task LoadAsync()
     {
         _list = await Studio.ListAsync();
+        _films = await Videos.ByPromotionAsync(_list.Where(p => p.Kind == StudioKind.Video).Select(p => p.Id));
         var wasBuilding = _k.Building;
         _k = await Studio.KnowledgeStateAsync();
         if (_kEdit is null || (wasBuilding && !_k.Building)) _kEdit = _k.Knowledge is null ? null : Clone(_k.Knowledge);
@@ -307,6 +342,13 @@
     {
         _busy = true;
         var (id, error) = await Studio.CreateAsync(_kind, _brief, _garmin, manual);
+        if (error is null && _kind == StudioKind.Video)
+        {
+            var (videoId, videoError) = await Videos.CreateAsync(id, _brief, _garmin, manual);
+            if (videoError is not null) { await Studio.DeleteAsync(id); _busy = false; await FlashAsync((false, videoError)); return; }
+            Nav.NavigateTo($"/panel/studio/film/{videoId}");
+            return;
+        }
         _busy = false;
         if (error is not null) { await FlashAsync((false, error)); return; }
         _brief = "";
@@ -374,6 +416,28 @@
         await Studio.SaveOptionsAsync(_opt);
         await FlashAsync((true, "Zapisano ustawienia Studia."));
     }
+
+    private static string FilmLabel(StudioVideo? f) => f?.Status switch
+    {
+        null => "Brak filmu",
+        StudioVideoStatus.Writing => "AI pisze…",
+        StudioVideoStatus.ScriptReview => "Akceptacja tekstu",
+        StudioVideoStatus.Voicing => "Głos…",
+        StudioVideoStatus.Rendering => "Render…",
+        StudioVideoStatus.VideoReview => "Akceptacja wideo",
+        StudioVideoStatus.ReadyToPublish => "Do publikacji",
+        StudioVideoStatus.Published => "Opublikowany",
+        StudioVideoStatus.Failed => "Błąd",
+        _ => f.Status.ToString(),
+    };
+
+    private static string FilmTone(StudioVideo? f) => f?.Status switch
+    {
+        StudioVideoStatus.Failed or null => "danger",
+        StudioVideoStatus.ScriptReview or StudioVideoStatus.VideoReview => "warn",
+        StudioVideoStatus.ReadyToPublish or StudioVideoStatus.Published => "ok",
+        _ => "info",
+    };
 
     public void Dispose() => _timer?.Dispose();
 }

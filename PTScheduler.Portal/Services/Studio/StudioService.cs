@@ -202,14 +202,14 @@ public class StudioService(
     /// <summary>Nowy materiał: z AI (trafia do kolejki) albo ręczny (pusty szablon do wypełnienia).</summary>
     public async Task<(int Id, string? Error)> CreateAsync(StudioKind kind, string brief, bool garmin, bool manual)
     {
-        if (kind == StudioKind.Video) return (0, "Filmy będą dostępne po uruchomieniu renderera.");
-        if (!manual && await ai.UnavailableReasonAsync() is { } reason) return (0, $"{reason} Możesz utworzyć materiał ręcznie.");
+        if (!manual && kind != StudioKind.Video && await ai.UnavailableReasonAsync() is { } reason) return (0, $"{reason} Możesz utworzyć materiał ręcznie.");
         await using var db = await dbFactory.CreateDbContextAsync();
+        // Film to tylko wpis na liście — scenariusz, głos i render prowadzi StudioVideos (własna kolejka zadań).
         var p = new StudioPromotion
         {
             Kind = kind, Brief = brief.Trim(), Garmin = garmin, Manual = manual,
-            Status = manual ? StudioStatus.Ready : StudioStatus.Writing,
-            ResultJson = manual ? Empty(kind) : null,
+            Status = manual || kind == StudioKind.Video ? StudioStatus.Ready : StudioStatus.Writing,
+            ResultJson = manual && kind != StudioKind.Video ? Empty(kind) : null,
         };
         db.StudioPromotions.Add(p);
         await db.SaveChangesAsync();
