@@ -22,10 +22,13 @@ public class StudioJobFatalException(string message) : Exception(message);
 /// </summary>
 public class StudioJobs(
     IDbContextFactory<PortalDbContext> dbFactory,
-    IEnumerable<IStudioJobHandler> handlers,
+    IServiceProvider services,
     StudioNotifier notifier,
     ILogger<StudioJobs> logger)
 {
+    // Wykonawcy pobierani dopiero przy wykonaniu: sami zlecają kolejne zadania (głos → render → kontrola),
+    // więc wstrzyknięci w konstruktorze tworzyliby zależność cykliczną StudioJobs → handler → StudioJobs.
+    private IEnumerable<IStudioJobHandler> Handlers => services.GetServices<IStudioJobHandler>();
     public const int MaxAttempts = 3;
 
     /// <summary>Kiedy ponowić po <paramref name="attempts"/> nieudanych próbach; null = koniec prób.</summary>
@@ -93,7 +96,7 @@ public class StudioJobs(
 
         string? error = null;
         var fatal = false;
-        var handler = handlers.FirstOrDefault(h => h.Type == job.Type);
+        var handler = Handlers.FirstOrDefault(h => h.Type == job.Type);
         if (handler is null) { error = $"Nieznany rodzaj zadania „{job.Type}”."; fatal = true; }
         else
         {

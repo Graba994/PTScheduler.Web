@@ -5,6 +5,7 @@ using PTScheduler.Portal.Components;
 using PTScheduler.Portal.Data;
 using PTScheduler.Portal.Entities;
 using PTScheduler.Portal.Services;
+using PTScheduler.Portal.Services.Studio;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -115,24 +116,7 @@ builder.Services.AddScoped<InstagramClient>();
 builder.Services.AddScoped<InstagramAi>();
 builder.Services.AddScoped<InstagramService>();
 builder.Services.AddHostedService<InstagramBackgroundService>();
-builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.StudioService>();
-builder.Services.AddHostedService<PTScheduler.Portal.Services.Studio.StudioBackgroundService>();
-// Studio reklam — filmy: głos i dźwięk, renderer (kontener hantly-renderer), kolejka zadań
-builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.StudioMedia>();
-builder.Services.AddHttpClient(PTScheduler.Portal.Services.Studio.RendererClient.HttpClientName);
-builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.RendererClient>();
-builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.StudioNotifier>();
-builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.StudioJobs>();
-builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.IStudioJobHandler, PTScheduler.Portal.Services.Studio.SoundsJobHandler>();
-builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.StudioScreens>();
-builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.IStudioJobHandler, PTScheduler.Portal.Services.Studio.ScreensJobHandler>();
-builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.AdWriter>();
-builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.StudioVideos>();
-builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.IStudioJobHandler, PTScheduler.Portal.Services.Studio.WriteVideoJobHandler>();
-builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.IStudioJobHandler, PTScheduler.Portal.Services.Studio.VoiceJobHandler>();
-builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.IStudioJobHandler, PTScheduler.Portal.Services.Studio.RenderJobHandler>();
-builder.Services.AddScoped<PTScheduler.Portal.Services.Studio.IStudioJobHandler, PTScheduler.Portal.Services.Studio.QaJobHandler>();
-builder.Services.AddHostedService<PTScheduler.Portal.Services.Studio.StudioJobsBackgroundService>();
+builder.Services.AddStudioReklam(); // Studio reklam: teksty, posty, filmy 9:16, kolejka zadań (Services/Studio/StudioRegistration.cs)
 builder.Services.AddHostedService<SuspensionReportBackgroundService>();
 builder.Services.AddScoped<BackupService>();
 builder.Services.AddScoped<OffsiteBackupService>();
