@@ -212,6 +212,13 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string MetaUserToken = "meta_user_token";
         public const string MetaUserTokenExpires = "meta_user_token_expires";
         public const string MetaAdAccount = "meta_ad_account";
+        public const string TikTokClientKey = "tiktok_client_key";
+        public const string TikTokClientSecret = "tiktok_client_secret";
+        public const string GoogleClientId = "youtube_client_id";
+        public const string GoogleClientSecret = "youtube_client_secret";
+        public const string TikTokPrivacy = "tiktok_privacy";
+        public const string YouTubePrivacy = "youtube_privacy";
+        public const string VideoOAuthState = "video_oauth_state";
         // Studio reklam (Panel → Studio reklam)
         public const string StudioKnowledge = "studio_knowledge";
         public const string StudioKnowledgeRequested = "studio_knowledge_requested";

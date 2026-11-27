@@ -127,6 +127,9 @@ builder.Services.AddScoped<PTScheduler.Portal.Services.Social.AdsClient>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Social.AdsService>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Social.WatchClient>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Social.WatchService>();
+builder.Services.AddScoped<PTScheduler.Portal.Services.Social.TikTokClient>();
+builder.Services.AddScoped<PTScheduler.Portal.Services.Social.YouTubeClient>();
+builder.Services.AddScoped<PTScheduler.Portal.Services.Social.VideoChannelService>();
 builder.Services.AddScoped<InstagramAi>();
 builder.Services.AddScoped<InstagramService>();
 builder.Services.AddHostedService<InstagramBackgroundService>();
@@ -736,6 +739,13 @@ app.MapGet("/api/account/logout", async (SignInManager<IdentityUser> signIn) =>
 // header. Return 200 quickly; Stripe will retry on any non-2xx.
 // ── Instagram marki ──
 // Powrót z logowania do Instagrama (tylko administrator — ten sam, który kliknął „Połącz”).
+// TikTok i YouTube: powrót z logowania (OAuth) → zakładka Kanały.
+app.MapGet("/panel/social/oauth/{platform}", async (string platform, string? code, string? state, string? error, PTScheduler.Portal.Services.Social.VideoChannelService video) =>
+{
+    var p = platform == "tiktok" ? PTScheduler.Portal.Entities.SocialPlatform.TikTok : PTScheduler.Portal.Entities.SocialPlatform.YouTube;
+    var (ok, message) = await video.CallbackAsync(p, code, state, error);
+    return Results.Redirect($"/panel/social?t=polaczenie&{(ok ? "ok" : "err")}={Uri.EscapeDataString(message)}");
+}).RequireAuthorization(p => p.RequireRole("Admin"));
 app.MapGet("/panel/instagram/callback", async (string? code, string? state, string? error, InstagramService ig) =>
 {
     var (ok, message) = await ig.CallbackAsync(code, state, error);

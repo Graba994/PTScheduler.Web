@@ -24,6 +24,7 @@ public class SocialService(
     IDataProtectionProvider dataProtection,
     IConfiguration config,
     LinkService links,
+    VideoChannelService videoChannels,
     ILogger<SocialService> logger)
 {
     /// <summary>Ten sam cel szyfrowania co token Instagrama — konto Instagram przez stronę korzysta z tokenu strony.</summary>
@@ -341,6 +342,10 @@ public class SocialService(
                     t.Status = SocialTargetStatus.Published;
                     t.PublishedAt = DateTime.UtcNow;
                     try { t.Permalink = await facebook.PermalinkAsync(id, token, ct); } catch (InstagramApiException) { }
+                }
+                else if (ch.Platform is SocialPlatform.TikTok or SocialPlatform.YouTube)
+                {
+                    await videoChannels.PublishAsync(t, ch, post, caption, video, ct);
                 }
                 else if (ch.Platform == SocialPlatform.Threads)
                 {
