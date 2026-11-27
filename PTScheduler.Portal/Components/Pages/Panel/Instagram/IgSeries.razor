@@ -1,0 +1,102 @@
+@inject InstagramService Ig
+
+@* Serie — stałe cykle treści (np. „Wtorkowa porada”, „Piątek: nowość w Hantly”). Autopilot co tydzień przygotowuje
+   post na termin serii (temat przewodni + filar + hasztag serii); w trybie „szkice” czeka on na akceptację. *@
+
+<PanelCard Title="Serie" Icon="bi-collection-play" Subtitle="Stałe cykle — ten sam dzień i rodzaj treści co tydzień; odbiorcy wiedzą, czego się spodziewać">
+    @if (_series.Count > 0)
+    {
+        <div class="bio-edit mb-3">
+            @foreach (var s in _series)
+            {
+                var row = s;
+                <div class="bio-edit-row @(row.Enabled ? "" : "is-off")" @key="row.Id">
+                    <span class="pp-chip pp-tone-info">@InstagramRules.DayShort(row.Day) @(row.Time?.ToString("HH:mm") ?? "")</span>
+                    <div class="flex-grow-1 min-w-0">
+                        <div class="fw-semibold">@row.Name @if (row.Hashtag is not null) { <span class="text-muted small ms-1">@row.Hashtag</span> }</div>
+                        <div class="small text-muted text-truncate">@InstagramRules.PillarLabel(row.Pillar) · @(row.Format == "image" ? "grafika" : "karuzela")@(string.IsNullOrWhiteSpace(row.Brief) ? "" : $" · {row.Brief}")</div>
+                    </div>
+                    <button class="btn btn-link btn-sm p-0" title="Edytuj" aria-label="Edytuj" @onclick="() => Edit(row)"><i class="bi bi-pencil"></i></button>
+                    <button class="btn btn-link btn-sm p-0 text-danger" title="Usuń" aria-label="Usuń" @onclick="() => DeleteAsync(row.Id)"><i class="bi bi-trash3"></i></button>
+                </div>
+            }
+        </div>
+    }
+
+    <div class="row g-2">
+        <div class="col-sm-4">
+            <label class="form-label small fw-semibold" for="se-name">Nazwa</label>
+            <input id="se-name" class="form-control form-control-sm" @bind="_f.Name" @bind:event="oninput" maxlength="80" placeholder="np. Wtorkowa porada" />
+        </div>
+        <div class="col-6 col-sm-2">
+            <label class="form-label small fw-semibold" for="se-day">Dzień</label>
+            <select id="se-day" class="form-select form-select-sm" @bind="_f.Day">
+                @for (var d = 1; d <= 7; d++) { <option value="@d">@InstagramRules.DayName(d)</option> }
+            </select>
+        </div>
+        <div class="col-6 col-sm-2">
+            <label class="form-label small fw-semibold" for="se-time">Godzina</label>
+            <input id="se-time" type="time" class="form-control form-control-sm" @bind="_f.Time" title="Puste — godzina z autopilota" />
+        </div>
+        <div class="col-6 col-sm-2">
+            <label class="form-label small fw-semibold" for="se-pillar">Filar</label>
+            <select id="se-pillar" class="form-select form-select-sm" @bind="_f.Pillar">
+                @foreach (var p in InstagramRules.Pillars) { <option value="@p.Key">@p.Label</option> }
+            </select>
+        </div>
+        <div class="col-6 col-sm-2">
+            <label class="form-label small fw-semibold" for="se-format">Format</label>
+            <select id="se-format" class="form-select form-select-sm" @bind="_f.Format">
+                <option value="carousel">Karuzela</option>
+                <option value="image">Grafika</option>
+            </select>
+        </div>
+        <div class="col-sm-8">
+            <label class="form-label small fw-semibold" for="se-brief">Temat przewodni dla AI</label>
+            <input id="se-brief" class="form-control form-control-sm" @bind="_f.Brief" maxlength="500" placeholder="np. jedna rzecz, która oszczędza trenerowi godzinę w tygodniu" />
+        </div>
+        <div class="col-sm-2">
+            <label class="form-label small fw-semibold" for="se-tag">Hasztag serii</label>
+            <input id="se-tag" class="form-control form-control-sm" @bind="_f.Hashtag" maxlength="60" placeholder="#WtorekZHantly" />
+        </div>
+        <div class="col-sm-2 d-flex align-items-end">
+            <label class="form-check small mb-1"><input class="form-check-input" type="checkbox" @bind="_f.Enabled" /> <span class="form-check-label">Włączona</span></label>
+        </div>
+    </div>
+    <div class="d-flex gap-2 mt-2 align-items-center">
+        <button class="btn btn-primary btn-sm" disabled="@string.IsNullOrWhiteSpace(_f.Name)" @onclick="SaveAsync"><i class="bi bi-check-lg me-1"></i>@(_f.Id > 0 ? "Zapisz serię" : "Dodaj serię")</button>
+        @if (_f.Id > 0) { <button class="btn btn-link btn-sm" @onclick="Reset">Anuluj</button> }
+        <span class="small text-muted">Serie działają, gdy autopilot jest włączony. Posty serii liczą się do limitu postów w tygodniu.</span>
+    </div>
+</PanelCard>
+
+@code {
+    [Parameter] public EventCallback<(bool, string)> Flash { get; set; }
+
+    private List<ContentSeries> _series = [];
+    private ContentSeries _f = New();
+
+    private static ContentSeries New() => new() { Day = 2, Pillar = "porada", Format = "carousel", Enabled = true };
+
+    protected override async Task OnInitializedAsync() => _series = await Ig.SeriesAsync();
+
+    private void Edit(ContentSeries s) => _f = new ContentSeries
+    {
+        Id = s.Id, Name = s.Name, Day = s.Day, Time = s.Time, Pillar = s.Pillar, Format = s.Format, Brief = s.Brief, Hashtag = s.Hashtag, Enabled = s.Enabled
+    };
+
+    private void Reset() => _f = New();
+
+    private async Task SaveAsync()
+    {
+        var r = await Ig.SaveSeriesAsync(_f);
+        if (r.Ok) { Reset(); _series = await Ig.SeriesAsync(); }
+        await Flash.InvokeAsync(r);
+    }
+
+    private async Task DeleteAsync(int id)
+    {
+        await Ig.DeleteSeriesAsync(id);
+        _series = await Ig.SeriesAsync();
+    }
+}

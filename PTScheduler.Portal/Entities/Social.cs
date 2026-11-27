@@ -147,3 +147,43 @@ public class CommentRule
     public int Uses { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
+
+/// <summary>Stały cykl treści (np. „Wtorkowa porada”): dzień tygodnia, godzina, filar i temat przewodni — autopilot wypełnia go co tydzień.</summary>
+public class ContentSeries
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    /// <summary>Dzień tygodnia ISO (1 = poniedziałek … 7 = niedziela).</summary>
+    public int Day { get; set; } = 2;
+    /// <summary>Godzina publikacji (czas polski); null — godzina z autopilota.</summary>
+    public TimeOnly? Time { get; set; }
+    public string Pillar { get; set; } = "porada";
+    /// <summary>image | carousel.</summary>
+    public string Format { get; set; } = "carousel";
+    /// <summary>Temat przewodni dla AI, np. „jedna rzecz, która oszczędza trenerowi godzinę w tygodniu”.</summary>
+    public string Brief { get; set; } = "";
+    /// <summary>Hasztag cyklu dopisywany do opisu (np. #WtorekZHantly).</summary>
+    public string? Hashtag { get; set; }
+    public bool Enabled { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Biblioteka treści: własne pliki (Source = upload, dane w <see cref="Data"/>) oraz opis i tagi dla materiałów z innych miejsc
+/// (grafiki postów, zrzuty aplikacji ze Studia, filmy, Hantelek) — wskazywanych przez <see cref="Source"/> i <see cref="Ref"/>.
+/// </summary>
+public class LibraryItem
+{
+    public int Id { get; set; }
+    /// <summary>upload | post | screen | film | mascot.</summary>
+    public string Source { get; set; } = "upload";
+    public string Ref { get; set; } = "";
+    public string Title { get; set; } = "";
+    /// <summary>Tagi po przecinku (małymi literami).</summary>
+    public string Tags { get; set; } = "";
+    public byte[]? Data { get; set; }
+    public int Width { get; set; }
+    public int Height { get; set; }
+    public int Uses { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}

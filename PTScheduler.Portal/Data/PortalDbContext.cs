@@ -49,6 +49,8 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<SocialThread> SocialThreads => Set<SocialThread>();
     public DbSet<SocialMessage> SocialMessages => Set<SocialMessage>();
     public DbSet<CommentRule> CommentRules => Set<CommentRule>();
+    public DbSet<ContentSeries> ContentSeries => Set<ContentSeries>();
+    public DbSet<LibraryItem> LibraryItems => Set<LibraryItem>();
     public DbSet<StudioPromotion> StudioPromotions => Set<StudioPromotion>();
     public DbSet<StudioVideo> StudioVideos => Set<StudioVideo>();
     public DbSet<StudioScene> StudioScenes => Set<StudioScene>();
@@ -539,6 +541,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
         b.Entity<InstagramPost>(e =>
         {
             e.HasIndex(x => new { x.Status, x.ScheduledAt });
+            e.HasIndex(x => x.SeriesId);
             e.Property(x => x.Title).HasMaxLength(200);
             e.Property(x => x.Caption).HasMaxLength(2200);
             e.Property(x => x.Pillar).HasMaxLength(32);
@@ -618,6 +621,22 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.Property(x => x.Text).HasMaxLength(4000);
             e.HasIndex(x => new { x.ThreadId, x.At });
             e.HasOne<SocialThread>().WithMany().HasForeignKey(x => x.ThreadId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<ContentSeries>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(80);
+            e.Property(x => x.Pillar).HasMaxLength(32);
+            e.Property(x => x.Format).HasMaxLength(16);
+            e.Property(x => x.Brief).HasMaxLength(500);
+            e.Property(x => x.Hashtag).HasMaxLength(60);
+        });
+        b.Entity<LibraryItem>(e =>
+        {
+            e.HasIndex(x => new { x.Source, x.Ref }).IsUnique();
+            e.Property(x => x.Source).HasMaxLength(16);
+            e.Property(x => x.Ref).HasMaxLength(200);
+            e.Property(x => x.Title).HasMaxLength(200);
+            e.Property(x => x.Tags).HasMaxLength(500);
         });
         b.Entity<CommentRule>(e =>
         {

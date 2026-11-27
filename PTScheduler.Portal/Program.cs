@@ -122,6 +122,7 @@ builder.Services.AddScoped<PTScheduler.Portal.Services.Social.SocialReportServic
 builder.Services.AddScoped<PTScheduler.Portal.Services.Social.MessagesClient>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Social.DmService>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Social.FilmPublisher>();
+builder.Services.AddScoped<PTScheduler.Portal.Services.Social.LibraryService>();
 builder.Services.AddScoped<InstagramAi>();
 builder.Services.AddScoped<InstagramService>();
 builder.Services.AddHostedService<InstagramBackgroundService>();
@@ -748,6 +749,12 @@ app.MapGet("/media/ig/{token}.jpg", async (string token, HttpContext ctx, Instag
 // Filmy ze Studia dla Meta (Instagram, Facebook, Threads pobierają plik przy publikacji) — adres z podpisem HMAC.
 app.MapGet("/media/film/{id:int}/{signature}.mp4", async (int id, string signature, PTScheduler.Portal.Services.Social.FilmPublisher films) =>
     await films.FileAsync(id, signature) is { } path ? Results.File(path, "video/mp4", enableRangeProcessing: true) : Results.NotFound());
+
+// Biblioteka treści: własne pliki (podgląd w panelu).
+app.MapGet("/api/panel/library/{id:int}.jpg", async (int id, PTScheduler.Portal.Services.Social.LibraryService library) =>
+    await library.UploadBytesAsync(id) is { } data
+        ? Results.File(data, PTScheduler.Portal.Services.Social.LibraryService.ContentType(data))
+        : Results.NotFound()).RequireAuthorization(p => p.RequireRole("Admin"));
 
 // Studio reklam: teksty reklam do Excela (średnik, UTF-8 z BOM).
 app.MapGet("/api/panel/studio/{id:int}/reklamy.csv", async (int id, PTScheduler.Portal.Services.Studio.StudioService studio) =>

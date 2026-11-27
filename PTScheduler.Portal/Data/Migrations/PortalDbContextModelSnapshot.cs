@@ -679,6 +679,55 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.ToTable("CommunityExercises");
                 });
 
+            modelBuilder.Entity("PTScheduler.Portal.Entities.ContentSeries", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Brief")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Day")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Format")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Hashtag")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("Pillar")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<TimeOnly?>("Time")
+                        .HasColumnType("time without time zone");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ContentSeries");
+                });
+
             modelBuilder.Entity("PTScheduler.Portal.Entities.Expense", b =>
                 {
                     b.Property<int>("Id")
@@ -1437,6 +1486,9 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Property<DateTime?>("ScheduledAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int?>("SeriesId")
+                        .HasColumnType("integer");
+
                     b.Property<bool>("ShareToFeed")
                         .HasColumnType("boolean");
 
@@ -1460,6 +1512,8 @@ namespace PTScheduler.Portal.Data.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("SeriesId");
 
                     b.HasIndex("Status", "ScheduledAt");
 
@@ -1554,6 +1608,57 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.HasIndex("TenantId", "DocKey", "Version");
 
                     b.ToTable("LegalAcceptances");
+                });
+
+            modelBuilder.Entity("PTScheduler.Portal.Entities.LibraryItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<byte[]>("Data")
+                        .HasColumnType("bytea");
+
+                    b.Property<int>("Height")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Ref")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Tags")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("Uses")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Width")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Source", "Ref")
+                        .IsUnique();
+
+                    b.ToTable("LibraryItems");
                 });
 
             modelBuilder.Entity("PTScheduler.Portal.Entities.LoginLog", b =>

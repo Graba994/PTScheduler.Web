@@ -43,6 +43,8 @@ public class InstagramPost
     /// <summary>manual | ai | autopilot</summary>
     public string Source { get; set; } = "manual";
     public bool ShareToFeed { get; set; } = true;
+    /// <summary>Cykl treści (<see cref="ContentSeries"/>), z którego powstał post.</summary>
+    public int? SeriesId { get; set; }
     /// <summary>Czy publikować na Instagramie (pozostałe kanały — <see cref="SocialPostTarget"/>).</summary>
     public bool ToInstagram { get; set; } = true;
     public DateTime? ScheduledAt { get; set; }

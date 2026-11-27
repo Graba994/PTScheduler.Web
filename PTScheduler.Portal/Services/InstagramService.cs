@@ -996,14 +996,15 @@ public class InstagramService(
     {
         var ap = await AutopilotAsync();
         if (ap.Mode == "off" && !force) return (0, "Autopilot jest wyłączony.");
+        var (fromSeries, seriesNote) = await FillSeriesAsync(ap, ct);
         var planned = await PostsAsync(q => q.Where(p => p.ScheduledAt != null && p.ScheduledAt > DateTime.UtcNow
             && (p.Status == InstagramPostStatus.Scheduled || p.Status == InstagramPostStatus.ToApprove || p.Status == InstagramPostStatus.Publishing)));
         var weekEnd = DateTime.UtcNow.AddDays(7);
         var inWeek = planned.Count(p => p.ScheduledAt < weekEnd);
         var need = Math.Max(0, ap.PostsPerWeek - inWeek);
-        if (need == 0) return (0, "Plan na najbliższy tydzień jest pełny.");
+        if (need == 0) return (fromSeries, fromSeries > 0 ? $"Serie: {fromSeries} nowe posty. Plan na tydzień jest pełny." : seriesNote ?? "Plan na najbliższy tydzień jest pełny.");
         var slots = InstagramRules.FreeSlots(DateTime.UtcNow, ap.Days, ap.Time, planned.Select(p => p.ScheduledAt!.Value), need, 7);
-        if (slots.Count == 0) return (0, "Brak wolnych terminów w wybrane dni w tym tygodniu.");
+        if (slots.Count == 0) return (fromSeries, fromSeries > 0 ? $"Serie: {fromSeries} nowe posty." : "Brak wolnych terminów w wybrane dni w tym tygodniu.");
 
         // Filary po kolei, z pominięciem ostatnio użytych; oferta najwyżej raz na 5 postów.
         var recent = await PostsAsync(q => q.OrderByDescending(p => p.CreatedAt).Take(5));
@@ -1030,7 +1031,99 @@ public class InstagramService(
             await CreateFromIdeaAsync(idea, ap.Mode == "auto" ? InstagramPostStatus.Scheduled : InstagramPostStatus.ToApprove, slots[i], "autopilot");
             created++;
         }
+        created += fromSeries;
         if (created > 0 && ap.Mode == "drafts") await NotifyDraftsAsync(created);
+        return (created, note ?? seriesNote);
+    }
+
+    // ── Serie (stałe cykle) ──────────────────────────────────────────
+
+    public async Task<List<ContentSeries>> SeriesAsync()
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        return (await db.ContentSeries.AsNoTracking().ToListAsync()).OrderBy(s => s.Day).ThenBy(s => s.Time).ToList();
+    }
+
+    public async Task<(bool Ok, string Message)> SaveSeriesAsync(ContentSeries input)
+    {
+        var name = (input.Name ?? "").Trim();
+        if (name.Length is < 2 or > 80) return (false, "Nazwa serii: od 2 do 80 znaków, np. „Wtorkowa porada”.");
+        if (input.Day is < 1 or > 7) return (false, "Wybierz dzień tygodnia.");
+        if (InstagramRules.FindPillar(input.Pillar) is null) return (false, "Wybierz filar treści.");
+        var brief = (input.Brief ?? "").Trim();
+        if (brief.Length > 500) return (false, "Temat przewodni: najwyżej 500 znaków.");
+        var tag = string.IsNullOrWhiteSpace(input.Hashtag) ? null : "#" + new string(input.Hashtag.Trim().TrimStart('#').Where(char.IsLetterOrDigit).ToArray());
+        if (tag is { Length: < 2 }) tag = null;
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var s = input.Id > 0 ? await db.ContentSeries.FirstOrDefaultAsync(x => x.Id == input.Id) : null;
+        if (s is null) db.ContentSeries.Add(s = new ContentSeries());
+        (s.Name, s.Day, s.Time, s.Pillar, s.Format, s.Brief, s.Hashtag, s.Enabled) =
+            (name, input.Day, input.Time, input.Pillar, input.Format == "image" ? "image" : "carousel", brief, tag, input.Enabled);
+        await db.SaveChangesAsync();
+        return (true, "Zapisano serię — autopilot przygotuje ją na najbliższy termin.");
+    }
+
+    public async Task DeleteSeriesAsync(int id)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        await db.InstagramPosts.Where(p => p.SeriesId == id).ExecuteUpdateAsync(u => u.SetProperty(p => p.SeriesId, (int?)null));
+        await db.ContentSeries.Where(s => s.Id == id).ExecuteDeleteAsync();
+    }
+
+    /// <summary>Najbliższy termin serii w ciągu 7 dni (czas UTC); null — brak (np. dziś już po godzinie).</summary>
+    public static DateTime? NextSeriesSlot(ContentSeries s, TimeOnly defaultTime, DateTime nowUtc)
+    {
+        var today = InstagramRules.ToWarsaw(nowUtc).Date;
+        for (var d = 0; d < 7; d++)
+        {
+            var day = today.AddDays(d);
+            if (InstagramRules.IsoDay(day) != s.Day) continue;
+            var at = InstagramRules.ToUtc(day.Add((s.Time ?? defaultTime).ToTimeSpan()));
+            if (at > nowUtc.AddMinutes(30)) return at;
+        }
+        return null;
+    }
+
+    /// <summary>Serie: na najbliższy termin każdej włączonej serii — post z pomysłu AI (albo z banku) z tematem przewodnim i hasztagiem serii.</summary>
+    private async Task<(int Created, string? Note)> FillSeriesAsync(Autopilot ap, CancellationToken ct)
+    {
+        var series = (await SeriesAsync()).Where(s => s.Enabled).ToList();
+        if (series.Count == 0) return (0, null);
+        var created = 0;
+        string? note = null;
+        var titles = await RecentTitlesAsync();
+        foreach (var s in series)
+        {
+            if (NextSeriesSlot(s, ap.Time, DateTime.UtcNow) is not { } at) continue;
+            var dayStart = InstagramRules.ToUtc(InstagramRules.ToWarsaw(at).Date);
+            var dayEnd = dayStart.AddDays(1);
+            await using (var db = await dbFactory.CreateDbContextAsync(ct))
+                if (await db.InstagramPosts.AnyAsync(p => p.SeriesId == s.Id && p.ScheduledAt >= dayStart && p.ScheduledAt < dayEnd, ct)) continue;
+            InstagramAi.Idea? idea = null;
+            if (await ai.UnavailableAsync() is null)
+            {
+                var (aiIdea, err) = await ai.IdeaAsync(s.Pillar, s.Format, titles, $"Seria „{s.Name}”. {s.Brief}".Trim(), ct);
+                idea = aiIdea;
+                if (err is not null) note = err;
+            }
+            idea ??= InstagramAi.FromBank(s.Pillar, titles, 1).FirstOrDefault();
+            if (idea is null) continue;
+            titles.Insert(0, idea.Title);
+            var id = await CreateFromIdeaAsync(idea, ap.Mode == "auto" ? InstagramPostStatus.Scheduled : InstagramPostStatus.ToApprove, at, "autopilot");
+            // Hasztag serii dopisujemy do opisu posta (pomysł z banku jest współdzielony — nie zmieniamy go).
+            await using (var db = await dbFactory.CreateDbContextAsync(ct))
+                if (await db.InstagramPosts.FirstOrDefaultAsync(p => p.Id == id, ct) is { } post)
+                {
+                    post.SeriesId = s.Id;
+                    if (s.Hashtag is { } tag && !InstagramRules.Hashtags(post.Caption).Contains(InstagramRules.NormalizeTag(tag), StringComparer.OrdinalIgnoreCase))
+                    {
+                        var withTag = InstagramRules.AddHashtags(post.Caption, [tag], InstagramRules.MaxHashtags);
+                        post.Caption = withTag.Length <= InstagramRules.MaxCaption ? withTag : post.Caption;
+                    }
+                    await db.SaveChangesAsync(ct);
+                }
+            created++;
+        }
         return (created, note);
     }
 

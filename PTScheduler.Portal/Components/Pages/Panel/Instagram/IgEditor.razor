@@ -101,6 +101,7 @@ else
                 {
                     <div class="d-flex gap-2 flex-wrap mt-2">
                         <button class="btn btn-outline-primary btn-sm" @onclick="() => OpenDesigner(null, null)"><i class="bi bi-palette me-1"></i>Grafika z szablonu</button>
+                        <button class="btn btn-outline-primary btn-sm" @onclick="OpenLibraryAsync"><i class="bi bi-collection me-1"></i>Z biblioteki</button>
                         <label class="btn btn-outline-primary btn-sm mb-0">
                             <i class="bi bi-upload me-1"></i>Wgraj zdjęcie / zrzut
                             <InputFile OnChange="UploadAsync" accept="image/jpeg,image/png,image/webp" multiple class="d-none" />
@@ -116,6 +117,22 @@ else
                     @if (_uploading) { <div class="small text-muted mt-2"><span class="spinner-border spinner-border-sm me-1"></span>Przygotowuję zdjęcia…</div> }
                 }
 
+                @if (_library)
+                {
+                    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true" aria-label="Biblioteka treści" style="background:rgba(15,23,42,.45)">
+                        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <h5 class="modal-title"><i class="bi bi-collection me-2"></i>Dodaj z biblioteki</h5>
+                                    <button type="button" class="btn-close" aria-label="Zamknij" @onclick="() => _library = false"></button>
+                                </div>
+                                <div class="modal-body">
+                                    <IgLibrary PostId="_post.Id" AllowVideo="@(_kind is InstagramPostKind.Reel or InstagramPostKind.Story)" Flash="Flash" Used="LibraryUsedAsync" />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                }
                 @if (_designer)
                 {
                     <div class="ig-designer">
@@ -286,7 +303,20 @@ else
 
     private InstagramPost? _post;
     private InstagramAccount? _account;
-    private bool _missing, _busy, _uploading, _aiBusy, _designer, _rendering;
+    private bool _missing, _busy, _uploading, _aiBusy, _designer, _rendering, _library;
+
+    private async Task OpenLibraryAsync()
+    {
+        await SaveFieldsAsync();
+        _library = true;
+    }
+
+    private async Task LibraryUsedAsync()
+    {
+        _library = false;
+        await LoadAsync();
+        if (_kind == InstagramPostKind.Image && _post!.Assets.Count > 1) { _kind = InstagramPostKind.Carousel; await SaveFieldsAsync(); }
+    }
     private string _title = "", _caption = "", _pillar = "", _videoUrl = "";
     private InstagramPostKind _kind;
     private DateTime? _when;

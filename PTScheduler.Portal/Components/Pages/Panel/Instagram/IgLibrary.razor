@@ -1,0 +1,161 @@
+@using PTScheduler.Portal.Services.Social
+@inject LibraryService Library
+
+@* Biblioteka treści: grafiki z postów, zrzuty aplikacji (demo), filmy, Hantelek i własne pliki — z tytułami i tagami.
+   W zakładce „Użyj” tworzy nowy szkic; w edytorze (PostId) dodaje materiał do otwartego posta. *@
+
+<div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+    <div class="pp-seg" role="group" aria-label="Źródło">
+        <button type="button" class="@(_source is null ? "active" : "")" @onclick="() => SetSourceAsync(null)">Wszystko</button>
+        @foreach (var (key, label, icon) in LibraryService.Sources)
+        {
+            var k = key;
+            @if (PostId is null || k != "film" || AllowVideo)
+            {
+                <button type="button" class="@(_source == k ? "active" : "")" @onclick="() => SetSourceAsync(k)"><i class="bi @icon"></i>@label</button>
+            }
+        }
+    </div>
+    <input class="form-control form-control-sm lib-search" placeholder="Szukaj po tytule albo tagu…" @bind="_query" @bind:event="oninput" @bind:after="LoadAsync" aria-label="Szukaj w bibliotece" />
+    @if (PostId is null)
+    {
+        <label class="btn btn-primary btn-sm mb-0 ms-auto">
+            <i class="bi bi-upload me-1"></i>Dodaj pliki
+            <InputFile OnChange="UploadAsync" accept="image/jpeg,image/png,image/webp" multiple class="d-none" />
+        </label>
+    }
+</div>
+@if (_uploading) { <div class="small text-muted mb-2"><span class="spinner-border spinner-border-sm me-1"></span>Dodaję pliki…</div> }
+
+@if (_items is null)
+{
+    <div class="text-muted small py-4 text-center"><span class="spinner-border spinner-border-sm me-2"></span>Wczytuję…</div>
+}
+else if (_items.Count == 0)
+{
+    <div class="pp-card"><div class="pp-empty"><i class="bi bi-collection"></i><div class="pp-empty-title">Nic tu nie ma</div><p>Zmień filtr albo dodaj własne pliki.</p></div></div>
+}
+else
+{
+    <div class="lib-grid">
+        @foreach (var it in _items.Take(_limit))
+        {
+            var item = it;
+            var key = $"{item.Source}:{item.Ref}";
+            <article class="lib-tile" @key="key">
+                <div class="lib-thumb @(item.Kind == "video" ? "is-video" : "")">
+                    @if (item.Thumb is not null) { <img src="@item.Thumb" alt="@item.Title" loading="lazy" /> }
+                    else { <i class="bi bi-film" aria-hidden="true"></i> }
+                    <span class="lib-src"><i class="bi @(LibraryService.Sources.FirstOrDefault(s => s.Key == item.Source).Icon)"></i></span>
+                </div>
+                <div class="lib-body">
+                    @if (_editing == key)
+                    {
+                        <input class="form-control form-control-sm mb-1" @bind="_title" aria-label="Tytuł" maxlength="200" />
+                        <input class="form-control form-control-sm mb-1" @bind="_tags" placeholder="tagi, po przecinku" aria-label="Tagi" />
+                        <div class="d-flex gap-1">
+                            <button class="btn btn-primary btn-sm" @onclick="() => SaveMetaAsync(item)">Zapisz</button>
+                            <button class="btn btn-link btn-sm" @onclick="() => _editing = null">Anuluj</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="lib-title" title="@item.Title">@item.Title</div>
+                        @if (item.Tags.Count > 0) { <div class="lib-tags">@foreach (var t in item.Tags.Take(5)) { <span>#@t</span> }</div> }
+                        @if (item.Note is not null) { <div class="small text-warning"><i class="bi bi-exclamation-triangle me-1"></i>@item.Note</div> }
+                        <div class="d-flex gap-1 align-items-center mt-1">
+                            <button class="btn btn-outline-primary btn-sm" disabled="@_busy" @onclick="() => UseAsync(item)">
+                                <i class="bi bi-plus-lg me-1"></i>@(PostId is null ? (item.Kind == "video" ? "Post z filmem" : "Nowy post") : "Dodaj")
+                            </button>
+                            <button class="btn btn-link btn-sm p-0 ms-auto" title="Tytuł i tagi" aria-label="Tytuł i tagi" @onclick="() => Edit(item)"><i class="bi bi-tags"></i></button>
+                            @if (item.Source == "upload" && item.LibraryId is int lid && PostId is null)
+                            {
+                                <button class="btn btn-link btn-sm p-0 text-danger" title="Usuń z biblioteki" aria-label="Usuń z biblioteki" @onclick="() => DeleteAsync(lid)"><i class="bi bi-trash3"></i></button>
+                            }
+                        </div>
+                        @if (item.Uses > 0) { <div class="small text-muted">użyto: @item.Uses</div> }
+                    }
+                </div>
+            </article>
+        }
+    </div>
+    @if (_items.Count > _limit)
+    {
+        <div class="text-center mt-3"><button class="btn btn-outline-secondary btn-sm" @onclick="() => _limit += 48">Pokaż więcej (@(_items.Count - _limit))</button></div>
+    }
+}
+
+@code {
+    /// <summary>Tryb wyboru w edytorze: materiał trafia do tego posta.</summary>
+    [Parameter] public int? PostId { get; set; }
+    /// <summary>W edytorze: czy post przyjmie film (rolka/relacja).</summary>
+    [Parameter] public bool AllowVideo { get; set; }
+    [Parameter] public EventCallback<(string, int?)> Go { get; set; }
+    [Parameter] public EventCallback<(bool, string)> Flash { get; set; }
+    [Parameter] public EventCallback Used { get; set; }
+
+    private List<LibraryService.Entry>? _items;
+    private string? _source, _editing;
+    private string _query = "", _title = "", _tags = "";
+    private bool _busy, _uploading;
+    private int _limit = 48;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var list = await Library.ListAsync(_source, _query);
+        if (PostId is not null && !AllowVideo) list = list.Where(i => i.Kind != "video").ToList();
+        _items = list;
+    }
+
+    private async Task SetSourceAsync(string? source) { _source = source; _limit = 48; await LoadAsync(); }
+
+    private void Edit(LibraryService.Entry item) => (_editing, _title, _tags) = ($"{item.Source}:{item.Ref}", item.Title, string.Join(", ", item.Tags));
+
+    private async Task SaveMetaAsync(LibraryService.Entry item)
+    {
+        await Library.SaveMetaAsync(item.Source, item.Ref, _title, _tags);
+        _editing = null;
+        await LoadAsync();
+    }
+
+    private async Task UseAsync(LibraryService.Entry item)
+    {
+        _busy = true;
+        var (ok, message, postId) = await Library.UseAsync(item.Source, item.Ref, PostId, item.Title);
+        _busy = false;
+        await Flash.InvokeAsync((ok, message));
+        if (!ok) return;
+        if (PostId is not null) await Used.InvokeAsync();
+        else if (postId is int id) await Go.InvokeAsync(("plan", id));
+    }
+
+    private async Task DeleteAsync(int id)
+    {
+        await Library.DeleteUploadAsync(id);
+        await LoadAsync();
+    }
+
+    private async Task UploadAsync(InputFileChangeEventArgs e)
+    {
+        _uploading = true;
+        var errors = new List<string>();
+        foreach (var file in e.GetMultipleFiles(20))
+        {
+            try
+            {
+                await using var stream = file.OpenReadStream(15 * 1024 * 1024);
+                using var ms = new MemoryStream();
+                await stream.CopyToAsync(ms);
+                var (ok, msg) = await Library.UploadAsync(ms.ToArray(), Path.GetFileNameWithoutExtension(file.Name), "");
+                if (!ok) errors.Add($"{file.Name}: {msg}");
+            }
+            catch (IOException) { errors.Add($"{file.Name}: plik jest za duży (najwięcej 15 MB)."); }
+        }
+        _uploading = false;
+        _source = "upload";
+        await LoadAsync();
+        await Flash.InvokeAsync(errors.Count > 0 ? (false, string.Join(" ", errors)) : (true, "Dodano pliki — opisz je tagami, żeby łatwo je znaleźć."));
+    }
+}
