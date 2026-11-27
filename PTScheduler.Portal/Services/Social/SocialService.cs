@@ -30,6 +30,14 @@ public class SocialService(
     private IDataProtector Secrets => dataProtection.CreateProtector("instagram");
     private string PortalUrl => PortalUrls.Public(config);
 
+    /// <summary>Token użytkownika Meta (do reklam) i jego ważność; null — brak albo wygasł.</summary>
+    public async Task<(string? Token, DateTime? ExpiresAt)> MetaUserTokenAsync()
+    {
+        var token = Unprotect(await settings.GetAsync(K.MetaUserToken));
+        DateTime? exp = DateTime.TryParse(await settings.GetAsync(K.MetaUserTokenExpires), null, System.Globalization.DateTimeStyles.RoundtripKind, out var e) ? e : null;
+        return token is not null && exp > DateTime.UtcNow ? (token, exp) : (null, exp);
+    }
+
     private string? Unprotect(string? raw)
     {
         if (string.IsNullOrEmpty(raw)) return null;
@@ -100,12 +108,21 @@ public class SocialService(
         try
         {
             var (appId, hasSecret) = await MetaAppAsync();
+            var longLived = false;
             if (appId.Length > 0 && hasSecret && Unprotect(await settings.GetAsync(K.MetaAppSecret)) is { } secret)
             {
-                try { userToken = await facebook.LongLivedUserTokenAsync(appId, secret, userToken); }
+                try
+                {
+                    var exchanged = await facebook.LongLivedUserTokenAsync(appId, secret, userToken);
+                    longLived = exchanged != userToken;
+                    userToken = exchanged;
+                }
                 catch (InstagramApiException ex) when (!ex.TokenInvalid) { }
             }
             var pages = await facebook.PagesAsync(userToken);
+            // Token użytkownika — potrzebny do reklam (Marketing API nie przyjmuje tokenu strony).
+            await settings.SetAsync(K.MetaUserToken, Secrets.Protect(userToken));
+            await settings.SetAsync(K.MetaUserTokenExpires, DateTime.UtcNow.Add(longLived ? TimeSpan.FromDays(59) : TimeSpan.FromHours(1)).ToString("O"));
             return pages.Count == 0 ? ([], "Token nie widzi żadnej strony. Zaznacz przy generowaniu uprawnienia do stron (pages_show_list, pages_manage_posts…) i wybierz stronę Hantly.") : (pages, null);
         }
         catch (InstagramApiException ex) { return ([], ex.Message); }

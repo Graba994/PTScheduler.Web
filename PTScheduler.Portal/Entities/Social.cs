@@ -187,3 +187,42 @@ public class LibraryItem
     public int Uses { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
+
+public enum AdPromotionStatus { Paused = 0, Active = 1, Ended = 2, Failed = 3 }
+
+/// <summary>Promocja posta w Meta Ads (kampania → zestaw → reklama). Powstaje wstrzymana; uruchamia ją człowiek.</summary>
+public class AdPromotion
+{
+    public int Id { get; set; }
+    /// <summary>Post (null — post usunięty; promocja i jej wyniki zostają, żeby kampania nie zniknęła z oczu).</summary>
+    public int? PostId { get; set; }
+    public string Title { get; set; } = "";
+    /// <summary>traffic — ruch na stronę (link śledzący, „Zarejestruj się”); boost — podbicie opublikowanego posta.</summary>
+    public string Mode { get; set; } = "traffic";
+    public AdPromotionStatus Status { get; set; }
+    public string Account { get; set; } = "";
+    public string Currency { get; set; } = "PLN";
+    public string? CampaignId { get; set; }
+    public string? AdSetId { get; set; }
+    public string? CreativeId { get; set; }
+    public string? AdId { get; set; }
+    public decimal DailyBudget { get; set; }
+    public int Days { get; set; }
+    public DateTime StartAt { get; set; }
+    public DateTime EndAt { get; set; }
+    public int AgeMin { get; set; } = 21;
+    public int AgeMax { get; set; } = 55;
+    public string InterestsJson { get; set; } = "[]";
+    public bool OnInstagram { get; set; } = true;
+    public bool OnFacebook { get; set; } = true;
+    public int? LinkId { get; set; }
+    public decimal Spend { get; set; }
+    public int Impressions { get; set; }
+    public int Reach { get; set; }
+    public int Clicks { get; set; }
+    public int Engagements { get; set; }
+    public DateTime? InsightsAt { get; set; }
+    public DateTime? ActivatedAt { get; set; }
+    public string? Error { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}

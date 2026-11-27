@@ -51,6 +51,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<CommentRule> CommentRules => Set<CommentRule>();
     public DbSet<ContentSeries> ContentSeries => Set<ContentSeries>();
     public DbSet<LibraryItem> LibraryItems => Set<LibraryItem>();
+    public DbSet<AdPromotion> AdPromotions => Set<AdPromotion>();
     public DbSet<StudioPromotion> StudioPromotions => Set<StudioPromotion>();
     public DbSet<StudioVideo> StudioVideos => Set<StudioVideo>();
     public DbSet<StudioScene> StudioScenes => Set<StudioScene>();
@@ -629,6 +630,24 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.Property(x => x.Format).HasMaxLength(16);
             e.Property(x => x.Brief).HasMaxLength(500);
             e.Property(x => x.Hashtag).HasMaxLength(60);
+        });
+        b.Entity<AdPromotion>(e =>
+        {
+            e.HasIndex(x => x.PostId);
+            e.Property(x => x.Mode).HasMaxLength(16);
+            e.Property(x => x.Account).HasMaxLength(40);
+            e.Property(x => x.Currency).HasMaxLength(8);
+            e.Property(x => x.CampaignId).HasMaxLength(40);
+            e.Property(x => x.AdSetId).HasMaxLength(40);
+            e.Property(x => x.CreativeId).HasMaxLength(40);
+            e.Property(x => x.AdId).HasMaxLength(40);
+            e.Property(x => x.DailyBudget).HasPrecision(10, 2);
+            e.Property(x => x.Spend).HasPrecision(12, 2);
+            e.Property(x => x.InterestsJson).HasMaxLength(2000);
+            e.Property(x => x.Error).HasMaxLength(1000);
+            e.Property(x => x.Title).HasMaxLength(200);
+            e.HasOne<InstagramPost>().WithMany().HasForeignKey(x => x.PostId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne<TrackedLink>().WithMany().HasForeignKey(x => x.LinkId).OnDelete(DeleteBehavior.SetNull);
         });
         b.Entity<LibraryItem>(e =>
         {

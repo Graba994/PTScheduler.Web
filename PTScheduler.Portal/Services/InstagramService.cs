@@ -1249,7 +1249,7 @@ public class InstagramService(
 /// </summary>
 public class InstagramBackgroundService(IServiceScopeFactory scopes, ILogger<InstagramBackgroundService> logger) : BackgroundService
 {
-    private DateTime _comments = DateTime.MinValue, _sync = DateTime.MinValue, _dm = DateTime.MinValue;
+    private DateTime _comments = DateTime.MinValue, _sync = DateTime.MinValue, _dm = DateTime.MinValue, _ads = DateTime.MinValue;
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -1271,6 +1271,7 @@ public class InstagramBackgroundService(IServiceScopeFactory scopes, ILogger<Ins
                     var dm = scope.ServiceProvider.GetRequiredService<PTScheduler.Portal.Services.Social.DmService>();
                     if (now - _comments > TimeSpan.FromMinutes(15)) { _comments = now; await ig.SyncCommentsAsync(ct); await dm.ApplyRulesAsync(ct); }
                     if (now - _dm > TimeSpan.FromMinutes(5)) { _dm = now; await dm.SyncAsync(ct); }
+                    if (now - _ads > TimeSpan.FromHours(1)) { _ads = now; await scope.ServiceProvider.GetRequiredService<PTScheduler.Portal.Services.Social.AdsService>().RefreshAsync(ct: ct); }
                     await DailyAsync(scope.ServiceProvider, ig, ct);
                     await scope.ServiceProvider.GetRequiredService<PTScheduler.Portal.Services.Social.SocialReportService>().SendIfDueAsync(ct);
                 }

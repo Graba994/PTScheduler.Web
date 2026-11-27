@@ -237,6 +237,127 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.ToTable("AspNetUserTokens", (string)null);
                 });
 
+            modelBuilder.Entity("PTScheduler.Portal.Entities.AdPromotion", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Account")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<DateTime?>("ActivatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("AdId")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("AdSetId")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<int>("AgeMax")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("AgeMin")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CampaignId")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<int>("Clicks")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreativeId")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.Property<decimal>("DailyBudget")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<int>("Days")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("EndAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Engagements")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int>("Impressions")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("InsightsAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("InterestsJson")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<int?>("LinkId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<bool>("OnFacebook")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("OnInstagram")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("PostId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Reach")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("Spend")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)");
+
+                    b.Property<DateTime>("StartAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LinkId");
+
+                    b.HasIndex("PostId");
+
+                    b.ToTable("AdPromotions");
+                });
+
             modelBuilder.Entity("PTScheduler.Portal.Entities.AiUsageLog", b =>
                 {
                     b.Property<long>("Id")
@@ -4862,6 +4983,19 @@ namespace PTScheduler.Portal.Data.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("PTScheduler.Portal.Entities.AdPromotion", b =>
+                {
+                    b.HasOne("PTScheduler.Portal.Entities.TrackedLink", null)
+                        .WithMany()
+                        .HasForeignKey("LinkId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PTScheduler.Portal.Entities.InstagramPost", null)
+                        .WithMany()
+                        .HasForeignKey("PostId")
+                        .OnDelete(DeleteBehavior.SetNull);
                 });
 
             modelBuilder.Entity("PTScheduler.Portal.Entities.AppFeedback", b =>

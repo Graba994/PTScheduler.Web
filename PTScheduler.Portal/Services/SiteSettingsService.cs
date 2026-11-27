@@ -209,6 +209,9 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string SocialWeeklySent = "social_weekly_sent";
         public const string DmLastError = "dm_last_error";
         public const string FilmMediaKey = "film_media_key";
+        public const string MetaUserToken = "meta_user_token";
+        public const string MetaUserTokenExpires = "meta_user_token_expires";
+        public const string MetaAdAccount = "meta_ad_account";
         // Studio reklam (Panel → Studio reklam)
         public const string StudioKnowledge = "studio_knowledge";
         public const string StudioKnowledgeRequested = "studio_knowledge_requested";
