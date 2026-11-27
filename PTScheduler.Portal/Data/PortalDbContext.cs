@@ -41,6 +41,8 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<InstagramMedia> InstagramMedia => Set<InstagramMedia>();
     public DbSet<InstagramDaily> InstagramDaily => Set<InstagramDaily>();
     public DbSet<InstagramComment> InstagramComments => Set<InstagramComment>();
+    public DbSet<SocialChannel> SocialChannels => Set<SocialChannel>();
+    public DbSet<SocialPostTarget> SocialPostTargets => Set<SocialPostTarget>();
     public DbSet<StudioPromotion> StudioPromotions => Set<StudioPromotion>();
     public DbSet<StudioVideo> StudioVideos => Set<StudioVideo>();
     public DbSet<StudioScene> StudioScenes => Set<StudioScene>();
@@ -523,6 +525,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.Property(x => x.Name).HasMaxLength(200);
             e.Property(x => x.PictureUrl).HasMaxLength(2000);
             e.Property(x => x.LastError).HasMaxLength(500);
+            e.Property(x => x.Provider).HasMaxLength(16);
         });
         b.Entity<InstagramPost>(e =>
         {
@@ -552,10 +555,32 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.HasIndex(x => x.PostedAt);
             e.Property(x => x.MediaType).HasMaxLength(32);
             e.Property(x => x.ProductType).HasMaxLength(32);
+            e.Property(x => x.Platform).HasMaxLength(16);
             e.Property(x => x.Permalink).HasMaxLength(500);
             e.Property(x => x.ThumbnailUrl).HasMaxLength(2000);
         });
         b.Entity<InstagramDaily>(e => e.HasKey(x => x.Day));
+        b.Entity<SocialChannel>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.Handle).HasMaxLength(100);
+            e.Property(x => x.ExternalId).HasMaxLength(64);
+            e.Property(x => x.PictureUrl).HasMaxLength(2000);
+            e.Property(x => x.ProfileUrl).HasMaxLength(500);
+            e.Property(x => x.LastError).HasMaxLength(500);
+        });
+        b.Entity<SocialPostTarget>(e =>
+        {
+            e.HasIndex(x => new { x.PostId, x.ChannelId }).IsUnique();
+            e.HasIndex(x => x.Status);
+            e.Property(x => x.Caption).HasMaxLength(5000);
+            e.Property(x => x.ContainerId).HasMaxLength(64);
+            e.Property(x => x.ExternalId).HasMaxLength(128);
+            e.Property(x => x.Permalink).HasMaxLength(500);
+            e.Property(x => x.Error).HasMaxLength(1000);
+            e.HasOne(x => x.Post).WithMany().HasForeignKey(x => x.PostId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Channel).WithMany().HasForeignKey(x => x.ChannelId).OnDelete(DeleteBehavior.Cascade);
+        });
         b.Entity<InstagramComment>(e =>
         {
             e.HasKey(x => x.Id);
@@ -565,6 +590,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.Property(x => x.Username).HasMaxLength(64);
             e.Property(x => x.Text).HasMaxLength(2200);
             e.Property(x => x.Suggestion).HasMaxLength(1000);
+            e.Property(x => x.Platform).HasMaxLength(16);
             e.HasIndex(x => new { x.Done, x.At });
             e.HasIndex(x => x.MediaId);
         });

@@ -138,6 +138,25 @@ public class InstagramAi(AiService ai, SiteSettingsService settings, IDbContextF
         return (r.Text?.Trim().Trim('"'), r.Error);
     }
 
+    /// <summary>Opis przerobiony pod konkretną platformę (ton, długość, hashtagi) — z tych samych faktów.</summary>
+    public async Task<(string? Text, string? Error)> AdaptAsync(string platform, string tone, int maxLength, string title, string caption, CancellationToken ct = default)
+    {
+        var user = $"""
+            Przerób opis posta pod platformę {platform}. Zasady tej platformy: {tone}
+            Najwyżej {maxLength} znaków łącznie z hashtagami. Zachowaj sens i fakty, nie dodawaj nowych obietnic.
+            Temat: {title}
+
+            Opis z Instagrama:
+            {caption}
+
+            Odpowiedz samym gotowym tekstem, bez cudzysłowów i komentarzy.
+            """;
+        var r = await ai.CompleteAsync(Feature, null, await SystemAsync(), user, maxTokens: Math.Clamp(maxLength / 2, 200, 1200), ct: ct);
+        var text = r.Text?.Trim().Trim('"');
+        if (text is not null && text.Length > maxLength) text = text[..maxLength].TrimEnd();
+        return (text, r.Error);
+    }
+
     // ── Komentarze ──
 
     public async Task<(string? Text, string? Error)> ReplyAsync(string comment, string? username, string? postCaption, CancellationToken ct = default)

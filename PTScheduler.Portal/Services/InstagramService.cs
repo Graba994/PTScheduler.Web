@@ -20,6 +20,7 @@ public class InstagramService(
     SiteSettingsService settings,
     InstagramClient client,
     InstagramAi ai,
+    PTScheduler.Portal.Services.Social.SocialService social,
     EmailService email,
     IDataProtectionProvider dataProtection,
     IConfiguration config,
@@ -73,6 +74,7 @@ public class InstagramService(
         var token = Token(a);
         if (token is null) return (a, null, "Nie da się odczytać tokenu — połącz konto ponownie.");
         if (a.TokenExpiresAt < DateTime.UtcNow) return (a, null, "Token Instagrama wygasł — połącz konto ponownie.");
+        client.Provider = a.Provider;
         return (a, token, null);
     }
 
@@ -147,6 +149,7 @@ public class InstagramService(
             await db.InstagramDaily.ExecuteDeleteAsync();
         }
         a.IgUserId = me.UserId;
+        a.Provider = "instagram";
         a.Username = me.Username;
         a.Name = me.Name;
         a.PictureUrl = me.Picture;
@@ -173,7 +176,7 @@ public class InstagramService(
     public async Task<bool> RefreshTokenIfNeededAsync(CancellationToken ct = default)
     {
         var (a, token, _) = await ConnectedAsync();
-        if (a is null || token is null || !InstagramRules.TokenNeedsRefresh(a.TokenExpiresAt, a.TokenRefreshedAt, DateTime.UtcNow)) return false;
+        if (a is null || token is null || a.Provider == "facebook" || !InstagramRules.TokenNeedsRefresh(a.TokenExpiresAt, a.TokenRefreshedAt, DateTime.UtcNow)) return false;
         try
         {
             var (fresh, expires) = await client.RefreshAsync(token, ct);
@@ -272,6 +275,7 @@ public class InstagramService(
         var p = new InstagramPost { Kind = kind, Title = title, Pillar = pillar, Source = source, ShareToFeed = true };
         db.InstagramPosts.Add(p);
         await db.SaveChangesAsync();
+        await social.ApplyDefaultsAsync(p.Id);
         return p.Id;
     }
 
@@ -299,6 +303,7 @@ public class InstagramService(
     /// <summary>Czy post da się opublikować: pliki zgodne z rodzajem i opis w limitach. Pusta lista = tak.</summary>
     public static List<string> Problems(InstagramPost p)
     {
+        if (!p.ToInstagram) return [];
         var list = InstagramRules.CaptionProblems(p.Caption);
         var images = p.Assets.Count(a => a.Kind == "image");
         var videos = p.Assets.Count(a => a.Kind == "video");
@@ -314,12 +319,15 @@ public class InstagramService(
         return list;
     }
 
+    /// <summary>Instagram (jeśli wybrany) + wszystkie pozostałe wybrane kanały.</summary>
+    public async Task<List<string>> AllProblemsAsync(InstagramPost p) => [.. Problems(p), .. await social.ProblemsAsync(p)];
+
     /// <summary>Planuje post na konkretny termin (UTC) albo najbliższy wolny termin z ustawień autopilota.</summary>
     public async Task<(bool Ok, string Message)> ScheduleAsync(int id, DateTime? atUtc)
     {
         var p = await PostAsync(id);
         if (p is null) return (false, "Nie ma takiego posta.");
-        if (Problems(p) is { Count: > 0 } problems) return (false, string.Join(" ", problems));
+        if (await AllProblemsAsync(p) is { Count: > 0 } problems) return (false, string.Join(" ", problems));
         if (atUtc is null)
         {
             var ap = await AutopilotAsync();
@@ -357,20 +365,36 @@ public class InstagramService(
     {
         var p = await PostAsync(id);
         if (p is null) return (false, "Nie ma takiego posta.");
-        if (Problems(p) is { Count: > 0 } problems) return (false, string.Join(" ", problems));
-        var (a, token, error) = await ConnectedAsync();
-        if (error is not null) return (false, error);
-        await StartPublishAsync(p, a!, token!, CancellationToken.None);
-        await AdvanceAsync(id, a!, token!, CancellationToken.None);
+        if (await AllProblemsAsync(p) is { Count: > 0 } problems) return (false, string.Join(" ", problems));
+        var igMessage = "";
+        if (p.ToInstagram)
+        {
+            var (a, token, error) = await ConnectedAsync();
+            if (error is not null) return (false, error);
+            await StartPublishAsync(p, a!, token!, CancellationToken.None);
+            await AdvanceAsync(id, a!, token!, CancellationToken.None);
+        }
+        else
+        {
+            await using var db = await dbFactory.CreateDbContextAsync();
+            await db.InstagramPosts.Where(x => x.Id == id).ExecuteUpdateAsync(u => u
+                .SetProperty(x => x.Status, InstagramPostStatus.Publishing).SetProperty(x => x.ScheduledAt, DateTime.UtcNow).SetProperty(x => x.UpdatedAt, DateTime.UtcNow));
+        }
+        await social.ProcessDueAsync(CancellationToken.None, id);
         var after = await PostAsync(id);
         // Nowy post od razu w statystykach i komentarzach (bez czekania na przebieg co 3 godziny).
-        if (after?.Status == InstagramPostStatus.Published) await SafeAsync(() => SyncAsync(), "synchronizacja po publikacji");
-        return after?.Status switch
-        {
-            InstagramPostStatus.Published => (true, "Opublikowano na Instagramie."),
-            InstagramPostStatus.Publishing => (true, "Instagram przetwarza plik — post pojawi się za chwilę (sprawdzam co minutę)."),
-            _ => (false, after?.Error ?? "Nie udało się opublikować.")
-        };
+        if (after?.Status == InstagramPostStatus.Published && p.ToInstagram) await SafeAsync(() => SyncAsync(), "synchronizacja po publikacji");
+        var targets = await social.TargetsAsync(id);
+        var others = targets.Count == 0 ? "" : " " + string.Join(", ", targets.Select(t => $"{PTScheduler.Portal.Services.Social.SocialPlatforms.Get(t.Channel!.Platform).Label}: {PTScheduler.Portal.Services.Social.SocialPlatforms.TargetLabel(t.Status).ToLowerInvariant()}")) + ".";
+        if (p.ToInstagram)
+            igMessage = after?.Status switch
+            {
+                InstagramPostStatus.Published => "Instagram: opublikowano.",
+                InstagramPostStatus.Publishing => "Instagram przetwarza plik — post pojawi się za chwilę.",
+                _ => $"Instagram: {after?.Error ?? "nie udało się"}."
+            };
+        var ok = after?.Status is InstagramPostStatus.Published or InstagramPostStatus.Publishing && targets.All(t => t.Status != SocialTargetStatus.Failed);
+        return (ok, (igMessage + others).Trim());
     }
 
     // ── Pliki posta ───────────────────────────────────────────────────
@@ -656,38 +680,51 @@ public class InstagramService(
     public async Task<int> PublishDueAsync(CancellationToken ct)
     {
         var due = await PostsAsync(q => q.Where(p => (p.Status == InstagramPostStatus.Scheduled && p.ScheduledAt <= DateTime.UtcNow) || p.Status == InstagramPostStatus.Publishing));
-        if (due.Count == 0) return 0;
-        var (a, token, error) = await ConnectedAsync();
-        if (error is not null)
+        // Posty bez Instagrama: przechodzą w „Publikuję…”, a kanały obsługuje SocialService.
+        foreach (var p in due.Where(p => !p.ToInstagram && p.Status == InstagramPostStatus.Scheduled))
         {
-            // Bez połączenia nie publikujemy — posty czekają, a w Przeglądzie widać powód.
-            foreach (var p in due.Where(p => p.Status == InstagramPostStatus.Scheduled && p.ScheduledAt < DateTime.UtcNow.AddHours(-6)))
-            {
-                await using var db = await dbFactory.CreateDbContextAsync(ct);
-                await db.InstagramPosts.Where(x => x.Id == p.Id).ExecuteUpdateAsync(u => u.SetProperty(x => x.Status, InstagramPostStatus.Failed).SetProperty(x => x.Error, error), ct);
-            }
-            return 0;
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var problems = await social.ProblemsAsync(p);
+            await db.InstagramPosts.Where(x => x.Id == p.Id).ExecuteUpdateAsync(u => u
+                .SetProperty(x => x.Status, problems.Count > 0 ? InstagramPostStatus.Failed : InstagramPostStatus.Publishing)
+                .SetProperty(x => x.Error, problems.Count > 0 ? string.Join(" ", problems) : null).SetProperty(x => x.UpdatedAt, DateTime.UtcNow), ct);
         }
-        foreach (var p in due)
+        var ig = due.Where(p => p.ToInstagram).ToList();
+        if (ig.Count > 0)
         {
-            if (p.Status == InstagramPostStatus.Scheduled)
+            var (a, token, error) = await ConnectedAsync();
+            if (error is not null)
             {
-                if (Problems(p) is { Count: > 0 } problems)
+                // Bez połączenia z Instagramem nie publikujemy tam — posty czekają, a w Przeglądzie widać powód.
+                foreach (var p in ig.Where(p => p.Status == InstagramPostStatus.Scheduled && p.ScheduledAt < DateTime.UtcNow.AddHours(-6)))
                 {
                     await using var db = await dbFactory.CreateDbContextAsync(ct);
-                    await db.InstagramPosts.Where(x => x.Id == p.Id).ExecuteUpdateAsync(u => u.SetProperty(x => x.Status, InstagramPostStatus.Failed).SetProperty(x => x.Error, string.Join(" ", problems)), ct);
-                    continue;
+                    await db.InstagramPosts.Where(x => x.Id == p.Id).ExecuteUpdateAsync(u => u.SetProperty(x => x.Status, InstagramPostStatus.Failed).SetProperty(x => x.Error, error), ct);
                 }
-                await StartPublishAsync(p, a!, token!, ct);
             }
-            await AdvanceAsync(p.Id, a!, token!, ct);
+            else
+            {
+                foreach (var p in ig)
+                {
+                    if (p.Status == InstagramPostStatus.Scheduled)
+                    {
+                        if (Problems(p) is { Count: > 0 } problems)
+                        {
+                            await using var db = await dbFactory.CreateDbContextAsync(ct);
+                            await db.InstagramPosts.Where(x => x.Id == p.Id).ExecuteUpdateAsync(u => u.SetProperty(x => x.Status, InstagramPostStatus.Failed).SetProperty(x => x.Error, string.Join(" ", problems)), ct);
+                            continue;
+                        }
+                        await StartPublishAsync(p, a!, token!, ct);
+                    }
+                    await AdvanceAsync(p.Id, a!, token!, ct);
+                }
+                await using var db2 = await dbFactory.CreateDbContextAsync(ct);
+                var ids = ig.Select(p => p.Id).ToList();
+                if (await db2.InstagramPosts.AnyAsync(p => ids.Contains(p.Id) && p.Status == InstagramPostStatus.Published, ct))
+                    await SafeAsync(() => SyncAsync(ct), "synchronizacja po publikacji");
+            }
         }
-        await using (var db = await dbFactory.CreateDbContextAsync(ct))
-        {
-            var ids = due.Select(p => p.Id).ToList();
-            if (await db.InstagramPosts.AnyAsync(p => ids.Contains(p.Id) && p.Status == InstagramPostStatus.Published, ct))
-                await SafeAsync(() => SyncAsync(ct), "synchronizacja po publikacji");
-        }
+        await social.ProcessDueAsync(ct);
         return due.Count;
     }
 
@@ -709,8 +746,8 @@ public class InstagramService(
         if (error is not null) return (false, error);
         try
         {
-            var me = await client.MeAsync(token!, ct);
-            var media = await client.MediaAsync(token!, a!.IgUserId, 50, ct);
+            var me = a!.Provider == "facebook" ? await client.ProfileAsync(token!, a.IgUserId, ct) : await client.MeAsync(token!, ct);
+            var media = await client.MediaAsync(token!, a.IgUserId, 50, ct);
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var acc = await db.InstagramAccounts.FirstAsync(x => x.Id == a.Id, ct);
             acc.Username = me.Username; acc.Name = me.Name; acc.PictureUrl = me.Picture;
@@ -781,12 +818,21 @@ public class InstagramService(
     }
 
     /// <summary>Komentarze pod ostatnimi postami. Nowe trafiają do skrzynki; autopilot może odpowiedzieć na proste pochwały.</summary>
+    /// <summary>Komentarze z Instagrama i z pozostałych kanałów (Facebook) — do wspólnej skrzynki.</summary>
     public async Task<(int New, string? Error)> SyncCommentsAsync(CancellationToken ct = default)
+    {
+        var hasIg = await AccountAsync() is not null;
+        var (igNew, igError) = hasIg ? await SyncInstagramCommentsAsync(ct) : (0, null);
+        var (otherNew, otherError) = await social.SyncAsync(ct);
+        return (igNew + otherNew, igError ?? otherError);
+    }
+
+    private async Task<(int New, string? Error)> SyncInstagramCommentsAsync(CancellationToken ct)
     {
         var (a, token, error) = await ConnectedAsync();
         if (error is not null) return (0, error);
         await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var recent = await db.InstagramMedia.AsNoTracking().Where(m => m.ProductType != "STORY").OrderByDescending(m => m.PostedAt).Take(15).Select(m => m.Id).ToListAsync(ct);
+        var recent = await db.InstagramMedia.AsNoTracking().Where(m => m.Platform == "instagram" && m.ProductType != "STORY").OrderByDescending(m => m.PostedAt).Take(15).Select(m => m.Id).ToListAsync(ct);
         var added = 0;
         try
         {
@@ -837,11 +883,12 @@ public class InstagramService(
     {
         text = text.Trim();
         if (text.Length == 0) return (false, "Wpisz odpowiedź.");
-        var (a, token, error) = await ConnectedAsync();
-        if (error is not null) return (false, error);
         await using var db = await dbFactory.CreateDbContextAsync();
         var c = await db.InstagramComments.FirstOrDefaultAsync(x => x.Id == commentId);
         if (c is null) return (false, "Nie ma takiego komentarza.");
+        if (c.Platform != "instagram") return await social.ReplyAsync(c, text);
+        var (a, token, error) = await ConnectedAsync();
+        if (error is not null) return (false, error);
         try
         {
             // Odpowiedź zawsze do komentarza głównego (Instagram nie ma głębszych wątków).
@@ -857,6 +904,9 @@ public class InstagramService(
 
     public async Task<(bool Ok, string Message)> HideCommentAsync(string commentId, bool hide)
     {
+        await using (var cdb = await dbFactory.CreateDbContextAsync())
+            if (await cdb.InstagramComments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == commentId) is { Platform: not "instagram" } other)
+                return await social.HideAsync(other, hide);
         var (_, token, error) = await ConnectedAsync();
         if (error is not null) return (false, error);
         try
@@ -973,8 +1023,8 @@ public class InstagramService(
         var last7 = days.Where(d => d.Day > today.AddDays(-8) && d.Day < today).ToList();
         var prev7 = days.Where(d => d.Day > today.AddDays(-15) && d.Day <= today.AddDays(-8)).ToList();
         var weekAgo = days.FirstOrDefault(d => d.Day >= today.AddDays(-7));
-        var media30 = await db.InstagramMedia.AsNoTracking().Where(m => m.PostedAt > DateTime.UtcNow.AddDays(-30)).ToListAsync();
-        var allMedia = await db.InstagramMedia.AsNoTracking().OrderByDescending(m => m.PostedAt).Take(100).ToListAsync();
+        var media30 = await db.InstagramMedia.AsNoTracking().Where(m => m.Platform == "instagram" && m.PostedAt > DateTime.UtcNow.AddDays(-30)).ToListAsync();
+        var allMedia = await db.InstagramMedia.AsNoTracking().Where(m => m.Platform == "instagram").OrderByDescending(m => m.PostedAt).Take(100).ToListAsync();
         var followers = acc?.Followers ?? 0;
         var rates = media30.Select(m => InstagramRules.EngagementRate(m, followers)).Where(r => r is not null).Select(r => r!.Value).ToList();
         var best = media30.Where(m => m.ProductType != "STORY").OrderByDescending(InstagramRules.Interactions).FirstOrDefault();
@@ -1001,6 +1051,10 @@ public class InstagramService(
             tips.Add(("warn", "bi-hourglass-split", $"{counts[InstagramPostStatus.ToApprove]} od autopilota czeka na akceptację.", "plan"));
         if (counts.GetValueOrDefault(InstagramPostStatus.Failed) > 0)
             tips.Add(("danger", "bi-x-octagon", $"{counts[InstagramPostStatus.Failed]} nie udało się opublikować — sprawdź powód w planie.", "plan"));
+        var manualDue = await social.ManualDueCountAsync();
+        if (manualDue > 0) tips.Add(("warn", "bi-box-arrow-up", $"{manualDue} {(manualDue == 1 ? "post czeka" : "posty czekają")} na wrzucenie do kanału ręcznego (TikTok, YouTube, LinkedIn…) — paczka jest gotowa.", "plan"));
+        var failedTargets = await social.FailedCountAsync();
+        if (failedTargets > 0) tips.Add(("danger", "bi-x-octagon", $"Nie udało się opublikować na {failedTargets} kanałach — sprawdź w planie.", "plan"));
         if (open > 0) tips.Add(("info", "bi-chat-dots", $"{open} {(open == 1 ? "komentarz czeka" : "komentarzy czeka")} na odpowiedź. Szybka odpowiedź podbija zasięg posta.", "komentarze"));
         var slots = InstagramRules.BestSlots(allMedia, followers, minPosts: 2);
         if (slots.Count > 0)
@@ -1016,16 +1070,22 @@ public class InstagramService(
 
     public sealed record Stats(List<InstagramDaily> Days, List<InstagramMedia> Media, Dictionary<int, string> PillarByPost, List<InstagramRules.Slot> Slots, int Followers);
 
-    public async Task<Stats> StatsAsync(int days)
+    public async Task<Stats> StatsAsync(int days, string platform = "instagram")
     {
         var acc = await AccountAsync();
         await using var db = await dbFactory.CreateDbContextAsync();
         var from = DateOnly.FromDateTime(InstagramRules.ToWarsaw(DateTime.UtcNow)).AddDays(-days);
-        var daily = await db.InstagramDaily.AsNoTracking().Where(d => d.Day >= from).OrderBy(d => d.Day).ToListAsync();
-        var media = await db.InstagramMedia.AsNoTracking().OrderByDescending(m => m.PostedAt).Take(100).ToListAsync();
+        // Dzienne liczby (zasięg, obserwujący) zbieramy dla Instagrama; dla innych kanałów — same posty.
+        var daily = platform == "instagram" ? await db.InstagramDaily.AsNoTracking().Where(d => d.Day >= from).OrderBy(d => d.Day).ToListAsync() : [];
+        var media = await db.InstagramMedia.AsNoTracking().Where(m => m.Platform == platform).OrderByDescending(m => m.PostedAt).Take(100).ToListAsync();
         var postIds = media.Where(m => m.PostId != null).Select(m => m.PostId!.Value).ToList();
         var pillars = await db.InstagramPosts.AsNoTracking().Where(p => postIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, p => p.Pillar);
-        var followers = acc?.Followers ?? 0;
+        var followers = platform switch
+        {
+            "facebook" => await db.SocialChannels.Where(c => c.Platform == SocialPlatform.Facebook).Select(c => c.Followers).FirstOrDefaultAsync() ?? 0,
+            "threads" => await db.SocialChannels.Where(c => c.Platform == SocialPlatform.Threads).Select(c => c.Followers).FirstOrDefaultAsync() ?? 0,
+            _ => acc?.Followers ?? 0
+        };
         return new(daily, media, pillars, InstagramRules.BestSlots(media, followers, 1, 5), followers);
     }
 
@@ -1070,11 +1130,14 @@ public class InstagramBackgroundService(IServiceScopeFactory scopes, ILogger<Ins
             {
                 using var scope = scopes.CreateScope();
                 var ig = scope.ServiceProvider.GetRequiredService<InstagramService>();
-                if (await ig.AccountAsync() is not null)
+                var social = scope.ServiceProvider.GetRequiredService<PTScheduler.Portal.Services.Social.SocialService>();
+                var hasIg = await ig.AccountAsync() is not null;
+                var hasOther = (await social.ChannelsAsync(enabledOnly: true)).Count > 0;
+                if (hasIg || hasOther)
                 {
                     await ig.PublishDueAsync(ct);
                     var now = DateTime.UtcNow;
-                    if (now - _sync > TimeSpan.FromHours(3)) { _sync = now; await ig.SyncAsync(ct); }
+                    if (hasIg && now - _sync > TimeSpan.FromHours(3)) { _sync = now; await ig.SyncAsync(ct); }
                     if (now - _comments > TimeSpan.FromMinutes(15)) { _comments = now; await ig.SyncCommentsAsync(ct); }
                     await DailyAsync(scope.ServiceProvider, ig, ct);
                 }
@@ -1093,6 +1156,7 @@ public class InstagramBackgroundService(IServiceScopeFactory scopes, ILogger<Ins
         if (await settings.GetAsync(K.InstagramAutopilotRunAt) == today) return;
         await settings.SetAsync(K.InstagramAutopilotRunAt, today);
         await ig.RefreshTokenIfNeededAsync(ct);
+        await sp.GetRequiredService<PTScheduler.Portal.Services.Social.SocialService>().RefreshTokensAsync(ct);
         await ig.RunAutopilotAsync(ct: ct);
     }
 }

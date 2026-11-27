@@ -4,6 +4,13 @@
 @* Statystyki: obserwujący i zasięg w czasie, najlepsze pory, filary treści, tabela postów i analiza AI. *@
 
 <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+    <div class="pp-seg" role="group" aria-label="Kanał">
+        @foreach (var (key, label, icon) in Platforms)
+        {
+            var k = key;
+            <button type="button" class="@(_platform == k ? "active" : "")" @onclick="() => SetPlatformAsync(k)"><i class="bi @icon"></i>@label</button>
+        }
+    </div>
     <div class="pp-seg" role="group" aria-label="Okres">
         @foreach (var d in new[] { 7, 30, 90 })
         {
@@ -151,10 +158,16 @@ else
     protected override async Task OnInitializedAsync()
     {
         _aiOff = await Ai.UnavailableAsync();
-        _s = await Ig.StatsAsync(_days);
+        _s = await Ig.StatsAsync(_days, _platform);
     }
 
-    private async Task SetAsync(int days) { _days = days; _s = await Ig.StatsAsync(days); }
+    private async Task SetAsync(int days) { _days = days; _s = await Ig.StatsAsync(days, _platform); }
+
+    private static readonly (string Key, string Label, string Icon)[] Platforms =
+        [("instagram", "Instagram", "bi-instagram"), ("facebook", "Facebook", "bi-facebook"), ("threads", "Threads", "bi-threads")];
+    private string _platform = "instagram";
+
+    private async Task SetPlatformAsync(string platform) { _platform = platform; _s = await Ig.StatsAsync(_days, platform); }
 
     private List<ResourceReportService.Point> Points(Func<InstagramDaily, int?> f) =>
         _s!.Days.Where(d => f(d) is not null).Select(d => new ResourceReportService.Point(InstagramRules.ToUtc(d.Day.ToDateTime(new TimeOnly(12, 0))), f(d)!.Value)).ToList();

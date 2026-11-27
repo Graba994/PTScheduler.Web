@@ -1,4 +1,5 @@
 @inject InstagramService Ig
+@inject PTScheduler.Portal.Services.Social.SocialService Social
 
 @* Plan: pasek dwóch tygodni i lista postów po dniach (nadchodzące, szkice, opublikowane). *@
 
@@ -67,6 +68,17 @@ else
                             <span class="ms-auto ig-post-when">@(post.Status == InstagramPostStatus.Published ? IgUi.When(post.PublishedAt) : IgUi.When(post.ScheduledAt))</span>
                         </div>
                         <button type="button" class="ig-post-title" @onclick='() => Go.InvokeAsync(("plan", post.Id))'>@(string.IsNullOrWhiteSpace(post.Title) ? "Bez tytułu" : post.Title)</button>
+                        <div class="sc-badges">
+                            @if (post.ToInstagram)
+                            {
+                                <span class="sc-badge st-@(post.Status == InstagramPostStatus.Published ? "ok" : post.Status == InstagramPostStatus.Failed ? "danger" : "muted")" title="Instagram"><i class="bi bi-instagram"></i></span>
+                            }
+                            @foreach (var t in _targets.GetValueOrDefault(post.Id) ?? [])
+                            {
+                                var info = PTScheduler.Portal.Services.Social.SocialPlatforms.Get(t.Channel!.Platform);
+                                <span class="sc-badge st-@PTScheduler.Portal.Services.Social.SocialPlatforms.TargetTone(t.Status)" title="@($"{info.Label}: {PTScheduler.Portal.Services.Social.SocialPlatforms.TargetLabel(t.Status)}")"><i class="bi @info.Icon"></i></span>
+                            }
+                        </div>
                         <div class="ig-post-cap">@InstagramGraphics.Clean(post.Caption, 140)</div>
                         @if (post.Status == InstagramPostStatus.Failed && post.Error is not null)
                         {
@@ -125,6 +137,7 @@ else
 
     private string _filter = "upcoming";
     private List<InstagramPost> _posts = [];
+    private Dictionary<int, List<SocialPostTarget>> _targets = [];
     private List<DateTime> _days = [];
     private DateTime _today;
     private HashSet<int> _postDays = [];
@@ -149,6 +162,7 @@ else
             _ => await Ig.PostsAsync(q => q.Where(p => p.Status == InstagramPostStatus.ToApprove || p.Status == InstagramPostStatus.Scheduled
                 || p.Status == InstagramPostStatus.Publishing || p.Status == InstagramPostStatus.Failed).OrderBy(p => p.ScheduledAt))
         };
+        _targets = await Social.TargetsForAsync(_posts.Select(p => p.Id));
     }
 
     private async Task SetFilterAsync(string f) { _filter = f; await LoadAsync(); }

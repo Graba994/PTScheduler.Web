@@ -22,7 +22,16 @@ public class InstagramClient(IHttpClientFactory httpFactory, IConfiguration? con
 {
     public const string Version = "v24.0";
     /// <summary>Adresy API — do testów można je podmienić (Instagram:GraphUrl, Instagram:ApiUrl).</summary>
-    private string Graph => (config?["Instagram:GraphUrl"] is { Length: > 0 } g ? g : "https://graph.instagram.com").TrimEnd('/');
+    private string Graph => Provider == "facebook"
+        ? (config?["Social:FacebookGraphUrl"] is { Length: > 0 } f ? f : "https://graph.facebook.com").TrimEnd('/')
+        : (config?["Instagram:GraphUrl"] is { Length: > 0 } g ? g : "https://graph.instagram.com").TrimEnd('/');
+
+    /// <summary>
+    /// instagram — konto połączone logowaniem przez Instagram (graph.instagram.com, token konta);
+    /// facebook — konto połączone przez stronę na Facebooku (graph.facebook.com, token strony). Endpointy publikacji,
+    /// statystyk i komentarzy są te same.
+    /// </summary>
+    public string Provider { get; set; } = "instagram";
     private string Api => (config?["Instagram:ApiUrl"] is { Length: > 0 } a ? a : "https://api.instagram.com").TrimEnd('/');
 
     /// <summary>Uprawnienia: profil, publikacja, komentarze, statystyki.</summary>
@@ -75,6 +84,14 @@ public class InstagramClient(IHttpClientFactory httpFactory, IConfiguration? con
     {
         var j = await GetAsync(token, "me", "fields=user_id,username,name,profile_picture_url,followers_count,follows_count,media_count", ct);
         return new(Str(j, "user_id") ?? Str(j, "id") ?? "", Str(j, "username") ?? "", Str(j, "name"), Str(j, "profile_picture_url"),
+            Int(j, "followers_count"), Int(j, "follows_count"), Int(j, "media_count"));
+    }
+
+    /// <summary>Profil konta po id (konto połączone przez stronę na Facebooku — tam /me to strona, nie Instagram).</summary>
+    public async Task<Profile> ProfileAsync(string token, string igId, CancellationToken ct = default)
+    {
+        var j = await GetAsync(token, igId, "fields=id,username,name,profile_picture_url,followers_count,follows_count,media_count", ct);
+        return new(Str(j, "id") ?? igId, Str(j, "username") ?? "", Str(j, "name"), Str(j, "profile_picture_url"),
             Int(j, "followers_count"), Int(j, "follows_count"), Int(j, "media_count"));
     }
 

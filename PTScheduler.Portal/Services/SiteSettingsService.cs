@@ -199,6 +199,9 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         /// <summary>off | suggest (AI podpowiada odpowiedź) | auto (odpowiada sam na proste komentarze)</summary>
         public const string InstagramCommentMode = "instagram_comment_mode";
         public const string InstagramAutopilotRunAt = "instagram_autopilot_run_at";
+        // Meta (Facebook Login): strona na Facebooku i Instagram przez stronę
+        public const string MetaAppId = "meta_app_id";
+        public const string MetaAppSecret = "meta_app_secret";
         // Studio reklam (Panel → Studio reklam)
         public const string StudioKnowledge = "studio_knowledge";
         public const string StudioKnowledgeRequested = "studio_knowledge_requested";

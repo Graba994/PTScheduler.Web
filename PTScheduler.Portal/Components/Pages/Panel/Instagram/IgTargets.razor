@@ -1,0 +1,185 @@
+@using PTScheduler.Portal.Services.Social
+@inject SocialService Social
+@inject InstagramService Ig
+@inject IJSRuntime JS
+
+@* Gdzie publikować: Instagram + kanały (Facebook, Threads przez API; TikTok, YouTube, LinkedIn, X, Pinterest ręcznie).
+   Każdy kanał może mieć własny opis (ręcznie albo „Dopasuj z AI”), stan publikacji i — dla kanałów ręcznych — paczkę do wrzucenia. *@
+
+<PanelCard Title="Gdzie publikować" Icon="bi-broadcast-pin" Subtitle="Jeden post — kilka kanałów, każdy z opisem dopasowanym do platformy">
+    <div class="sc-pick">
+        <label class="sc-check">
+            <input type="checkbox" class="form-check-input" checked="@Post.ToInstagram" disabled="@Locked" @onchange="e => ToggleIgAsync(e.Value is true)" />
+            <span class="sc-ico sm" style="--c:@SocialPlatforms.InstagramColor"><i class="bi bi-instagram"></i></span>Instagram
+            @if (_igMissing && Post.ToInstagram) { <small class="text-warning ms-1">niepołączony</small> }
+        </label>
+        @foreach (var c in _channels)
+        {
+            var ch = c;
+            var info = SocialPlatforms.Get(ch.Platform);
+            var target = _targets.FirstOrDefault(t => t.ChannelId == ch.Id);
+            <label class="sc-check">
+                <input type="checkbox" class="form-check-input" checked="@(target is not null)" disabled="@(target?.Status == SocialTargetStatus.Published)" @onchange="e => ToggleAsync(ch.Id, e.Value is true)" />
+                <span class="sc-ico sm" style="--c:@info.Color"><i class="bi @info.Icon"></i></span>@info.Label
+                @if (!ch.Api) { <small class="text-muted ms-1">ręcznie</small> }
+            </label>
+        }
+        @if (_channels.Count == 0)
+        {
+            <span class="small text-muted">Dodaj Facebooka, Threads albo kanały ręczne w zakładce <b>Kanały</b>.</span>
+        }
+    </div>
+
+    @foreach (var t in _targets)
+    {
+        var target = t;
+        var ch = target.Channel!;
+        var info = SocialPlatforms.Get(ch.Platform);
+        var caption = string.IsNullOrWhiteSpace(_captions.GetValueOrDefault(target.Id)) ? Caption : _captions[target.Id];
+        var problems = SocialPlatforms.Problems(ch.Platform, Post, caption);
+        <div class="sc-target" @key="target.Id">
+            <div class="sc-target-head">
+                <span class="sc-ico sm" style="--c:@info.Color"><i class="bi @info.Icon"></i></span>
+                <b>@info.Label</b>
+                <span class="pp-chip pp-tone-@SocialPlatforms.TargetTone(target.Status)">@SocialPlatforms.TargetLabel(target.Status)</span>
+                <span class="small @(caption.Length > info.MaxText ? "text-danger fw-semibold" : "text-muted")">@caption.Length / @info.MaxText</span>
+                @if (target.Permalink is not null) { <a class="small ms-auto" href="@target.Permalink" target="_blank" rel="noopener">zobacz <i class="bi bi-box-arrow-up-right"></i></a> }
+            </div>
+            @if (target.Error is not null && target.Status == SocialTargetStatus.Failed)
+            {
+                <div class="small text-danger"><i class="bi bi-exclamation-triangle me-1"></i>@target.Error
+                    <button class="btn btn-link btn-sm p-0 ms-1" @onclick="() => RetryAsync(target.Id)">Ponów</button></div>
+            }
+            @if (problems.Count > 0 && target.Status is SocialTargetStatus.Pending or SocialTargetStatus.Failed)
+            {
+                <div class="small text-warning">@string.Join(" ", problems)</div>
+            }
+            @if (target.Status != SocialTargetStatus.Published)
+            {
+                <details class="sc-own" open="@(!string.IsNullOrWhiteSpace(target.Caption))">
+                    <summary>Opis dla: @info.Label @(string.IsNullOrWhiteSpace(target.Caption) ? "(taki jak na Instagramie)" : "(własny)")</summary>
+                    <textarea class="form-control form-control-sm mt-2" rows="5" value="@_captions.GetValueOrDefault(target.Id)" placeholder="Pusty = opis z Instagrama. @info.Tone"
+                              @oninput="e => _captions[target.Id] = e.Value?.ToString() ?? string.Empty" aria-label="Opis dla @info.Label"></textarea>
+                    <div class="d-flex gap-2 flex-wrap mt-2">
+                        <button class="btn btn-outline-primary btn-sm" @onclick="() => SaveCaptionAsync(target.Id)"><i class="bi bi-save me-1"></i>Zapisz opis</button>
+                        <button class="btn btn-outline-secondary btn-sm" disabled="@(_adapting == target.Id)" @onclick="() => AdaptAsync(target)">
+                            @if (_adapting == target.Id) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-stars me-1"></i> }Dopasuj z AI
+                        </button>
+                    </div>
+                </details>
+            }
+            @if (!ch.Api && target.Status is SocialTargetStatus.ManualDue or SocialTargetStatus.Pending)
+            {
+                <div class="sc-pack">
+                    <div class="small fw-semibold mb-1"><i class="bi bi-box-seam me-1"></i>Paczka do wrzucenia@(target.Status == SocialTargetStatus.ManualDue ? " — termin minął, czas wrzucić" : "")</div>
+                    <div class="d-flex flex-wrap gap-2">
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => CopyAsync(caption)"><i class="bi bi-copy me-1"></i>Kopiuj opis</button>
+                        @foreach (var a in Post.Assets)
+                        {
+                            <a class="btn btn-outline-secondary btn-sm" href="@(a.Kind == "video" ? a.ExternalUrl : $"/media/ig/{a.Token}.jpg")" download target="_blank" rel="noopener">
+                                <i class="bi @(a.Kind == "video" ? "bi-film" : "bi-image") me-1"></i>@(a.Kind == "video" ? "Film" : $"Grafika {a.Order + 1}")
+                            </a>
+                        }
+                        <a class="btn btn-outline-primary btn-sm" href="@(ch.ProfileUrl ?? info.UploadUrl)" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i>Otwórz @info.Label</a>
+                    </div>
+                    <div class="input-group input-group-sm mt-2">
+                        <input class="form-control" placeholder="Adres opublikowanego posta (opcjonalnie)" value="@_links.GetValueOrDefault(target.Id)" @oninput="e => _links[target.Id] = e.Value?.ToString() ?? string.Empty" aria-label="Adres posta" />
+                        <button class="btn btn-success" @onclick="() => DoneAsync(target.Id)"><i class="bi bi-check-lg me-1"></i>Opublikowane</button>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</PanelCard>
+
+@code {
+    [Parameter, EditorRequired] public InstagramPost Post { get; set; } = default!;
+    /// <summary>Aktualny (niezapisany) opis z edytora — domyślny dla kanałów bez własnego.</summary>
+    [Parameter] public string Caption { get; set; } = "";
+    [Parameter] public EventCallback<bool> ToInstagramChanged { get; set; }
+    [Parameter] public EventCallback<(bool, string)> Flash { get; set; }
+
+    private List<SocialChannel> _channels = [];
+    private List<SocialPostTarget> _targets = [];
+    private readonly Dictionary<int, string> _captions = [], _links = [];
+    private bool _igMissing;
+    private int? _adapting;
+    private InstagramPost? _loadedFor;
+
+    private bool Locked => Post.Status is InstagramPostStatus.Published or InstagramPostStatus.Publishing;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Edytor po zapisie/publikacji wczytuje post od nowa (nowy obiekt) — wtedy odświeżamy też stany kanałów.
+        if (ReferenceEquals(_loadedFor, Post)) return;
+        var first = _loadedFor?.Id != Post.Id;
+        _loadedFor = Post;
+        if (first)
+        {
+            _channels = await Social.ChannelsAsync(enabledOnly: true);
+            _igMissing = await Ig.AccountAsync() is null;
+            _captions.Clear();
+            _links.Clear();
+        }
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _targets = await Social.TargetsAsync(Post.Id);
+        foreach (var t in _targets) _captions.TryAdd(t.Id, t.Caption ?? "");
+    }
+
+    private async Task ToggleIgAsync(bool on)
+    {
+        await Social.SetTargetsAsync(Post.Id, on, _targets.Select(t => t.ChannelId).ToList());
+        await ToInstagramChanged.InvokeAsync(on);
+    }
+
+    private async Task ToggleAsync(int channelId, bool on)
+    {
+        var ids = _targets.Select(t => t.ChannelId).Where(id => id != channelId).ToList();
+        if (on) ids.Add(channelId);
+        await Social.SetTargetsAsync(Post.Id, Post.ToInstagram, ids);
+        await LoadAsync();
+    }
+
+    private async Task SaveCaptionAsync(int targetId)
+    {
+        await Social.SetCaptionAsync(targetId, _captions.GetValueOrDefault(targetId));
+        await LoadAsync();
+        await Flash.InvokeAsync((true, "Zapisano opis dla kanału."));
+    }
+
+    private async Task AdaptAsync(SocialPostTarget t)
+    {
+        _adapting = t.Id;
+        var post = new InstagramPost { Id = Post.Id, Title = Post.Title, Caption = Caption };
+        var (text, error) = await Social.AdaptCaptionAsync(t.Channel!.Platform, post);
+        _adapting = null;
+        if (text is null) { await Flash.InvokeAsync((false, error ?? "AI nie odpowiedziało.")); return; }
+        _captions[t.Id] = text;
+        await Social.SetCaptionAsync(t.Id, text);
+        await LoadAsync();
+    }
+
+    private async Task RetryAsync(int targetId)
+    {
+        await Social.RetryTargetAsync(targetId);
+        await LoadAsync();
+        await Flash.InvokeAsync((true, "Spróbuję ponownie przy najbliższym przebiegu (co minutę)."));
+    }
+
+    private async Task DoneAsync(int targetId)
+    {
+        await Social.MarkManualDoneAsync(targetId, _links.GetValueOrDefault(targetId));
+        await LoadAsync();
+        await Flash.InvokeAsync((true, "Oznaczono jako opublikowane."));
+    }
+
+    private async Task CopyAsync(string text)
+    {
+        try { await JS.InvokeAsync<bool>("ptCopy", text); await Flash.InvokeAsync((true, "Opis skopiowany.")); }
+        catch (JSException) { await Flash.InvokeAsync((false, "Nie udało się skopiować — zaznacz tekst ręcznie.")); }
+    }
+}

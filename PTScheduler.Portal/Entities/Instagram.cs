@@ -6,6 +6,8 @@ public class InstagramAccount
     public int Id { get; set; }
     /// <summary>Id konta profesjonalnego (user_id z /me) — do publikacji i statystyk.</summary>
     public string IgUserId { get; set; } = "";
+    /// <summary>instagram (logowanie przez Instagram, graph.instagram.com) | facebook (przez stronę na Facebooku, graph.facebook.com, token strony).</summary>
+    public string Provider { get; set; } = "instagram";
     public string Username { get; set; } = "";
     public string? Name { get; set; }
     public string? PictureUrl { get; set; }
@@ -39,6 +41,8 @@ public class InstagramPost
     /// <summary>manual | ai | autopilot</summary>
     public string Source { get; set; } = "manual";
     public bool ShareToFeed { get; set; } = true;
+    /// <summary>Czy publikować na Instagramie (pozostałe kanały — <see cref="SocialPostTarget"/>).</summary>
+    public bool ToInstagram { get; set; } = true;
     public DateTime? ScheduledAt { get; set; }
     public DateTime? PublishedAt { get; set; }
     public string? ContainerId { get; set; }
@@ -80,6 +84,8 @@ public class InstagramAsset
 public class InstagramMedia
 {
     public string Id { get; set; } = "";
+    /// <summary>instagram | facebook | threads</summary>
+    public string Platform { get; set; } = "instagram";
     public string MediaType { get; set; } = "";
     public string? ProductType { get; set; }
     public string? Caption { get; set; }
@@ -112,6 +118,8 @@ public class InstagramDaily
 public class InstagramComment
 {
     public string Id { get; set; } = "";
+    /// <summary>instagram | facebook | threads</summary>
+    public string Platform { get; set; } = "instagram";
     public string MediaId { get; set; } = "";
     public string? ParentId { get; set; }
     public string Username { get; set; } = "";
