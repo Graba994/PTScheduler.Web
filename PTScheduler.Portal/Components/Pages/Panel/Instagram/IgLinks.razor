@@ -1,6 +1,7 @@
 @using PTScheduler.Portal.Services.Social
 @inject LinkService Links
 @inject IJSRuntime JS
+@inject SocialReportService Report
 
 @* Linki śledzące i wyniki: które posty i kanały przynoszą wejścia, rejestracje i płatne konta.
    Linki postów tworzą się same przy publikacji („{link}” w opisie); tu można dodać własne (reklama, wizytówka, mail). *@
@@ -139,11 +140,40 @@ else
                 }
             </PanelCard>
 
+            <PanelCard Title="Raport tygodniowy" Icon="bi-envelope-paper" Subtitle="W poniedziałek rano na e-mail powiadomień">
+                <label class="form-check form-switch small mb-2">
+                    <input class="form-check-input" type="checkbox" checked="@_weekly" @onchange="e => WeeklyAsync(e.Value is true)" />
+                    <span class="form-check-label">Wysyłaj co tydzień</span>
+                </label>
+                <div class="small text-muted mb-2">Kanały, najlepszy post, kliknięcia i rejestracje z linków, co czeka w tym tygodniu i 3 wnioski AI.</div>
+                <div class="d-flex gap-2 flex-wrap">
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="PreviewAsync"><i class="bi bi-eye me-1"></i>Podgląd</button>
+                    <button class="btn btn-outline-primary btn-sm" disabled="@_sending" @onclick="SendAsync">
+                        @if (_sending) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-send me-1"></i> }Wyślij teraz
+                    </button>
+                </div>
+            </PanelCard>
+
             <div class="pp-callout pp-tone-muted small">
                 <i class="bi bi-shield-check"></i>
                 <div>Liczymy tylko kliknięcia i to, czy z linku powstało konto — bez cookie i bez danych osób. Kod linku jedzie w adresie (<code>?src=</code>) aż do kreatora.</div>
             </div>
         </aside>
+    </div>
+}
+
+@if (_preview is not null)
+{
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true" aria-label="Podgląd raportu" style="background:rgba(15,23,42,.45)">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Podgląd raportu (bez wniosków AI)</h5>
+                    <button type="button" class="btn-close" aria-label="Zamknij" @onclick="() => _preview = null"></button>
+                </div>
+                <div class="modal-body lk-preview">@((MarkupString)_preview)</div>
+            </div>
+        </div>
     </div>
 }
 
@@ -156,7 +186,31 @@ else
     private string _label = "", _channel = "reklama", _target = "/register";
     private TrackedLink? _created;
 
-    protected override Task OnInitializedAsync() => LoadAsync();
+    private bool _weekly = true, _sending;
+    private string? _preview;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _weekly = await Report.EnabledAsync();
+        await LoadAsync();
+    }
+
+    private async Task WeeklyAsync(bool on)
+    {
+        _weekly = on;
+        await Report.SetEnabledAsync(on);
+        await Flash.InvokeAsync((true, on ? "Raport będzie przychodził w poniedziałki rano." : "Raport tygodniowy wyłączony."));
+    }
+
+    private async Task PreviewAsync() => _preview = await Report.PreviewAsync();
+
+    private async Task SendAsync()
+    {
+        _sending = true;
+        var r = await Report.SendAsync();
+        _sending = false;
+        await Flash.InvokeAsync(r);
+    }
 
     private async Task LoadAsync() => _r = await Links.ReportAsync(_days, _archived);
 

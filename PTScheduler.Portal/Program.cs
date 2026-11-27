@@ -118,6 +118,7 @@ builder.Services.AddScoped<PTScheduler.Portal.Services.Social.ThreadsClient>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Social.SocialService>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Social.LinkService>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Social.BioService>();
+builder.Services.AddScoped<PTScheduler.Portal.Services.Social.SocialReportService>();
 builder.Services.AddScoped<InstagramAi>();
 builder.Services.AddScoped<InstagramService>();
 builder.Services.AddHostedService<InstagramBackgroundService>();

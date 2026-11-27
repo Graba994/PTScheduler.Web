@@ -1140,6 +1140,7 @@ public class InstagramBackgroundService(IServiceScopeFactory scopes, ILogger<Ins
                     if (hasIg && now - _sync > TimeSpan.FromHours(3)) { _sync = now; await ig.SyncAsync(ct); }
                     if (now - _comments > TimeSpan.FromMinutes(15)) { _comments = now; await ig.SyncCommentsAsync(ct); }
                     await DailyAsync(scope.ServiceProvider, ig, ct);
+                    await scope.ServiceProvider.GetRequiredService<PTScheduler.Portal.Services.Social.SocialReportService>().SendIfDueAsync(ct);
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogError(ex, "Instagram: przebieg w tle nie powiódł się."); }

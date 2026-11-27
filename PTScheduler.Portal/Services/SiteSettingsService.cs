@@ -205,6 +205,8 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string BioTitle = "bio_title";
         public const string BioText = "bio_text";
         public const string BioShowPosts = "bio_show_posts";
+        public const string SocialWeeklyOn = "social_weekly_on";
+        public const string SocialWeeklySent = "social_weekly_sent";
         // Studio reklam (Panel → Studio reklam)
         public const string StudioKnowledge = "studio_knowledge";
         public const string StudioKnowledgeRequested = "studio_knowledge_requested";

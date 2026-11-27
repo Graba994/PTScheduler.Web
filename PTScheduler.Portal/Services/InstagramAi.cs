@@ -192,6 +192,21 @@ public class InstagramAi(AiService ai, SiteSettingsService settings, IDbContextF
         return (r.Text?.Trim(), r.Error);
     }
 
+    /// <summary>3 wnioski do cotygodniowego raportu (same liczby na wejściu — bez danych osób).</summary>
+    public async Task<(string? Text, string? Error)> WeeklyAsync(string facts, CancellationToken ct = default)
+    {
+        var user = $"""
+            Oto liczby z ostatniego tygodnia mediów społecznościowych marki (Instagram, Facebook, Threads, linki śledzące do rejestracji).
+            Napisz dokładnie 3 krótkie wnioski po polsku (każdy 1 zdanie, od myślnika): co zadziałało, co poprawić,
+            i jedna konkretna rzecz do zrobienia w tym tygodniu. Najważniejsze są rejestracje z linków, nie polubienia.
+            Opieraj się tylko na liczbach; gdy danych jest mało, powiedz to wprost.
+
+            {facts}
+            """;
+        var r = await ai.CompleteAsync(Feature, null, await SystemAsync(), user, maxTokens: 400, ct: ct);
+        return (r.Text?.Trim(), r.Error);
+    }
+
     // ── Bank pomysłów (bez AI) ──
 
     private static Slide S(string template, string headline, string? body = null, string? eyebrow = null, params string[] points) =>
