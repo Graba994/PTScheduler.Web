@@ -144,6 +144,8 @@ public class InstagramAi(AiService ai, SiteSettingsService settings, IDbContextF
         var user = $"""
             Przerób opis posta pod platformę {platform}. Zasady tej platformy: {tone}
             Najwyżej {maxLength} znaków łącznie z hashtagami. Zachowaj sens i fakty, nie dodawaj nowych obietnic.
+            Tam, gdzie zapraszasz do sprawdzenia Hantly, wstaw dokładnie znacznik {Social.LinkService.Placeholder} (Portal podmieni go na link śledzący tej platformy).
+            Jeśli opis mówi „link w bio”, zamień to na {Social.LinkService.Placeholder}. Znacznik wstaw najwyżej raz.
             Temat: {title}
 
             Opis z Instagrama:

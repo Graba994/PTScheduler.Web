@@ -686,6 +686,8 @@
     // Z adresu: ?plan=, ?nazwa= (z sekcji „Zbuduj” na stronie głównej), ?kod= (zaproszenie),
     // ?wznow=&session_id= (powrót z płatności kartą), ?karta=anulowana.
     private string? Plan, Nazwa, KodQuery, Wznow, SessionId, RefQuery;
+    /// <summary>Kod linku śledzącego (?src= z hantly.pl/go/…) — z którego posta/kanału przyszedł trener.</summary>
+    private string? _src;
     /// <summary>Polecający trener (z ?ref= albo ze szkicu) — polecony ma dłuższy okres próbny.</summary>
     private Tenant? _referrer;
     private int ExtraDays => (_invite?.ExtraTrialDays ?? 0) + (_referrer is not null ? ReferralService.ReferredBonusDays : 0);
@@ -722,6 +724,7 @@
         public string? Interval { get; set; }
         public string? CustomDomain { get; set; }
         public string? Ref { get; set; }
+        public string? Src { get; set; }
     }
 
     private static readonly int[] Minutes = [30, 45, 50, 55, 60, 75, 90, 120];
@@ -1051,6 +1054,7 @@
         var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query);
         string? Q(string key) => query.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v) ? v.ToString() : null;
         Plan = Q("plan"); Nazwa = Q("nazwa"); KodQuery = Q("kod"); Wznow = Q("wznow"); SessionId = Q("session_id"); RefQuery = Q("ref");
+        if (PTScheduler.Portal.Services.Social.LinkService.ValidCode(Q("src")?.ToLowerInvariant())) _src = Q("src")!.ToLowerInvariant();
         _cardCancelled = Q("karta") == "anulowana";
         _sms = await Settings.PlatformSmsOnAsync();
 
@@ -1207,6 +1211,7 @@
                 {
                     RestoreDraft(d);
                     if (_referrer is null && d.Ref is not null) _referrer = await Referrals.FindReferrerAsync(d.Ref);
+                    if (_src is null && PTScheduler.Portal.Services.Social.LinkService.ValidCode(d.Src)) _src = d.Src;
                     await CompanyChanged();
                     StateHasChanged();
                 }
@@ -1244,7 +1249,7 @@
             Step = _step, Company = _company, FullName = _fullName, Spec = _spec, Color = _color, Template = _template,
             Offers = _offers, WithPackage = _withPackage, PkgCount = _pkgCount, PkgPrice = _pkgPrice,
             Email = _email, Phone = _phone, PlanId = _planId, Interval = _interval, CustomDomain = _wantDomain ? _customDomain : null,
-            Ref = _referrer?.Slug
+            Ref = _referrer?.Slug, Src = _src
         };
         if (AdminMode) return;
         try { await JS.InvokeVoidAsync("ptBuilder.save", System.Text.Json.JsonSerializer.Serialize(d)); } catch (JSException) { }
@@ -1554,6 +1559,7 @@
             t.InviteCode = _invite?.Code;
             if (_referrer is not null && !string.Equals(_referrer.OwnerEmail, email, StringComparison.OrdinalIgnoreCase))
                 t.ReferredByTenantId = _referrer.Id;
+            if (!AdminMode && _src is not null) t.SignupSource = _src;
             if (NormalizedDomain is { } dom) { t.CustomDomain = dom; t.CustomDomainStatus = "waiting"; t.CustomDomainSince = DateTime.UtcNow; }
             t.OwnerPasswordHash = passwordHash;
             await db.SaveChangesAsync();

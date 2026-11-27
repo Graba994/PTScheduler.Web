@@ -58,6 +58,8 @@ public class Tenant
     public DateTime? CustomDomainSince { get; set; }
     /// <summary>Kto polecił tego trenera (link ?ref= z aplikacji lub e-maila polecającego).</summary>
     public int? ReferredByTenantId { get; set; }
+    /// <summary>Kod linku śledzącego (hantly.pl/go/…), z którego przyszedł trener — post, kanał, bio albo reklama.</summary>
+    public string? SignupSource { get; set; }
     /// <summary>Kiedy polecający dostał nagrodę za tego trenera (po pierwszej płatności poleconego).</summary>
     public DateTime? ReferralRewardedAt { get; set; }
     /// <summary>Darmowe miesiące z poleceń do wykorzystania na rachunkach (przy Stripe — od razu saldo w Stripe).</summary>

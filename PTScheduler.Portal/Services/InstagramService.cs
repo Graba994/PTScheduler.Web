@@ -581,7 +581,7 @@ public class InstagramService(
         try
         {
             var assets = p.Assets.OrderBy(x => x.Order).ToList();
-            var caption = p.Caption ?? "";
+            var caption = Social.LinkService.ForInstagram(p.Caption);
             string container;
             switch (p.Kind)
             {

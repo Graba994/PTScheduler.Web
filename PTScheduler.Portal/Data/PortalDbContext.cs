@@ -43,6 +43,9 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<InstagramComment> InstagramComments => Set<InstagramComment>();
     public DbSet<SocialChannel> SocialChannels => Set<SocialChannel>();
     public DbSet<SocialPostTarget> SocialPostTargets => Set<SocialPostTarget>();
+    public DbSet<TrackedLink> TrackedLinks => Set<TrackedLink>();
+    public DbSet<TrackedLinkDay> TrackedLinkDays => Set<TrackedLinkDay>();
+    public DbSet<BioItem> BioItems => Set<BioItem>();
     public DbSet<StudioPromotion> StudioPromotions => Set<StudioPromotion>();
     public DbSet<StudioVideo> StudioVideos => Set<StudioVideo>();
     public DbSet<StudioScene> StudioScenes => Set<StudioScene>();
@@ -122,6 +125,8 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
         {
             e.HasIndex(t => t.Slug).IsUnique();
             e.HasIndex(t => t.ReferredByTenantId);
+            e.HasIndex(t => t.SignupSource);
+            e.Property(t => t.SignupSource).HasMaxLength(16);
             e.HasIndex(t => t.RegistrationKey);
             e.HasIndex(t => t.Domain).IsUnique();
             e.HasIndex(t => t.Port).IsUnique();
@@ -580,6 +585,29 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.Property(x => x.Error).HasMaxLength(1000);
             e.HasOne(x => x.Post).WithMany().HasForeignKey(x => x.PostId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(x => x.Channel).WithMany().HasForeignKey(x => x.ChannelId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<TrackedLink>(e =>
+        {
+            e.HasIndex(x => x.Code).IsUnique();
+            e.HasIndex(x => new { x.PostId, x.Channel });
+            e.Property(x => x.Code).HasMaxLength(16);
+            e.Property(x => x.Channel).HasMaxLength(16);
+            e.Property(x => x.Label).HasMaxLength(120);
+            e.Property(x => x.Target).HasMaxLength(300);
+            e.HasOne<InstagramPost>().WithMany().HasForeignKey(x => x.PostId).OnDelete(DeleteBehavior.SetNull);
+        });
+        b.Entity<BioItem>(e =>
+        {
+            e.Property(x => x.Title).HasMaxLength(80);
+            e.Property(x => x.Subtitle).HasMaxLength(120);
+            e.Property(x => x.Target).HasMaxLength(500);
+            e.Property(x => x.Icon).HasMaxLength(40);
+            e.HasOne<TrackedLink>().WithMany().HasForeignKey(x => x.LinkId).OnDelete(DeleteBehavior.SetNull);
+        });
+        b.Entity<TrackedLinkDay>(e =>
+        {
+            e.HasKey(x => new { x.LinkId, x.Day });
+            e.HasOne<TrackedLink>().WithMany().HasForeignKey(x => x.LinkId).OnDelete(DeleteBehavior.Cascade);
         });
         b.Entity<InstagramComment>(e =>
         {

@@ -1,0 +1,192 @@
+@using PTScheduler.Portal.Services.Social
+@inject LinkService Links
+@inject IJSRuntime JS
+
+@* Linki śledzące i wyniki: które posty i kanały przynoszą wejścia, rejestracje i płatne konta.
+   Linki postów tworzą się same przy publikacji („{link}” w opisie); tu można dodać własne (reklama, wizytówka, mail). *@
+
+<div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+    <div class="pp-seg" role="group" aria-label="Okres">
+        @foreach (var d in new[] { 7, 30, 90, 365 })
+        {
+            var days = d;
+            <button type="button" class="@(_days == days ? "active" : "")" @onclick="() => SetAsync(days)">@(days == 365 ? "rok" : $"{days} dni")</button>
+        }
+    </div>
+    <label class="form-check form-switch small ms-auto mb-0">
+        <input class="form-check-input" type="checkbox" checked="@_archived" @onchange="e => ArchivedAsync(e.Value is true)" />
+        <span class="form-check-label">Pokaż zarchiwizowane</span>
+    </label>
+</div>
+
+@if (_r is null)
+{
+    <div class="text-muted small py-4 text-center"><span class="spinner-border spinner-border-sm me-2"></span>Wczytuję…</div>
+}
+else
+{
+    <div class="pp-stats">
+        <StatTile Label="Kliknięcia" Value="@_r.Clicks.ToString("N0")" Icon="bi-cursor" Tone="info" Meta="bez botów i podglądów linków" />
+        <StatTile Label="Rejestracje z linków" Value="@_r.Signups.ToString()" Icon="bi-person-plus" Tone="ok" Meta="@($"z {_r.SignupsTotal} wszystkich w okresie")" />
+        <StatTile Label="Płatne konta" Value="@_r.Paid.ToString()" Icon="bi-credit-card" Tone="warn" Meta="z rejestracji z linków" />
+        <StatTile Label="Konwersja" Value="@(_r.Clicks > 0 ? $"{100.0 * _r.Signups / _r.Clicks:0.0}%" : "—")" Icon="bi-funnel" Tone="muted" Meta="rejestracje / kliknięcia" />
+    </div>
+
+    <IgBio Flash="Flash" Views="_r.BioViews" />
+
+    <div class="ig-grid">
+        <div>
+            <PanelCard Title="Kliknięcia dzień po dniu" Icon="bi-graph-up">
+                @if (_r.Daily.Count == 0)
+                {
+                    <div class="text-muted small">Brak kliknięć w tym okresie. Wstaw <code>{link}</code> w opis posta — przy publikacji każdy kanał dostanie własny link.</div>
+                }
+                else
+                {
+                    <Sparkline Points="@Daily()" Range="@TimeSpan.FromDays(_days)" Bucket="@TimeSpan.FromDays(1)" Large="true" Height="120" Tone="info" Format='v => v.ToString("N0")' AriaLabel="Kliknięcia dziennie" />
+                }
+            </PanelCard>
+
+            <PanelCard Title="Linki" Icon="bi-link-45deg" Subtitle="Najlepsze na górze — najpierw rejestracje, potem kliknięcia">
+                @if (_r.Rows.Count == 0)
+                {
+                    <div class="text-muted small">Nie ma jeszcze linków. Pojawią się po publikacji posta z <code>{link}</code> albo dodaj własny obok.</div>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle ig-table mb-0">
+                            <thead><tr><th>Link</th><th>Kanał</th><th class="text-end">Kliknięcia</th><th class="text-end">Rejestracje</th><th class="text-end">Płatne</th><th></th></tr></thead>
+                            <tbody>
+                                @foreach (var row in _r.Rows)
+                                {
+                                    var r = row;
+                                    <tr @key="r.Link.Id" class="@(r.Link.Archived ? "text-muted" : "")">
+                                        <td>
+                                            <div class="fw-semibold lk-label">@(string.IsNullOrWhiteSpace(r.PostTitle) ? r.Link.Label : r.PostTitle)</div>
+                                            <div class="small text-muted"><code>@Links.ShortUrl(r.Link.Code)</code> → @TargetLabel(r.Link.Target)</div>
+                                        </td>
+                                        <td class="text-nowrap"><i class="bi @LinkService.ChannelIcon(r.Link.Channel) me-1"></i>@LinkService.ChannelLabel(r.Link.Channel)</td>
+                                        <td class="text-end tnum">@r.Clicks</td>
+                                        <td class="text-end tnum @(r.Signups > 0 ? "fw-semibold text-success" : "")">@r.Signups</td>
+                                        <td class="text-end tnum">@r.Paid</td>
+                                        <td class="text-end text-nowrap">
+                                            <button class="btn btn-link btn-sm p-0 me-2" title="Kopiuj link" aria-label="Kopiuj link" @onclick="() => CopyAsync(Links.Url(r.Link.Code))"><i class="bi bi-copy"></i></button>
+                                            @if (r.Link.PostId is int pid)
+                                            {
+                                                <a class="btn btn-link btn-sm p-0 me-2" href="@($"/panel/social?t=plan&post={pid}")" title="Otwórz post" aria-label="Otwórz post"><i class="bi bi-box-arrow-up-right"></i></a>
+                                            }
+                                            <button class="btn btn-link btn-sm p-0 text-muted" title="@(r.Link.Archived ? "Przywróć" : "Archiwizuj")" aria-label="@(r.Link.Archived ? "Przywróć" : "Archiwizuj")" @onclick="() => ArchiveAsync(r.Link.Id, !r.Link.Archived)">
+                                                <i class="bi @(r.Link.Archived ? "bi-arrow-counterclockwise" : "bi-archive")"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </PanelCard>
+        </div>
+        <aside>
+            <PanelCard Title="Kanały" Icon="bi-broadcast-pin" Subtitle="Skąd przychodzą trenerzy">
+                @if (_r.Channels.Count == 0)
+                {
+                    <div class="text-muted small">Brak danych.</div>
+                }
+                else
+                {
+                    var max = Math.Max(1, _r.Channels.Max(c => c.Clicks));
+                    <ul class="lk-channels">
+                        @foreach (var c in _r.Channels)
+                        {
+                            <li>
+                                <div class="d-flex align-items-center gap-2">
+                                    <i class="bi @LinkService.ChannelIcon(c.Channel)"></i><b>@LinkService.ChannelLabel(c.Channel)</b>
+                                    <span class="ms-auto small tnum">@c.Clicks klik. · <b>@c.Signups</b> rej. · @c.Paid płat.</span>
+                                </div>
+                                <div class="lk-bar"><span style="width:@(Math.Round(100.0 * c.Clicks / max))%"></span></div>
+                            </li>
+                        }
+                    </ul>
+                }
+            </PanelCard>
+
+            <PanelCard Title="Nowy link" Icon="bi-plus-lg" Subtitle="Do reklamy, wizytówki, maila albo opisu na YouTube">
+                <label class="form-label small fw-semibold" for="lk-label">Nazwa</label>
+                <input id="lk-label" class="form-control form-control-sm mb-2" @bind="_label" @bind:event="oninput" placeholder="np. Reklama Meta — listopad" maxlength="120" />
+                <div class="row g-2 mb-2">
+                    <div class="col-6">
+                        <label class="form-label small fw-semibold" for="lk-ch">Kanał</label>
+                        <select id="lk-ch" class="form-select form-select-sm" @bind="_channel">
+                            @foreach (var (key, label, _) in LinkService.Channels) { <option value="@key">@label</option> }
+                        </select>
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small fw-semibold" for="lk-target">Prowadzi do</label>
+                        <select id="lk-target" class="form-select form-select-sm" @bind="_target">
+                            @foreach (var (path, label) in LinkService.Targets) { <option value="@path">@label</option> }
+                        </select>
+                    </div>
+                </div>
+                <button class="btn btn-primary btn-sm" disabled="@string.IsNullOrWhiteSpace(_label)" @onclick="CreateAsync"><i class="bi bi-link-45deg me-1"></i>Utwórz link</button>
+                @if (_created is not null)
+                {
+                    <div class="input-group input-group-sm mt-2">
+                        <input class="form-control" readonly value="@Links.Url(_created.Code)" aria-label="Nowy link" />
+                        <button class="btn btn-outline-secondary" @onclick="() => CopyAsync(Links.Url(_created.Code))"><i class="bi bi-copy"></i></button>
+                    </div>
+                }
+            </PanelCard>
+
+            <div class="pp-callout pp-tone-muted small">
+                <i class="bi bi-shield-check"></i>
+                <div>Liczymy tylko kliknięcia i to, czy z linku powstało konto — bez cookie i bez danych osób. Kod linku jedzie w adresie (<code>?src=</code>) aż do kreatora.</div>
+            </div>
+        </aside>
+    </div>
+}
+
+@code {
+    [Parameter] public EventCallback<(bool, string)> Flash { get; set; }
+
+    private LinkService.Report? _r;
+    private int _days = 30;
+    private bool _archived;
+    private string _label = "", _channel = "reklama", _target = "/register";
+    private TrackedLink? _created;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync() => _r = await Links.ReportAsync(_days, _archived);
+
+    private async Task SetAsync(int days) { _days = days; await LoadAsync(); }
+    private async Task ArchivedAsync(bool on) { _archived = on; await LoadAsync(); }
+
+    private static string TargetLabel(string target) => LinkService.Targets.FirstOrDefault(t => t.Path == target).Label ?? target;
+
+    private List<ResourceReportService.Point> Daily() =>
+        _r!.Daily.Select(d => new ResourceReportService.Point(InstagramRules.ToUtc(d.Day.ToDateTime(new TimeOnly(12, 0))), d.Clicks)).ToList();
+
+    private async Task CreateAsync()
+    {
+        var (link, error) = await Links.CreateAsync(_label, _channel, _target);
+        if (link is null) { await Flash.InvokeAsync((false, error ?? "Nie udało się utworzyć linku.")); return; }
+        _created = link;
+        _label = "";
+        await LoadAsync();
+        await Flash.InvokeAsync((true, "Link gotowy — skopiuj i wklej tam, gdzie go użyjesz."));
+    }
+
+    private async Task ArchiveAsync(int id, bool archived)
+    {
+        await Links.ArchiveAsync(id, archived);
+        await LoadAsync();
+    }
+
+    private async Task CopyAsync(string text)
+    {
+        try { await JS.InvokeAsync<bool>("ptCopy", text); await Flash.InvokeAsync((true, "Link skopiowany.")); }
+        catch (JSException) { await Flash.InvokeAsync((false, "Nie udało się skopiować — zaznacz link ręcznie.")); }
+    }
+}

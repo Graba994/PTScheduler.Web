@@ -202,6 +202,9 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         // Meta (Facebook Login): strona na Facebooku i Instagram przez stronę
         public const string MetaAppId = "meta_app_id";
         public const string MetaAppSecret = "meta_app_secret";
+        public const string BioTitle = "bio_title";
+        public const string BioText = "bio_text";
+        public const string BioShowPosts = "bio_show_posts";
         // Studio reklam (Panel → Studio reklam)
         public const string StudioKnowledge = "studio_knowledge";
         public const string StudioKnowledgeRequested = "studio_knowledge_requested";

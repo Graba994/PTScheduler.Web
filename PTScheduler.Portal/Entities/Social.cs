@@ -56,3 +56,48 @@ public class SocialPostTarget
     public InstagramPost? Post { get; set; }
     public SocialChannel? Channel { get; set; }
 }
+
+/// <summary>
+/// Link śledzący (hantly.pl/go/{kod}) — jeden na post i kanał albo własny (bio, reklama, wizytówka).
+/// Liczymy tylko kliknięcia (bez danych osób i bez cookie); źródło rejestracji trafia do <see cref="Tenant.SignupSource"/>
+/// przez parametr ?src= w adresie.
+/// </summary>
+public class TrackedLink
+{
+    public int Id { get; set; }
+    public string Code { get; set; } = "";
+    /// <summary>instagram, facebook, threads, tiktok, youtube, linkedin, x, pinterest, bio, reklama, inne.</summary>
+    public string Channel { get; set; } = "inne";
+    public int? PostId { get; set; }
+    public string Label { get; set; } = "";
+    /// <summary>Ścieżka na stronie Hantly, np. „/register” albo „/#cennik”.</summary>
+    public string Target { get; set; } = "/register";
+    public int Clicks { get; set; }
+    public DateTime? LastClickAt { get; set; }
+    public bool Archived { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>Kliknięcia linku w danym dniu (do wykresów i raportu tygodniowego).</summary>
+public class TrackedLinkDay
+{
+    public int LinkId { get; set; }
+    public DateOnly Day { get; set; }
+    public int Clicks { get; set; }
+}
+
+/// <summary>Przycisk na stronie „link w bio” (hantly.pl/linki).</summary>
+public class BioItem
+{
+    public int Id { get; set; }
+    public string Title { get; set; } = "";
+    public string? Subtitle { get; set; }
+    /// <summary>Ścieżka na stronie Hantly („/register”) — wtedy przez link śledzący — albo pełny adres https:// (bez liczenia).</summary>
+    public string Target { get; set; } = "/register";
+    public string Icon { get; set; } = "bi-arrow-right";
+    public int Order { get; set; }
+    public bool Enabled { get; set; } = true;
+    public bool Highlight { get; set; }
+    /// <summary>Link śledzący (dla ścieżek na stronie Hantly).</summary>
+    public int? LinkId { get; set; }
+}

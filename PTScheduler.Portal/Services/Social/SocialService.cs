@@ -23,6 +23,7 @@ public class SocialService(
     EmailService email,
     IDataProtectionProvider dataProtection,
     IConfiguration config,
+    LinkService links,
     ILogger<SocialService> logger)
 {
     /// <summary>Ten sam cel szyfrowania co token Instagrama — konto Instagram przez stronę korzysta z tokenu strony.</summary>
@@ -308,7 +309,7 @@ public class SocialService(
             }
             var token = Unprotect(ch.Token);
             if (token is null || ch.ExternalId is null) { Fail(t, "Kanał nie jest połączony — połącz go ponownie w Kanałach."); continue; }
-            var caption = CaptionFor(t, post);
+            var caption = await links.ExpandAsync(CaptionFor(t, post), LinkService.KeyOf(ch.Platform), post.Id, post.Title);
             if (SocialPlatforms.Problems(ch.Platform, post, caption) is { Count: > 0 } problems) { Fail(t, string.Join(" ", problems)); continue; }
             var images = post.Assets.Where(a => a.Kind == "image").Select(AssetUrl).ToList();
             var video = post.Assets.FirstOrDefault(a => a.Kind == "video") is { } v ? AssetUrl(v) : null;

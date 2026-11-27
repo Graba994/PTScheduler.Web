@@ -2,6 +2,7 @@
 @inject SocialService Social
 @inject InstagramService Ig
 @inject IJSRuntime JS
+@inject LinkService Links
 
 @* Gdzie publikować: Instagram + kanały (Facebook, Threads przez API; TikTok, YouTube, LinkedIn, X, Pinterest ręcznie).
    Każdy kanał może mieć własny opis (ręcznie albo „Dopasuj z AI”), stan publikacji i — dla kanałów ręcznych — paczkę do wrzucenia. *@
@@ -29,6 +30,7 @@
             <span class="small text-muted">Dodaj Facebooka, Threads albo kanały ręczne w zakładce <b>Kanały</b>.</span>
         }
     </div>
+    <div class="sc-link mb-1"><i class="bi bi-link-45deg"></i>Wpisz <code>{link}</code> w opisie — każdy kanał dostanie własny link śledzący (na Instagramie zamieni się w „link w bio”). Wyniki: zakładka <b>Linki i wyniki</b>.</div>
 
     @foreach (var t in _targets)
     {
@@ -45,6 +47,10 @@
                 <span class="small @(caption.Length > info.MaxText ? "text-danger fw-semibold" : "text-muted")">@caption.Length / @info.MaxText</span>
                 @if (target.Permalink is not null) { <a class="small ms-auto" href="@target.Permalink" target="_blank" rel="noopener">zobacz <i class="bi bi-box-arrow-up-right"></i></a> }
             </div>
+            @if (_links.GetValueOrDefault(LinkService.KeyOf(ch.Platform)) is { } link)
+            {
+                <div class="sc-link"><i class="bi bi-link-45deg"></i><code>@Links.ShortUrl(link.Code)</code> · @link.Clicks @(link.Clicks == 1 ? "kliknięcie" : "kliknięć")</div>
+            }
             @if (target.Error is not null && target.Status == SocialTargetStatus.Failed)
             {
                 <div class="small text-danger"><i class="bi bi-exclamation-triangle me-1"></i>@target.Error
@@ -73,7 +79,7 @@
                 <div class="sc-pack">
                     <div class="small fw-semibold mb-1"><i class="bi bi-box-seam me-1"></i>Paczka do wrzucenia@(target.Status == SocialTargetStatus.ManualDue ? " — termin minął, czas wrzucić" : "")</div>
                     <div class="d-flex flex-wrap gap-2">
-                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => CopyAsync(caption)"><i class="bi bi-copy me-1"></i>Kopiuj opis</button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => CopyAsync(caption, ch.Platform)"><i class="bi bi-copy me-1"></i>Kopiuj opis</button>
                         @foreach (var a in Post.Assets)
                         {
                             <a class="btn btn-outline-secondary btn-sm" href="@(a.Kind == "video" ? a.ExternalUrl : $"/media/ig/{a.Token}.jpg")" download target="_blank" rel="noopener">
@@ -83,7 +89,7 @@
                         <a class="btn btn-outline-primary btn-sm" href="@(ch.ProfileUrl ?? info.UploadUrl)" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i>Otwórz @info.Label</a>
                     </div>
                     <div class="input-group input-group-sm mt-2">
-                        <input class="form-control" placeholder="Adres opublikowanego posta (opcjonalnie)" value="@_links.GetValueOrDefault(target.Id)" @oninput="e => _links[target.Id] = e.Value?.ToString() ?? string.Empty" aria-label="Adres posta" />
+                        <input class="form-control" placeholder="Adres opublikowanego posta (opcjonalnie)" value="@_urls.GetValueOrDefault(target.Id)" @oninput="e => _urls[target.Id] = e.Value?.ToString() ?? string.Empty" aria-label="Adres posta" />
                         <button class="btn btn-success" @onclick="() => DoneAsync(target.Id)"><i class="bi bi-check-lg me-1"></i>Opublikowane</button>
                     </div>
                 </div>
@@ -101,7 +107,8 @@
 
     private List<SocialChannel> _channels = [];
     private List<SocialPostTarget> _targets = [];
-    private readonly Dictionary<int, string> _captions = [], _links = [];
+    private readonly Dictionary<int, string> _captions = [], _urls = [];
+    private Dictionary<string, TrackedLink> _links = [];
     private bool _igMissing;
     private int? _adapting;
     private InstagramPost? _loadedFor;
@@ -119,7 +126,7 @@
             _channels = await Social.ChannelsAsync(enabledOnly: true);
             _igMissing = await Ig.AccountAsync() is null;
             _captions.Clear();
-            _links.Clear();
+            _urls.Clear();
         }
         await LoadAsync();
     }
@@ -127,6 +134,7 @@
     private async Task LoadAsync()
     {
         _targets = await Social.TargetsAsync(Post.Id);
+        _links = await Links.OfPostAsync(Post.Id);
         foreach (var t in _targets) _captions.TryAdd(t.Id, t.Caption ?? "");
     }
 
@@ -172,13 +180,16 @@
 
     private async Task DoneAsync(int targetId)
     {
-        await Social.MarkManualDoneAsync(targetId, _links.GetValueOrDefault(targetId));
+        await Social.MarkManualDoneAsync(targetId, _urls.GetValueOrDefault(targetId));
         await LoadAsync();
         await Flash.InvokeAsync((true, "Oznaczono jako opublikowane."));
     }
 
-    private async Task CopyAsync(string text)
+    private async Task CopyAsync(string caption, SocialPlatform platform)
     {
+        // „{link}” → link śledzący tego kanału (tworzy się przy pierwszym kopiowaniu).
+        var text = await Links.ExpandAsync(caption, LinkService.KeyOf(platform), Post.Id, Post.Title);
+        if (text != caption) _links = await Links.OfPostAsync(Post.Id);
         try { await JS.InvokeAsync<bool>("ptCopy", text); await Flash.InvokeAsync((true, "Opis skopiowany.")); }
         catch (JSException) { await Flash.InvokeAsync((false, "Nie udało się skopiować — zaznacz tekst ręcznie.")); }
     }

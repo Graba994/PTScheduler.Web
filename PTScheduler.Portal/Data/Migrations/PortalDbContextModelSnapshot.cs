@@ -398,6 +398,52 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.ToTable("BackupEntries");
                 });
 
+            modelBuilder.Entity("PTScheduler.Portal.Entities.BioItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("Highlight")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Icon")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<int?>("LinkId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Subtitle")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("Target")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LinkId");
+
+                    b.ToTable("BioItems");
+                });
+
             modelBuilder.Entity("PTScheduler.Portal.Entities.BugReport", b =>
                 {
                     b.Property<int>("Id")
@@ -3442,6 +3488,10 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Property<string>("SetupPayload")
                         .HasColumnType("text");
 
+                    b.Property<string>("SignupSource")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
                     b.Property<string>("Slug")
                         .IsRequired()
                         .HasColumnType("text");
@@ -3498,6 +3548,8 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.HasIndex("ReferredByTenantId");
 
                     b.HasIndex("RegistrationKey");
+
+                    b.HasIndex("SignupSource");
 
                     b.HasIndex("Slug")
                         .IsUnique();
@@ -4154,6 +4206,75 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.ToTable("TesterFeedback");
                 });
 
+            modelBuilder.Entity("PTScheduler.Portal.Entities.TrackedLink", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("Archived")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Channel")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int>("Clicks")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTime?>("LastClickAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("PostId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Target")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.HasIndex("PostId", "Channel");
+
+                    b.ToTable("TrackedLinks");
+                });
+
+            modelBuilder.Entity("PTScheduler.Portal.Entities.TrackedLinkDay", b =>
+                {
+                    b.Property<int>("LinkId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateOnly>("Day")
+                        .HasColumnType("date");
+
+                    b.Property<int>("Clicks")
+                        .HasColumnType("integer");
+
+                    b.HasKey("LinkId", "Day");
+
+                    b.ToTable("TrackedLinkDays");
+                });
+
             modelBuilder.Entity("PTScheduler.Portal.Entities.TrainerMeeting", b =>
                 {
                     b.Property<int>("Id")
@@ -4503,6 +4624,14 @@ namespace PTScheduler.Portal.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("PTScheduler.Portal.Entities.BioItem", b =>
+                {
+                    b.HasOne("PTScheduler.Portal.Entities.TrackedLink", null)
+                        .WithMany()
+                        .HasForeignKey("LinkId")
+                        .OnDelete(DeleteBehavior.SetNull);
                 });
 
             modelBuilder.Entity("PTScheduler.Portal.Entities.BugReport", b =>
@@ -4858,6 +4987,23 @@ namespace PTScheduler.Portal.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("PTScheduler.Portal.Entities.TrackedLink", b =>
+                {
+                    b.HasOne("PTScheduler.Portal.Entities.InstagramPost", null)
+                        .WithMany()
+                        .HasForeignKey("PostId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("PTScheduler.Portal.Entities.TrackedLinkDay", b =>
+                {
+                    b.HasOne("PTScheduler.Portal.Entities.TrackedLink", null)
+                        .WithMany()
+                        .HasForeignKey("LinkId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("PTScheduler.Portal.Entities.InboxThread", b =>

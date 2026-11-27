@@ -116,6 +116,8 @@ builder.Services.AddScoped<InstagramClient>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Social.FacebookClient>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Social.ThreadsClient>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Social.SocialService>();
+builder.Services.AddScoped<PTScheduler.Portal.Services.Social.LinkService>();
+builder.Services.AddScoped<PTScheduler.Portal.Services.Social.BioService>();
 builder.Services.AddScoped<InstagramAi>();
 builder.Services.AddScoped<InstagramService>();
 builder.Services.AddHostedService<InstagramBackgroundService>();
@@ -391,8 +393,17 @@ app.MapGet("/sitemap.xml", (HttpContext ctx) =>
 });
 
 app.MapGet("/robots.txt", (HttpContext ctx) => Results.Text(
-    $"User-agent: *\nDisallow: /panel\nDisallow: /api/\nDisallow: /subskrypcja/\nDisallow: /rachunek/\nDisallow: /login\nAllow: /\n\nSitemap: {PublicBase(ctx)}/sitemap.xml\n",
+    $"User-agent: *\nDisallow: /panel\nDisallow: /api/\nDisallow: /subskrypcja/\nDisallow: /rachunek/\nDisallow: /login\nDisallow: /go/\nAllow: /\n\nSitemap: {PublicBase(ctx)}/sitemap.xml\n",
     "text/plain; charset=utf-8"));
+
+// Linki śledzące z postów, bio i reklam: liczymy kliknięcie (bez cookie i danych osób) i przekierowujemy z ?src=kod.
+app.MapGet("/go/{code}", async (string code, HttpContext ctx, PTScheduler.Portal.Services.Social.LinkService links) =>
+{
+    var target = await links.ClickAsync(code.ToLowerInvariant(), ctx.Request.Headers.UserAgent.ToString());
+    ctx.Response.Headers.CacheControl = "no-store";
+    ctx.Response.Headers["X-Robots-Tag"] = "noindex";
+    return Results.Redirect(target ?? "/", permanent: false);
+});
 
 app.MapGet("/health", async (IDbContextFactory<PortalDbContext> dbFactory) =>
 {
