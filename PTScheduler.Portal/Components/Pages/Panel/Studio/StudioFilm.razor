@@ -8,6 +8,7 @@
 @inject StudioJobs Jobs
 @inject AiService AiSvc
 @inject NavigationManager Nav
+@inject PTScheduler.Portal.Services.Social.FilmPublisher Films
 @implements IDisposable
 @rendermode InteractiveServer
 
@@ -99,7 +100,16 @@ else
                 }
                 @if (_v.Status is StudioVideoStatus.ReadyToPublish or StudioVideoStatus.Published)
                 {
-                    <PanelCard Title="Do publikacji" Icon="bi-box-arrow-up" IconClass="pp-tone-ok" Subtitle="publikujesz sam — w aplikacji Instagrama, TikToka albo YouTube">
+                    <PanelCard Title="Do publikacji" Icon="bi-box-arrow-up" IconClass="pp-tone-ok" Subtitle="z planu mediów społecznościowych albo ręcznie w aplikacjach">
+                        @if (_socialPostId is int sp)
+                        {
+                            <a class="btn btn-success btn-sm w-100 mb-2" href="/panel/social?t=plan&post=@sp"><i class="bi bi-broadcast-pin me-1"></i>Otwórz post w planie (@_socialStatus)</a>
+                        }
+                        else
+                        {
+                            <button class="btn btn-success btn-sm w-100 mb-1" @onclick="ToSocialAsync" disabled="@_busy"><i class="bi bi-broadcast-pin me-1"></i>Wyślij do mediów społecznościowych</button>
+                            <div class="small text-muted mb-2">Rolka na Instagram, Facebook i Threads, paczki dla TikToka i YouTube Shorts — jako szkic do zaplanowania.</div>
+                        }
                         <a class="btn btn-primary btn-sm w-100 mb-2" href="/api/panel/studio/film/@_v.Id/video.mp4?download=true" download><i class="bi bi-download me-1"></i>Pobierz film (mp4)</a>
                         <a class="btn btn-outline-primary btn-sm w-100 mb-2" href="/api/panel/studio/film/@_v.Id/opis.txt" download><i class="bi bi-file-text me-1"></i>Pobierz opis (opis.txt)</a>
                         @if (_v.Status == StudioVideoStatus.ReadyToPublish)
@@ -256,6 +266,7 @@ else
         _job = Working ? await Jobs.LastAsync(_v.Status switch { StudioVideoStatus.Writing => "write", StudioVideoStatus.Voicing => "voice", _ => _v.QaJson is null && _v.RenderedAt is not null ? "qa" : "render" }, _v.Id) : null;
         _qa = ParseQa(_v.QaJson);
         if (!full) return;
+        await LoadSocialAsync();
         (_title, _description, _pinned) = (_v.Title, _v.Description, _v.PinnedComment);
         _hooks = StudioVideos.List(_v.HooksJson);
         _scenes = _v.Scenes.OrderBy(s => s.Order).Select(s => new EditScene
@@ -427,6 +438,36 @@ else
     {
         Flash(await Videos.ApproveVideoAsync(Id), "Wideo zaakceptowane — pobierz film i opis, a potem opublikuj w aplikacji.");
         await LoadAsync(full: true);
+    }
+
+    private int? _socialPostId;
+    private string? _socialStatus;
+
+    private async Task LoadSocialAsync()
+    {
+        if (_v?.Status is not (StudioVideoStatus.ReadyToPublish or StudioVideoStatus.Published)) { _socialPostId = null; return; }
+        var post = await Films.PostAsync(Id);
+        _socialPostId = post?.Id;
+        // Post z planu już wyszedł — film oznaczamy jako opublikowany (bez osobnego klikania).
+        if (post?.Status == InstagramPostStatus.Published && _v.Status == StudioVideoStatus.ReadyToPublish && await Videos.MarkPublishedAsync(Id) is null)
+            _v = await Videos.GetAsync(Id) ?? _v;
+        _socialStatus = post?.Status switch
+        {
+            InstagramPostStatus.Published => "opublikowany",
+            InstagramPostStatus.Scheduled => "zaplanowany",
+            InstagramPostStatus.Failed => "błąd",
+            InstagramPostStatus.Publishing => "publikuję",
+            _ => "szkic"
+        };
+    }
+
+    private async Task ToSocialAsync()
+    {
+        _busy = true;
+        var (ok, message, postId) = await Films.ToSocialAsync(Id);
+        _busy = false;
+        Flash(ok ? null : message, message);
+        if (postId is int pid) Nav.NavigateTo($"/panel/social?t=plan&post={pid}");
     }
 
     private async Task MarkPublishedAsync()

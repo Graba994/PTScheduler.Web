@@ -420,7 +420,9 @@ public class InstagramService(
     public async Task<(bool Ok, string Message)> AddVideoAsync(int postId, string url)
     {
         url = url.Trim();
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var u) || u.Scheme != "https") return (false, "Podaj publiczny adres https do pliku MP4.");
+        // Własne pliki Portalu (np. film ze Studia) — zawsze; obce adresy tylko https.
+        var own = url.StartsWith(PortalUrl + "/media/", StringComparison.OrdinalIgnoreCase);
+        if (!own && (!Uri.TryCreate(url, UriKind.Absolute, out var u) || u.Scheme != "https")) return (false, "Podaj publiczny adres https do pliku MP4.");
         await AddAssetAsync(postId, new InstagramAsset { Kind = "video", ExternalUrl = url });
         return (true, "Dodano film.");
     }

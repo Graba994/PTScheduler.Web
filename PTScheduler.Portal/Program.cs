@@ -121,6 +121,7 @@ builder.Services.AddScoped<PTScheduler.Portal.Services.Social.BioService>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Social.SocialReportService>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Social.MessagesClient>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Social.DmService>();
+builder.Services.AddScoped<PTScheduler.Portal.Services.Social.FilmPublisher>();
 builder.Services.AddScoped<InstagramAi>();
 builder.Services.AddScoped<InstagramService>();
 builder.Services.AddHostedService<InstagramBackgroundService>();
@@ -743,6 +744,10 @@ app.MapGet("/media/ig/{token}.jpg", async (string token, HttpContext ctx, Instag
     ctx.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
     return Results.File(data, "image/jpeg");
 });
+
+// Filmy ze Studia dla Meta (Instagram, Facebook, Threads pobierają plik przy publikacji) — adres z podpisem HMAC.
+app.MapGet("/media/film/{id:int}/{signature}.mp4", async (int id, string signature, PTScheduler.Portal.Services.Social.FilmPublisher films) =>
+    await films.FileAsync(id, signature) is { } path ? Results.File(path, "video/mp4", enableRangeProcessing: true) : Results.NotFound());
 
 // Studio reklam: teksty reklam do Excela (średnik, UTF-8 z BOM).
 app.MapGet("/api/panel/studio/{id:int}/reklamy.csv", async (int id, PTScheduler.Portal.Services.Studio.StudioService studio) =>
