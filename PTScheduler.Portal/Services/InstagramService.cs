@@ -344,6 +344,41 @@ public class InstagramService(
         return (true, $"Zaplanowano na {InstagramRules.ToWarsaw(atUtc.Value):dd.MM HH:mm}.");
     }
 
+    /// <summary>
+    /// Przesunięcie terminu z kalendarza: zaplanowany — przez <see cref="ScheduleAsync"/> (sprawdza post),
+    /// czekający na akceptację — tylko nowy termin (dalej czeka na akceptację).
+    /// </summary>
+    public async Task<(bool Ok, string Message)> RescheduleAsync(int id, DateTime atUtc)
+    {
+        var p = await PostAsync(id);
+        if (p is null) return (false, "Nie ma takiego posta.");
+        if (atUtc < DateTime.UtcNow.AddMinutes(1)) return (false, "Ten termin już minął — wybierz przyszły dzień.");
+        if (p.Status == InstagramPostStatus.Scheduled) return await ScheduleAsync(id, atUtc);
+        if (p.Status is not (InstagramPostStatus.ToApprove or InstagramPostStatus.Draft or InstagramPostStatus.Idea))
+            return (false, "Opublikowanego albo publikowanego posta nie da się przesunąć.");
+        await using var db = await dbFactory.CreateDbContextAsync();
+        await db.InstagramPosts.Where(x => x.Id == id).ExecuteUpdateAsync(u => u.SetProperty(x => x.ScheduledAt, atUtc).SetProperty(x => x.UpdatedAt, DateTime.UtcNow));
+        return (true, $"Nowy termin: {InstagramRules.ToWarsaw(atUtc):dd.MM HH:mm}{(p.Status == InstagramPostStatus.ToApprove ? " (dalej czeka na akceptację)" : " (szkic — zaplanuj go w edytorze)")}.");
+    }
+
+    /// <summary>Najlepsze pory dla każdej platformy (z ostatnich 90 dni): Instagram, Facebook, Threads.</summary>
+    public async Task<Dictionary<string, List<InstagramRules.Slot>>> BestSlotsByPlatformAsync()
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var since = DateTime.UtcNow.AddDays(-90);
+        var media = await db.InstagramMedia.AsNoTracking().Where(m => m.PostedAt >= since).ToListAsync();
+        var igFollowers = await db.InstagramAccounts.AsNoTracking().Select(a => a.Followers).FirstOrDefaultAsync();
+        var fbFollowers = await db.SocialChannels.AsNoTracking().Where(c => c.Platform == PTScheduler.Portal.Entities.SocialPlatform.Facebook).SumAsync(c => c.Followers ?? 0);
+        var thFollowers = await db.SocialChannels.AsNoTracking().Where(c => c.Platform == PTScheduler.Portal.Entities.SocialPlatform.Threads).SumAsync(c => c.Followers ?? 0);
+        var result = new Dictionary<string, List<InstagramRules.Slot>>();
+        foreach (var (platform, followers) in new[] { ("instagram", igFollowers), ("facebook", fbFollowers), ("threads", thFollowers) })
+        {
+            var slots = InstagramRules.BestSlots(media.Where(m => m.Platform == platform), followers, minPosts: 1, take: 3);
+            if (slots.Count > 0) result[platform] = slots;
+        }
+        return result;
+    }
+
     /// <summary>Akceptacja posta od autopilota — trafia do planu na swój termin (albo najbliższy wolny).</summary>
     public async Task<(bool Ok, string Message)> ApproveAsync(int id)
     {
