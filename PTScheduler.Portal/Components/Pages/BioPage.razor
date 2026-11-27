@@ -1,0 +1,72 @@
+@page "/linki"
+@layout BareLayout
+@using PTScheduler.Portal.Services.Social
+@inject BioService Bio
+
+@* Strona „link w bio” dla Instagrama, TikToka i innych profili. Bez interaktywności (szybka na telefonie).
+   Przyciski na stronę Hantly idą przez linki śledzące — w Panelu widać, który przynosi rejestracje. *@
+
+<PageTitle>@_page.Settings.Title — linki</PageTitle>
+<HeadContent>
+    <meta name="description" content="@_page.Settings.Text" />
+    <meta name="theme-color" content="#110E1B" />
+    <style>html, body { background: #110E1B; }</style>
+</HeadContent>
+
+<main class="bio">
+    <div class="bio-glow" aria-hidden="true"></div>
+    <div class="bio-inner">
+        <header class="bio-head">
+            <div class="bio-avatar">
+                <img src="/brand/hantly-mark.svg" alt="" width="44" height="44" />
+            </div>
+            <h1>@_page.Settings.Title</h1>
+            <p>@_page.Settings.Text</p>
+            <img class="bio-mascot" src="/mascot/hello.png" alt="Hantelek macha na powitanie" width="88" height="88" />
+        </header>
+
+        <nav class="bio-links" aria-label="Linki">
+            @foreach (var item in _page.Items)
+            {
+                <a class="bio-link @(item.Row.Highlight ? "is-main" : "")" href="@item.Href" @key="item.Row.Id"
+                   target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener" : null)" data-enhance-nav="false">
+                    <span class="bio-ico"><i class="bi @item.Row.Icon" aria-hidden="true"></i></span>
+                    <span class="bio-txt">
+                        <b>@item.Row.Title</b>
+                        @if (!string.IsNullOrWhiteSpace(item.Row.Subtitle)) { <small>@item.Row.Subtitle</small> }
+                    </span>
+                    <i class="bi @(item.External ? "bi-box-arrow-up-right" : "bi-chevron-right") bio-go" aria-hidden="true"></i>
+                </a>
+            }
+        </nav>
+
+        @if (_page.Posts.Count > 0)
+        {
+            <section class="bio-posts" aria-labelledby="bio-posts-h">
+                <h2 id="bio-posts-h">Ostatnie posty</h2>
+                <div class="bio-grid">
+                    @foreach (var p in _page.Posts)
+                    {
+                        <a href="@p.Href" target="_blank" rel="noopener" title="@p.Title"><img src="@p.Image" alt="@p.Title" loading="lazy" /></a>
+                    }
+                </div>
+            </section>
+        }
+
+        <footer class="bio-foot">
+            <a href="/" data-enhance-nav="false"><img src="/brand/hantly-wordmark-dark.svg" alt="Hantly" height="18" /></a>
+        </footer>
+    </div>
+</main>
+
+@code {
+    [CascadingParameter] public HttpContext? HttpContext { get; set; }
+    private BioService.Page _page = new(new(BioService.DefaultTitle, BioService.DefaultText, false), [], []);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _page = await Bio.PageAsync();
+        if (HttpContext is { } ctx && HttpMethods.IsGet(ctx.Request.Method))
+            await Bio.CountViewAsync(ctx.Request.Headers.UserAgent.ToString());
+    }
+}

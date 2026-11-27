@@ -1,0 +1,211 @@
+@using PTScheduler.Portal.Services.Social
+@inject SocialService Social
+@inject InstagramService Ig
+
+@* Kanały: Instagram (własne połączenie), Facebook i Threads przez API, TikTok / YouTube / LinkedIn / X / Pinterest ręcznie. *@
+
+<PanelCard Title="Twoje kanały" Icon="bi-broadcast-pin" IconClass="pp-tone-info"
+           Subtitle="Domyślne kanały zaznaczają się same przy nowych postach (i u autopilota). Kanały ręczne przypominają o terminie i dają gotową paczkę do wrzucenia.">
+    <div class="sc-list">
+        <div class="sc-row">
+            <span class="sc-ico" style="--c:@SocialPlatforms.InstagramColor"><i class="bi bi-instagram"></i></span>
+            <div class="min-w-0 flex-grow-1">
+                <div class="sc-name">Instagram @(_ig is null ? "" : "· @" + _ig.Username)</div>
+                <div class="small text-muted">@(_ig is null ? "niepołączony — sekcja niżej" : $"{_ig.Followers:N0} obserwujących · przez {(_ig.Provider == "facebook" ? "stronę na Facebooku" : "logowanie Instagrama")}")</div>
+                @if (_ig?.LastError is { } igErr) { <div class="small text-danger">@igErr</div> }
+            </div>
+            <span class="pp-chip @(_ig is null ? "pp-tone-muted" : "pp-tone-ok")">@(_ig is null ? "Brak" : "API")</span>
+        </div>
+        @foreach (var c in _channels)
+        {
+            var ch = c;
+            var info = SocialPlatforms.Get(ch.Platform);
+            <div class="sc-row @(ch.Enabled ? "" : "is-off")" @key="ch.Id">
+                <span class="sc-ico" style="--c:@info.Color">
+                    @if (!string.IsNullOrEmpty(ch.PictureUrl)) { <img src="@ch.PictureUrl" alt="" referrerpolicy="no-referrer" /> } else { <i class="bi @info.Icon"></i> }
+                </span>
+                <div class="min-w-0 flex-grow-1">
+                    <div class="sc-name">@info.Label · @ch.Name</div>
+                    <div class="small text-muted">
+                        @(ch.Api ? (ch.Followers is int f ? $"{f:N0} obserwujących" : "przez API") : "ręcznie — przypomnienie i paczka")
+                        @if (ch.TokenExpiresAt is { } exp) { <span> · dostęp do @InstagramRules.ToWarsaw(exp).ToString("dd.MM.yyyy")</span> }
+                        @if (!string.IsNullOrEmpty(ch.ProfileUrl)) { <span> · <a href="@ch.ProfileUrl" target="_blank" rel="noopener">profil</a></span> }
+                    </div>
+                    @if (ch.LastError is { } err) { <div class="small text-danger">@err</div> }
+                </div>
+                <div class="form-check form-switch mb-0" title="Domyślnie przy nowych postach">
+                    <input class="form-check-input" type="checkbox" id="def-@ch.Id" checked="@ch.Default" @onchange="e => FlagsAsync(ch, ch.Enabled, e.Value is true)" />
+                    <label class="form-check-label small" for="def-@ch.Id">domyślnie</label>
+                </div>
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" id="on-@ch.Id" checked="@ch.Enabled" @onchange="e => FlagsAsync(ch, e.Value is true, ch.Default)" />
+                    <label class="form-check-label small" for="on-@ch.Id">włączony</label>
+                </div>
+                @if (_confirm == ch.Id)
+                {
+                    <button class="btn btn-danger btn-sm" @onclick="() => DeleteAsync(ch.Id)">Usuń</button>
+                    <button class="btn btn-link btn-sm" @onclick="() => _confirm = null">Nie</button>
+                }
+                else
+                {
+                    <button class="btn btn-link btn-sm text-danger" title="Usuń kanał" aria-label="Usuń kanał" @onclick="() => _confirm = ch.Id"><i class="bi bi-trash3"></i></button>
+                }
+            </div>
+        }
+    </div>
+</PanelCard>
+
+<PanelCard Title="Facebook (i Instagram przez stronę)" Icon="bi-facebook" Subtitle="Jedno połączenie z Meta: strona firmowa na Facebooku, a jeśli ma podpięty Instagram — też Instagram. Działa bez portfolio firmowego.">
+    <ol class="ig-steps">
+        <li>W aplikacji Meta „hantly” dodaj przypadek użycia <b>„Zarządzaj wszystkim na swojej stronie”</b> (Pages API). Instagram musi być połączony ze stroną: na Facebooku <i>Ustawienia strony → Połączone konta → Instagram</i>.</li>
+        <li>Otwórz <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener">Graph API Explorer</a>, po prawej wybierz aplikację <b>hantly</b> i <b>User Token</b>.</li>
+        <li>W „Permissions” dodaj: <code class="sc-scopes">@string.Join(", ", FacebookClient.Scopes)</code></li>
+        <li>Kliknij <b>Generate Access Token</b>, zaloguj się, wybierz stronę Hantly i konto Instagram, zatwierdź. Skopiuj token (zaczyna się od <code>EAA</code>) i wklej niżej.</li>
+    </ol>
+    <div class="row g-2 mb-2">
+        <div class="col-sm-6"><input class="form-control form-control-sm" @bind="_metaAppId" placeholder="App ID aplikacji Meta (opcjonalnie)" aria-label="App ID" /></div>
+        <div class="col-sm-6"><input type="password" class="form-control form-control-sm" @bind="_metaSecret" placeholder="@(_metaHasSecret ? "App secret zapisany — wpisz, by zmienić" : "App secret (opcjonalnie)")" aria-label="App secret" autocomplete="new-password" /></div>
+    </div>
+    <div class="small text-muted mb-2">Z App ID i App secret Portal zamieni krótki token (1 h) na długi — tokeny stron nie wygasają. Bez nich połączenie wytrzyma około godziny. Oba znajdziesz w <i>Ustawienia aplikacji → Podstawowe</i>.</div>
+    <textarea class="form-control form-control-sm mb-2" rows="2" @bind="_metaToken" @bind:event="oninput" placeholder="EAA…" aria-label="Token Meta" autocomplete="off"></textarea>
+    <button class="btn btn-primary btn-sm" @onclick="PagesAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_metaToken))"><i class="bi bi-search me-1"></i>Pokaż moje strony</button>
+    @if (_pages is { Count: > 0 })
+    {
+        <div class="sc-pages mt-3">
+            @foreach (var pg in _pages)
+            {
+                var fbPage = pg;
+                <div class="sc-page">
+                    @if (fbPage.Picture is not null) { <img src="@fbPage.Picture" alt="" referrerpolicy="no-referrer" /> }
+                    <div class="min-w-0 flex-grow-1">
+                        <b>@fbPage.Name</b>
+                        <div class="small text-muted">@fbPage.Followers.ToString("N0") obserwujących · @(fbPage.IgUsername is null ? "bez Instagrama" : "Instagram @" + fbPage.IgUsername)</div>
+                    </div>
+                    <button class="btn btn-outline-primary btn-sm" @onclick="() => ConnectPageAsync(fbPage, false)" disabled="@_busy">Tylko Facebook</button>
+                    @if (fbPage.IgId is not null)
+                    {
+                        <button class="btn btn-primary btn-sm" @onclick="() => ConnectPageAsync(fbPage, true)" disabled="@_busy"><i class="bi bi-instagram me-1"></i>Facebook + Instagram</button>
+                    }
+                </div>
+            }
+        </div>
+    }
+</PanelCard>
+
+<PanelCard Title="Threads" Icon="bi-threads" Subtitle="Krótkie wpisy i karuzele, publikowane przez API Meta.">
+    <ol class="ig-steps">
+        <li>W aplikacji Meta dodaj przypadek użycia <b>„Uzyskaj dostęp do API Threads”</b> i nadaj uprawnienia: <code class="sc-scopes">@string.Join(", ", ThreadsClient.Scopes)</code>.</li>
+        <li>W <i>Role aplikacji → Testerzy Threads</i> dodaj swoje konto i zaakceptuj zaproszenie w Threads (Ustawienia → Konto → Strony i aplikacje).</li>
+        <li>W ustawieniach przypadku użycia Threads użyj <b>User Token Generator</b> i wklej token niżej. Portal odnawia go sam co 60 dni.</li>
+    </ol>
+    <textarea class="form-control form-control-sm mb-2" rows="2" @bind="_threadsToken" @bind:event="oninput" placeholder="THAA…" aria-label="Token Threads" autocomplete="off"></textarea>
+    <button class="btn btn-primary btn-sm" @onclick="ThreadsAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_threadsToken))"><i class="bi bi-threads me-1"></i>Połącz Threads</button>
+</PanelCard>
+
+<IgVideoChannels Flash="Flash" />
+
+<PanelCard Title="Kanały ręczne" Icon="bi-box-arrow-up" Subtitle="Portal przygotuje opis dopasowany do platformy i pliki, a w terminie przypomni e-mailem. Wrzucasz sam i klikasz „Opublikowane”.">
+    <div class="row g-2 align-items-end">
+        <div class="col-sm-4">
+            <label class="form-label small fw-semibold" for="sc-plat">Platforma</label>
+            <select id="sc-plat" class="form-select form-select-sm" @bind="_manualPlatform">
+                @foreach (var p in SocialPlatforms.All.Where(x => !x.Api)) { <option value="@p.Platform">@p.Label</option> }
+            </select>
+        </div>
+        <div class="col-sm-4">
+            <label class="form-label small fw-semibold" for="sc-name">Nazwa (opcjonalnie)</label>
+            <input id="sc-name" class="form-control form-control-sm" @bind="_manualName" placeholder="np. hantly.pl" />
+        </div>
+        <div class="col-sm-4">
+            <label class="form-label small fw-semibold" for="sc-url">Adres profilu (opcjonalnie)</label>
+            <input id="sc-url" class="form-control form-control-sm" @bind="_manualUrl" placeholder="https://…" />
+        </div>
+    </div>
+    <div class="small text-muted mt-2"><i class="bi bi-info-circle me-1"></i>@SocialPlatforms.Get(_manualPlatform).WhyManual</div>
+    <button class="btn btn-outline-primary btn-sm mt-2" @onclick="AddManualAsync"><i class="bi bi-plus-lg me-1"></i>Dodaj kanał</button>
+</PanelCard>
+
+<IgConnect Flash="Flash" Changed="Changed" />
+
+@code {
+    [Parameter] public EventCallback<(bool, string)> Flash { get; set; }
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private List<SocialChannel> _channels = [];
+    private InstagramAccount? _ig;
+    private List<FacebookClient.Page>? _pages;
+    private string _metaAppId = "", _metaSecret = "", _metaToken = "", _threadsToken = "", _manualName = "", _manualUrl = "";
+    private bool _metaHasSecret, _busy;
+    private SocialPlatform _manualPlatform = SocialPlatform.TikTok;
+    private int? _confirm;
+
+    protected override async Task OnInitializedAsync()
+    {
+        (_metaAppId, _metaHasSecret) = await Social.MetaAppAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _channels = await Social.ChannelsAsync();
+        _ig = await Ig.AccountAsync();
+    }
+
+    private async Task FlagsAsync(SocialChannel ch, bool enabled, bool isDefault)
+    {
+        await Social.SetFlagsAsync(ch.Id, enabled, isDefault);
+        await LoadAsync();
+    }
+
+    private async Task DeleteAsync(int id)
+    {
+        await Social.DeleteChannelAsync(id);
+        _confirm = null;
+        await LoadAsync();
+        await Changed.InvokeAsync();
+        await Flash.InvokeAsync((true, "Kanał usunięty."));
+    }
+
+    private async Task PagesAsync()
+    {
+        _busy = true;
+        if (!string.IsNullOrWhiteSpace(_metaAppId)) { await Social.SaveMetaAppAsync(_metaAppId, _metaSecret); _metaSecret = ""; (_metaAppId, _metaHasSecret) = await Social.MetaAppAsync(); }
+        var (pages, error) = await Social.MetaPagesAsync(_metaToken);
+        _pages = pages;
+        _busy = false;
+        if (error is not null) await Flash.InvokeAsync((false, error));
+    }
+
+    private async Task ConnectPageAsync(FacebookClient.Page page, bool alsoInstagram)
+    {
+        _busy = true;
+        var r = await Social.ConnectPageAsync(page, alsoInstagram);
+        if (r.Ok && alsoInstagram) await Ig.SyncAsync();
+        _pages = null;
+        _metaToken = "";
+        await LoadAsync();
+        _busy = false;
+        await Changed.InvokeAsync();
+        await Flash.InvokeAsync(r);
+    }
+
+    private async Task ThreadsAsync()
+    {
+        _busy = true;
+        var r = await Social.ConnectThreadsAsync(_threadsToken);
+        if (r.Ok) _threadsToken = "";
+        await LoadAsync();
+        _busy = false;
+        await Changed.InvokeAsync();
+        await Flash.InvokeAsync(r);
+    }
+
+    private async Task AddManualAsync()
+    {
+        var r = await Social.AddManualAsync(_manualPlatform, _manualName, _manualUrl);
+        _manualName = _manualUrl = "";
+        await LoadAsync();
+        await Changed.InvokeAsync();
+        await Flash.InvokeAsync(r);
+    }
+}

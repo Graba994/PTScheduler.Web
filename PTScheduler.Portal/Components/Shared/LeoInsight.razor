@@ -1,0 +1,70 @@
+@inject LeoInsights Insights
+
+@* Karta „Wnioski od Leo”: ostatnia analiza (zapisana) i przycisk „Wygeneruj”. AI tylko na kliknięcie — nic nie liczy się samo. *@
+<section class="card border-0 shadow-sm leo-card mb-3">
+    <div class="card-body">
+        <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+            <img src="@PuppyArt.DataUri(_busy ? "think" : _insight is null ? "hello" : "happy")" alt="" width="44" height="44" />
+            <div class="me-auto">
+                <div class="fw-semibold">@Title</div>
+                <div class="small text-muted">
+                    @if (_insight is null) { @Hint }
+                    else
+                    {
+                        @($"{(_insight.FromAi ? "Napisane przez AI" : "Z reguł (bez AI)")} · {_insight.At.ToLocalTime():dd.MM.yyyy HH:mm}")
+                    }
+                </div>
+            </div>
+            <button type="button" class="btn btn-sm btn-primary" @onclick="GenerateAsync" disabled="@_busy">
+                @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-stars me-1"></i> }
+                @(_insight is null ? "Wygeneruj" : "Wygeneruj ponownie")
+            </button>
+        </div>
+        @if (_insight is not null)
+        {
+            <div class="leo-insight-body">
+                @foreach (var line in _insight.Text.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var l = line.Trim();
+                    if (l.StartsWith("- ")) { <div class="leo-point">@l[2..]</div> }
+                    else if (l.EndsWith(':')) { <div class="leo-subhead">@l</div> }
+                    else { <p class="mb-1">@l</p> }
+                }
+            </div>
+            @if (_insight.Unverified.Count > 0)
+            {
+                <div class="small text-warning-emphasis mt-2"><i class="bi bi-exclamation-triangle me-1"></i>Sprawdź liczby, których nie ma w danych: @string.Join(", ", _insight.Unverified)</div>
+            }
+            @if (_insight.Error is { } err && !_insight.FromAi)
+            {
+                <div class="small text-muted mt-1">@err</div>
+            }
+        }
+    </div>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public string Kind { get; set; } = "";
+    [Parameter] public string Title { get; set; } = "Wnioski od Leo";
+    [Parameter] public string Hint { get; set; } = "Kliknij „Wygeneruj”, a Leo podsumuje dane w kilku punktach.";
+
+    private AssistantService.Insight? _insight;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync() => _insight = await Insights.LoadAsync(Kind);
+
+    private async Task GenerateAsync()
+    {
+        _busy = true;
+        try
+        {
+            _insight = Kind switch
+            {
+                LeoInsights.Survey => await Insights.SurveyAsync(),
+                LeoInsights.Meetings => await Insights.MeetingsAsync(),
+                _ => await Insights.FeedbackAsync(),
+            };
+        }
+        finally { _busy = false; }
+    }
+}

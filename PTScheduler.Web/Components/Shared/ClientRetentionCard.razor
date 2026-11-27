@@ -1,0 +1,72 @@
+@using PTScheduler.Application.Surveys
+@inject PTScheduler.Web.Services.RetentionService Retention
+
+@* Profil klienta: ryzyko odejścia, trend samopoczucia z ankiet po treningu i uwagi z ankiety zdrowotnej do planu.
+   Karta pojawia się tylko, gdy jest coś do pokazania. *@
+@if (_insights is { } x && (x.Risk.IsRisk || x.Wellbeing.Points.Count >= 4 || x.HealthFlags.Count > 0))
+{
+    <section class="prg-card rc-card">
+        <div class="rc-head">
+            <h6 class="prg-title"><i class="bi bi-heart-pulse"></i>Samopoczucie i utrzymanie</h6>
+            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => _write = !_write"><i class="bi bi-chat-heart me-1"></i>@(_write ? "Zamknij" : "Napisz")</button>
+        </div>
+
+        @if (x.Risk.IsRisk)
+        {
+            <div class="rc-risk @(x.Risk.IsHigh ? "high" : "")">
+                <b>@(x.Risk.IsHigh ? "Wysokie" : "Średnie") ryzyko odejścia</b> · @string.Join(" · ", x.Risk.Reasons.Take(3).Select(r => r.Text))
+                <div class="small mt-1"><i class="bi bi-lightbulb me-1"></i>@x.Risk.Top!.Suggestion</div>
+            </div>
+        }
+
+        @if (x.Wellbeing.Points.Count > 0)
+        {
+            <div class="rc-well">
+                <div class="rc-bars" aria-hidden="true">
+                    @foreach (var p in x.Wellbeing.Points)
+                    {
+                        <span class="@(p.Pain ? "pain" : "")" style="height:@(Math.Round(p.Score * 20))%" title="@($"{p.Date:dd.MM}: {p.Score:0.0}/5{(p.Pain ? " · ból" : "")}")"></span>
+                    }
+                </div>
+                <div class="rc-well-text">
+                    <span class="rc-trend @Trend(x.Wellbeing.Direction)"><i class="bi @TrendIcon(x.Wellbeing.Direction)"></i></span>
+                    @x.Wellbeing.Text
+                    <div class="small text-muted">Indeks 1–5 z ankiet po treningu: energia, sen, zadowolenie i zmęczenie mięśni. Czerwone słupki — zgłoszony ból.</div>
+                </div>
+            </div>
+        }
+
+        @if (x.HealthFlags.Count > 0)
+        {
+            <div class="rc-health">
+                <div class="rc-sub"><i class="bi bi-clipboard2-pulse me-1"></i>Ankieta zdrowotna a plan</div>
+                @foreach (var f in x.HealthFlags)
+                {
+                    <div class="rc-flag">
+                        <b>@f.Area</b> <span class="text-muted small">— @f.Source: „@f.Mention”</span>
+                        <div class="small">W planie: @string.Join(", ", f.Exercises)</div>
+                        <div class="small text-muted">@f.Advice</div>
+                    </div>
+                }
+            </div>
+        }
+
+        @if (_write)
+        {
+            <MessageDraftBox ClientId="ClientId" Phone="@Phone" Purpose="@(x.Risk.Top?.Purpose ?? PTScheduler.Domain.Rules.DraftPurpose.Congrats)" />
+        }
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public int ClientId { get; set; }
+    [Parameter] public string? Phone { get; set; }
+
+    private PTScheduler.Web.Services.RetentionService.ClientInsights? _insights;
+    private bool _write;
+
+    protected override async Task OnParametersSetAsync() => _insights = await Retention.GetInsightsAsync(ClientId);
+
+    private static string Trend(TrendDirection d) => d switch { TrendDirection.Down => "down", TrendDirection.Up => "up", _ => "flat" };
+    private static string TrendIcon(TrendDirection d) => d switch { TrendDirection.Down => "bi-arrow-down-right", TrendDirection.Up => "bi-arrow-up-right", _ => "bi-arrow-right" };
+}

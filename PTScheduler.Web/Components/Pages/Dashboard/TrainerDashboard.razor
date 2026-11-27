@@ -3,8 +3,12 @@
 @using PTScheduler.Domain.Enums
 @using PTScheduler.Domain.Constants
 @inject ISessionService SessionService
+@inject ITrainingPlanService PlanDays
 @inject IClientService ClientService
 @inject ISessionPackageService PackageService
+@inject IClientAttentionService Attention
+@inject EntitlementService Entitlements
+@inject WearableService Wearables
 
 @if (!_loaded)
 {
@@ -63,56 +67,73 @@
 else
 {
     <PullToRefresh OnRefresh="RefreshAsync">
-    <div class="page-header">
-        <h4 class="page-title"><i class="bi bi-calendar3 me-2" style="color:var(--c-primary)"></i>Mój dzień</h4>
-        <a href="/calendar" class="btn btn-sm btn-primary"><i class="bi bi-calendar3 me-1"></i>Kalendarz</a>
-    </div>
+    @if (!Embedded)
+    {
+        <DaySwitch Current="dashboard" />
+        @* Na telefonie przełącznik wystarcza za tytuł, a kalendarz jest w dolnym menu. *@
+        <div class="page-header d-none d-md-flex">
+            <h4 class="page-title"><i class="bi bi-grid-1x2 me-2" style="color:var(--c-primary)"></i>Pulpit</h4>
+            <a href="/calendar" class="btn btn-sm btn-primary"><i class="bi bi-calendar3 me-1"></i>Kalendarz</a>
+        </div>
 
-    <!-- KPI stat cards -->
-    <div class="row g-3 mb-3">
-        <div class="col-6 col-xl-3">
-            <div class="stat-card">
-                <div class="stat-icon"><i class="bi bi-calendar-week-fill"></i></div>
-                <div>
-                    <div class="stat-value">@_thisWeekCount</div>
-                    <div class="stat-label">Sesje w tym tygodniu</div>
+        <WelcomeBanner Trainer="true" />
+        <AssistantTodayCard />
+        <OffPackageAlerts TrainerUserId="@TrainerUserId" />
+
+        <!-- KPI stat cards -->
+        <div class="row g-3 mb-3">
+            <div class="col-6 col-xl-3">
+                <div class="stat-card">
+                    <div class="stat-icon"><i class="bi bi-calendar-week-fill"></i></div>
+                    <div>
+                        <div class="stat-value">@_thisWeekCount</div>
+                        <div class="stat-label">Sesje w tym tygodniu</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-xl-3">
+                <div class="stat-card">
+                    <div class="stat-icon stat-icon-green">
+                        <i class="bi bi-check-circle-fill"></i>
+                    </div>
+                    <div>
+                        <div class="stat-value">@_thisMonthCompleted</div>
+                        <div class="stat-label">Ukończone w @MonthLocative(StudioClock.Now.Month)</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-xl-3">
+                <div class="stat-card">
+                    <div class="stat-icon stat-icon-blue">
+                        <i class="bi bi-people-fill"></i>
+                    </div>
+                    <div>
+                        <div class="stat-value">@_activeClientsCount</div>
+                        <div class="stat-label">Aktywnych klientów</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-xl-3">
+                <div class="stat-card">
+                    <div class="stat-icon stat-icon-amber">
+                        <i class="bi bi-box-seam-fill"></i>
+                    </div>
+                    <div>
+                        <div class="stat-value">@_expiring.Count</div>
+                        <div class="stat-label">Pakiety wygasają</div>
+                    </div>
                 </div>
             </div>
         </div>
-        <div class="col-6 col-xl-3">
-            <div class="stat-card">
-                <div class="stat-icon stat-icon-green">
-                    <i class="bi bi-check-circle-fill"></i>
-                </div>
-                <div>
-                    <div class="stat-value">@_thisMonthCompleted</div>
-                    <div class="stat-label">Ukończone w @MonthLocative(DateTime.Now.Month)</div>
-                </div>
-            </div>
+
+    }
+    else
+    {
+        <div class="page-header mt-4">
+            <h5 class="page-title mb-0"><i class="bi bi-person-workspace me-2" style="color:var(--c-primary)"></i>Moje treningi</h5>
+            <a href="/dzis" class="btn btn-sm btn-outline-primary"><i class="bi bi-sun me-1"></i>Mój dzień</a>
         </div>
-        <div class="col-6 col-xl-3">
-            <div class="stat-card">
-                <div class="stat-icon stat-icon-blue">
-                    <i class="bi bi-people-fill"></i>
-                </div>
-                <div>
-                    <div class="stat-value">@_activeClientsCount</div>
-                    <div class="stat-label">Aktywnych klientów</div>
-                </div>
-            </div>
-        </div>
-        <div class="col-6 col-xl-3">
-            <div class="stat-card">
-                <div class="stat-icon stat-icon-amber">
-                    <i class="bi bi-box-seam-fill"></i>
-                </div>
-                <div>
-                    <div class="stat-value">@_expiring.Count</div>
-                    <div class="stat-label">Pakiety wygasają</div>
-                </div>
-            </div>
-        </div>
-    </div>
+    }
 
     @if (_awaiting.Any())
     {
@@ -138,8 +159,8 @@ else
                     var initials = string.Concat(first.ClientName.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => p[0])).ToUpper();
                     <div class="px-3 py-2 @(g != awaitingGroups.Last() ? "border-bottom" : "")">
                         <div class="d-flex align-items-center gap-2 mb-1">
-                            <div class="avatar-circle flex-shrink-0" style="width:28px;height:28px;font-size:.65rem">@initials</div>
-                            <span class="fw-semibold" style="font-size:.875rem">@first.ClientName</span>
+                            <GarminAvatar Connected="_garmin.Contains(g.Key)"><div class="avatar-circle flex-shrink-0" style="width:28px;height:28px;font-size:.65rem">@initials</div></GarminAvatar>
+                            <span class="fw-semibold" style="font-size:.875rem">@first.DisplayName</span>
                             @if (sessions.Count > 1)
                             {
                                 <span class="badge rounded-pill bg-warning text-dark ms-auto" style="font-size:.65rem">@sessions.Count×</span>
@@ -167,8 +188,8 @@ else
         <div class="col-12 col-lg-5">
             <div class="card h-100">
                 <div class="card-header d-flex align-items-center justify-content-between">
-                    <span><i class="bi bi-sun me-2"></i>Dziś — @DateTime.Now.ToString("dd MMMM")</span>
-                    <span class="badge" style="background:var(--c-primary-light);color:var(--c-primary)">@_today.Count</span>
+                    <span><i class="bi bi-sun me-2"></i>Dziś — @StudioClock.Now.ToString("dd MMMM") <span class="badge ms-1" style="background:var(--c-primary-light);color:var(--c-primary)">@_today.Count</span></span>
+                    <a href="/dzis" class="btn btn-sm btn-link p-0 text-decoration-none">Mój dzień <i class="bi bi-arrow-right"></i></a>
                 </div>
                 <div class="card-body p-0">
                     @if (!_today.Any())
@@ -185,16 +206,26 @@ else
                         <div class="list-group list-group-flush">
                             @foreach (var s in _today)
                             {
-                                <div class="list-group-item d-flex align-items-center gap-3 px-3 py-2">
-                                    <div class="text-center flex-shrink-0" style="min-width:48px">
-                                        <div class="fw-bold" style="font-size:1rem;color:var(--c-primary)">@s.StartTime.ToString("HH:mm")</div>
-                                        <div class="text-muted" style="font-size:.7rem">@s.DurationMinutes min</div>
+                                <div class="list-group-item px-3 py-2 dash-visit">
+                                    <div class="d-flex align-items-center gap-3">
+                                        <div class="text-center flex-shrink-0" style="min-width:48px">
+                                            <div class="fw-bold" style="font-size:1rem;color:var(--c-primary)">@s.StartTime.ToString("HH:mm")</div>
+                                            <div class="text-muted" style="font-size:.7rem">@s.DurationMinutes min</div>
+                                        </div>
+                                        <div class="flex-grow-1 overflow-hidden">
+                                            @if (s.Id == NextTodayId) { <CountdownChip Start="s.StartTime" End="s.EndTime" /> }
+                                            <a href="@($"/clients/{s.ClientId}")" class="fw-semibold text-truncate d-block text-body text-decoration-none" style="font-size:.875rem">@s.DisplayName@if (_garmin.Contains(s.ClientId)) { <GarminBadge /> }</a>
+                                            <div class="text-muted text-truncate" style="font-size:.75rem">@s.SessionTypeName@(_todayDays.GetValueOrDefault(s.Id) is { } pd ? $" · {pd.DayLabel}" : "")</div>
+                                        </div>
+                                        @if (!string.IsNullOrEmpty(s.MeetingUrl))
+                                        {
+                                            <a href="@s.MeetingUrl" target="_blank" class="btn btn-sm btn-outline-primary meet-btn" title="Google Meet"><i class="bi bi-camera-video-fill"></i></a>
+                                        }
+                                        <span class="badge rounded-pill @StatusBadge(s.Status)" style="font-size:.65rem">@StatusLabel(s.Status)</span>
                                     </div>
-                                    <div class="flex-grow-1 overflow-hidden">
-                                        <div class="fw-semibold text-truncate" style="font-size:.875rem">@s.ClientName</div>
-                                        <div class="text-muted" style="font-size:.75rem">@s.SessionTypeName</div>
+                                    <div class="dash-visit-actions">
+                                        <VisitActionBar Session="s" Day="_todayDays.GetValueOrDefault(s.Id)" Compact="true" OnChanged="r => OnTodayChanged(r)" />
                                     </div>
-                                    <span class="badge rounded-pill @StatusBadge(s.Status)" style="font-size:.65rem">@StatusLabel(s.Status)</span>
                                 </div>
                             }
                         </div>
@@ -228,9 +259,15 @@ else
                                         <div class="text-muted" style="font-size:.7rem">@s.StartTime.ToString("HH:mm")</div>
                                     </div>
                                     <div class="flex-grow-1 overflow-hidden">
-                                        <div class="fw-semibold text-truncate" style="font-size:.875rem">@s.ClientName</div>
+                                        <div class="fw-semibold text-truncate" style="font-size:.875rem">@s.DisplayName</div>
                                         <div class="text-muted" style="font-size:.75rem">@s.SessionTypeName · @s.DurationMinutes min</div>
                                     </div>
+                                    @if (!string.IsNullOrEmpty(s.MeetingUrl))
+                                    {
+                                        <a href="@s.MeetingUrl" target="_blank" class="btn btn-sm btn-outline-primary meet-btn" title="Google Meet" @onclick:stopPropagation>
+                                            <i class="bi bi-camera-video-fill"></i>
+                                        </a>
+                                    }
                                     <div class="text-muted" style="font-size:.7rem;white-space:nowrap">@DaysUntil(s.StartTime)</div>
                                 </a>
                             }
@@ -241,97 +278,135 @@ else
         </div>
     </div>
 
-    <div class="row g-3">
-        <!-- Expiring packages -->
-        <div class="col-12 col-lg-7">
-            <div class="card">
-                <div class="card-header d-flex align-items-center justify-content-between">
-                    <span><i class="bi bi-exclamation-triangle me-2" style="color:var(--c-warning)"></i>Pakiety wygasające (14 dni)</span>
-                    @if (_expiring.Any())
-                    {
-                        <span class="badge bg-warning text-dark">@_expiring.Count</span>
-                    }
-                </div>
-                <div class="card-body p-0">
-                    @if (!_expiring.Any())
-                    {
-                        <div class="empty-state">
-                            <div class="empty-state-icon">✅</div>
-                            <div class="empty-state-title">Wszystko w porządku</div>
-                            <div class="empty-state-desc">Żaden pakiet nie wygasa w ciągu najbliższych 14 dni.</div>
-                        </div>
-                    }
-                    else
-                    {
-                        <div class="list-group list-group-flush">
-                            @foreach (var p in _expiring)
+    @if (!Embedded)
+    {
+        <div class="row g-3">
+            <!-- Needs attention: retention signals from sessions, packages and workouts -->
+            <div class="col-12 col-lg-7">
+                <div class="card">
+                    <div class="card-header d-flex align-items-center justify-content-between">
+                        <span><i class="bi bi-bell me-2" style="color:var(--c-warning)"></i>Wymaga uwagi</span>
+                        @if (_attention.Any())
+                        {
+                            <span class="badge bg-warning text-dark">@_attention.Count</span>
+                        }
+                    </div>
+                    <div class="card-body p-0">
+                        @if (!_attention.Any())
+                        {
+                            <div class="empty-state">
+                                <div class="empty-state-icon">✅</div>
+                                <div class="empty-state-title">Wszystko w porządku</div>
+                                <div class="empty-state-desc">Klienci są w rytmie: mają pakiety, wizyty i trenują.</div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="list-group list-group-flush">
+                                @foreach (var a in _attention.Take(_attentionExpanded ? int.MaxValue : 6))
+                                {
+                                    <a href="@(a.Reasons.FirstOrDefault(r => r.Link is not null)?.Link ?? $"/clients/{a.ClientId}")"
+                                       class="list-group-item list-group-item-action d-flex align-items-start gap-3 px-3 py-2">
+                                        <span class="attention-dot attention-@a.Severity.ToString().ToLowerInvariant() mt-2 flex-shrink-0"></span>
+                                        <div class="flex-grow-1 overflow-hidden">
+                                            <div class="fw-semibold text-truncate" style="font-size:.875rem">@a.ClientName</div>
+                                            @foreach (var r in a.Reasons)
+                                            {
+                                                <div class="text-muted" style="font-size:.75rem">
+                                                    <i class="bi @ReasonIcon(r.Kind) me-1"></i>@r.Text
+                                                </div>
+                                            }
+                                        </div>
+                                        <i class="bi bi-chevron-right text-muted mt-1" style="font-size:.7rem"></i>
+                                    </a>
+                                }
+                            </div>
+                            @if (_attention.Count > 6)
                             {
-                                <a href="/clients/@p.ClientId" class="list-group-item list-group-item-action d-flex align-items-center gap-3 px-3 py-2">
-                                    <div class="flex-grow-1 overflow-hidden">
-                                        <div class="fw-semibold text-truncate" style="font-size:.875rem">@p.ClientName</div>
-                                        <div class="text-muted" style="font-size:.75rem">@p.PackageName · @p.RemainingCredits pozostałych</div>
-                                    </div>
-                                    <span class="badge rounded-pill @(p.DaysLeft <= 3 ? "bg-danger" : p.DaysLeft <= 7 ? "bg-warning text-dark" : "bg-secondary")">
-                                        @(p.DaysLeft == 0 ? "dziś" : $"{p.DaysLeft} d.")
-                                    </span>
-                                </a>
+                                <div class="text-center py-2 border-top">
+                                    <button class="btn btn-link btn-sm" @onclick="() => _attentionExpanded = !_attentionExpanded">
+                                        @(_attentionExpanded ? "Pokaż mniej" : $"Pokaż wszystkich ({_attention.Count})")
+                                    </button>
+                                </div>
                             }
-                        </div>
-                    }
+                        }
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <!-- Pending clients -->
-        <div class="col-12 col-lg-5">
-            <div class="card h-100">
-                <div class="card-header d-flex align-items-center justify-content-between">
-                    <span><i class="bi bi-hourglass-split me-2"></i>Oczekują na zatwierdzenie</span>
-                    @if (_pending.Any())
-                    {
-                        <span class="badge bg-warning text-dark">@_pending.Count</span>
-                    }
-                </div>
-                <div class="card-body p-0">
-                    @if (!_pending.Any())
-                    {
-                        <div class="empty-state">
-                            <div class="empty-state-icon">👋</div>
-                            <div class="empty-state-title">Brak oczekujących</div>
-                            <div class="empty-state-desc">Wszyscy klienci zostali zatwierdzeni. Nowi pojawią się po rejestracji.</div>
-                        </div>
-                    }
-                    else
-                    {
-                        <div class="list-group list-group-flush">
-                            @foreach (var c in _pending)
-                            {
-                                <a href="/clients/@c.Id" class="list-group-item list-group-item-action d-flex align-items-center gap-3 px-3 py-2">
-                                    <div class="avatar-circle flex-shrink-0" style="width:32px;height:32px;font-size:.75rem">@c.Initials</div>
-                                    <div class="flex-grow-1 overflow-hidden">
-                                        <div class="fw-semibold text-truncate" style="font-size:.875rem">@c.FullName</div>
-                                        <div class="text-muted text-truncate" style="font-size:.75rem">@c.Email</div>
-                                    </div>
-                                    <span class="badge bg-warning text-dark" style="font-size:.65rem">Oczekuje</span>
-                                </a>
-                            }
-                        </div>
-                    }
+            <!-- Pending clients -->
+            <div class="col-12 col-lg-5">
+                <div class="card h-100">
+                    <div class="card-header d-flex align-items-center justify-content-between">
+                        <span><i class="bi bi-hourglass-split me-2"></i>Oczekują na zatwierdzenie</span>
+                        @if (_pending.Any())
+                        {
+                            <span class="badge bg-warning text-dark">@_pending.Count</span>
+                        }
+                    </div>
+                    <div class="card-body p-0">
+                        @if (!_pending.Any())
+                        {
+                            <div class="empty-state">
+                                <div class="empty-state-icon">👋</div>
+                                <div class="empty-state-title">Brak oczekujących</div>
+                                <div class="empty-state-desc">Wszyscy klienci zostali zatwierdzeni. Nowi pojawią się po rejestracji.</div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="list-group list-group-flush">
+                                @foreach (var c in _pending)
+                                {
+                                    <a href="/clients/@c.Id" class="list-group-item list-group-item-action d-flex align-items-center gap-3 px-3 py-2">
+                                        <div class="avatar-circle flex-shrink-0" style="width:32px;height:32px;font-size:.75rem">@c.Initials</div>
+                                        <div class="flex-grow-1 overflow-hidden">
+                                            <div class="fw-semibold text-truncate" style="font-size:.875rem">@c.FullName</div>
+                                            <div class="text-muted text-truncate" style="font-size:.75rem">@c.Email</div>
+                                        </div>
+                                        <span class="badge bg-warning text-dark" style="font-size:.65rem">Oczekuje</span>
+                                    </a>
+                                }
+                            </div>
+                        }
+                    </div>
                 </div>
             </div>
         </div>
-    </div>
+    }
+    @* Prośba o ocenę i propozycja wyższego planu — na końcu, żeby nie przesłaniały spraw na dziś. *@
+    @if (!Embedded)
+    {
+        <div class="mt-4">
+            <UpsellStrip />
+            <AppFeedbackForm Compact="true" />
+        </div>
+    }
     </PullToRefresh>
 }
 
 @code {
     [Parameter] public string? TrainerUserId { get; set; }
+    /// <summary>Pod „Centrum studia” u właściciela, który sam prowadzi treningi: tylko jego dzień i wizyty, bez powtórzonych kart studia.</summary>
+    [Parameter] public bool Embedded { get; set; }
 
     private bool _loaded;
     private List<SessionDto> _today = [];
+    // Najbliższa dzisiejsza wizyta, która jeszcze się nie skończyła — przy niej odliczanie.
+    private int? NextTodayId => _today.FirstOrDefault(s => s.Status is SessionStatus.Scheduled or SessionStatus.AwaitingPackage && s.EndTime > StudioClock.Now)?.Id;
+    private Dictionary<int, PTScheduler.Application.DTOs.SessionPlanDayDto> _todayDays = [];
+
+    private void OnTodayChanged((SessionDto Session, string Message) r)
+    {
+        var i = _today.FindIndex(x => x.Id == r.Session.Id);
+        if (i >= 0) _today[i] = r.Session;
+    }
     private List<SessionDto> _upcoming = [];
     private List<SessionDto> _awaiting = [];
+    private HashSet<int> _garmin = [];
     private List<ExpiringPackageDto> _expiring = [];
+    private List<ClientAttentionDto> _attention = [];
+    private bool _attentionExpanded;
     private List<ClientDto> _pending = [];
 
     private int _thisWeekCount;
@@ -352,16 +427,21 @@ else
         try
         {
             _loaded = false;
-            var now = DateTime.Now;
+            var now = StudioClock.Now;
             var todayStart = new DateTime(now.Year, now.Month, now.Day);
             var todayEnd   = todayStart.AddDays(1);
 
-            _today    = await SessionService.GetSessionsAsync(todayStart, todayEnd, TrainerUserId);
+            // Trening w parze to dwie wizyty — na pulpicie pokazujemy go raz („Ola + Piotr”).
+            _today    = (await SessionService.GetSessionsAsync(todayStart, todayEnd, TrainerUserId)).Where(s => !s.IsPairFollower).ToList();
+            try { _todayDays = _today.Count == 0 ? [] : await PlanDays.GetSessionPlanDaysAsync(_today.Select(x => x.Id).ToList()); } catch { _todayDays = []; }
             _upcoming = (await SessionService.GetUpcomingAsync(trainerUserId: TrainerUserId, count: 8))
-                            .Where(s => s.StartTime.Date > DateTime.Now.Date).ToList();
+                            .Where(s => s.StartTime.Date > StudioClock.Now.Date && !s.IsPairFollower).ToList();
             _awaiting = await SessionService.GetAwaitingPackageAsync(TrainerUserId);
             _expiring = await PackageService.GetExpiringAsync(14, TrainerUserId);
+            try { _attention = await Attention.GetAsync(TrainerUserId, Entitlements.IsAllowed("TrainingPlansEnabled")); }
+            catch { _attention = []; } // Lista pomocnicza — nie blokuje pulpitu.
             _pending  = await ClientService.GetPendingClientsAsync(TrainerUserId);
+            if (Entitlements.IsAllowed("Wearables")) { try { _garmin = await Wearables.ConnectedClientIdsAsync(); } catch { _garmin = []; } }
 
             // Stats
             var weekDay = (int)now.DayOfWeek;
@@ -373,7 +453,7 @@ else
 
             var statsSessions = await SessionService.GetSessionsAsync(statsFrom, weekEnd, TrainerUserId);
             _thisWeekCount = statsSessions.Count(s =>
-                s.StartTime >= weekStart &&
+                s.StartTime >= weekStart && !s.IsPairFollower &&
                 s.Status != SessionStatus.Cancelled &&
                 s.Status != SessionStatus.NoShow);
 
@@ -391,6 +471,19 @@ else
         }
     }
 
+    private static string ReasonIcon(AttentionKind k) => k switch
+    {
+        AttentionKind.NoVisit         => "bi-calendar-x",
+        AttentionKind.PackageEmpty    => "bi-box-seam",
+        AttentionKind.LowCredits      => "bi-hourglass-split",
+        AttentionKind.PackageExpiring => "bi-clock-history",
+        AttentionKind.NotTraining     => "bi-lightning-charge",
+        AttentionKind.NewWorkout      => "bi-chat-dots",
+        AttentionKind.HealthSurvey    => "bi-clipboard2-pulse",
+        AttentionKind.WorkoutSurveyFlag => "bi-exclamation-triangle",
+        _ => "bi-dot"
+    };
+
     private static string MonthLocative(int m) => m switch
     {
         1 => "styczniu", 2 => "lutym",     3 => "marcu",      4 => "kwietniu",
@@ -401,7 +494,7 @@ else
 
     private static string DaysUntil(DateTime dt)
     {
-        var diff = (dt.Date - DateTime.Now.Date).Days;
+        var diff = (dt.Date - StudioClock.Now.Date).Days;
         return diff switch { 0 => "dziś", 1 => "jutro", _ => $"za {diff} dni" };
     }
 

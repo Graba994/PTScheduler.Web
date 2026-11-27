@@ -1,0 +1,150 @@
+@using PTScheduler.Portal.Services.Social
+@inject WatchService Watch
+@inject InstagramAi Ai
+
+@* Obserwacja: konta (konkurencja, inspiracje) i hasztagi na Instagramie — publiczne dane odświeżane raz dziennie,
+   wnioski AI jako podpowiedzi. *@
+
+@if (_error is not null)
+{
+    <div class="pp-callout pp-tone-warn small mb-3"><i class="bi bi-exclamation-triangle"></i><div>@_error</div></div>
+}
+
+<div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+    <div class="pp-seg" role="group" aria-label="Co dodać">
+        <button type="button" class="@(_kind == "account" ? "active" : "")" @onclick='() => _kind = "account"'><i class="bi bi-person"></i>Konto</button>
+        <button type="button" class="@(_kind == "hashtag" ? "active" : "")" @onclick='() => _kind = "hashtag"'><i class="bi bi-hash"></i>Hasztag</button>
+    </div>
+    <div class="input-group input-group-sm watch-add">
+        <input class="form-control" placeholder="@(_kind == "account" ? "@nazwa.konta albo link do profilu" : "#trenerpersonalny")" @bind="_value" @bind:event="oninput" aria-label="Co obserwować" />
+        <button class="btn btn-primary" disabled="@(_busy || string.IsNullOrWhiteSpace(_value))" @onclick="AddAsync"><i class="bi bi-plus-lg me-1"></i>Obserwuj</button>
+    </div>
+    <span class="small text-muted ms-auto">Dane odświeżają się codziennie rano.</span>
+</div>
+
+@if (_items.Count == 0)
+{
+    <div class="pp-card"><div class="pp-empty">
+        <i class="bi bi-binoculars"></i>
+        <div class="pp-empty-title">Nikogo jeszcze nie obserwujesz</div>
+        <p>Dodaj konta innych aplikacji dla trenerów, studiów albo trenerów-twórców i hasztagi branżowe — zobaczysz, co u nich działa.</p>
+    </div></div>
+}
+
+<div class="watch-grid">
+    @foreach (var w in _items)
+    {
+        var item = w;
+        var media = WatchService.MediaOf(item);
+        var s = WatchService.Summarize(media, item.Followers, _weekAgo.TryGetValue(item.Id, out var f7) ? f7 : null);
+        <article class="pp-card watch-card" @key="item.Id">
+            <header class="watch-head">
+                @if (item.PictureUrl is not null) { <img src="@item.PictureUrl" alt="" referrerpolicy="no-referrer" /> }
+                else { <span class="watch-ico"><i class="bi @(item.Kind == "account" ? "bi-person" : "bi-hash")"></i></span> }
+                <div class="min-w-0">
+                    <a class="fw-semibold" href="@(item.Kind == "account" ? $"https://www.instagram.com/{item.Value}/" : $"https://www.instagram.com/explore/tags/{item.Value}/")" target="_blank" rel="noopener">
+                        @(item.Kind == "account" ? "@" + item.Value : "#" + item.Value)
+                    </a>
+                    @if (item.Name is not null) { <div class="small text-muted text-truncate">@item.Name</div> }
+                </div>
+                <div class="ms-auto d-flex gap-1">
+                    <button class="btn btn-link btn-sm p-0" title="Odśwież" aria-label="Odśwież" disabled="@_busy" @onclick="() => SyncAsync(item.Id)"><i class="bi bi-arrow-repeat"></i></button>
+                    <button class="btn btn-link btn-sm p-0 text-danger" title="Przestań obserwować" aria-label="Przestań obserwować" @onclick="() => RemoveAsync(item.Id)"><i class="bi bi-x-lg"></i></button>
+                </div>
+            </header>
+            @if (item.LastError is not null) { <div class="small text-danger mb-2">@item.LastError</div> }
+            @if (item.Kind == "account")
+            {
+                <div class="watch-stats">
+                    <div><b>@(item.Followers?.ToString("N0", Pl) ?? "—")</b><small>obserwujących @(s.FollowersDelta7 is int d ? $"({d:+#;-#;0} w 7 dni)" : "")</small></div>
+                    <div><b>@(s.Engagement is double e ? e.ToString("0.0", Pl) + "%" : "—")</b><small>zaangażowanie</small></div>
+                    <div><b>@s.PostsPerWeek.ToString("0.#", Pl)</b><small>postów / tydz.</small></div>
+                </div>
+            }
+            @if (s.Top.Count > 0)
+            {
+                <div class="small fw-semibold mt-2 mb-1">@(item.Kind == "account" ? "Najlepsze z ostatnich postów" : "Najpopularniejsze posty")</div>
+                <ul class="watch-top">
+                    @foreach (var m in s.Top)
+                    {
+                        <li>
+                            <span class="pp-chip pp-tone-muted">@(m.Type switch { "REELS" or "VIDEO" => "rolka", "CAROUSEL_ALBUM" => "karuzela", _ => "zdjęcie" })</span>
+                            <span class="text-truncate">@InstagramGraphics.Clean(m.Caption, 90)</span>
+                            <span class="ms-auto text-nowrap small tnum"><i class="bi bi-heart"></i> @m.Likes.ToString("N0", Pl) · <i class="bi bi-chat"></i> @m.Comments</span>
+                            @if (m.Permalink is not null) { <a href="@m.Permalink" target="_blank" rel="noopener" aria-label="Zobacz post"><i class="bi bi-box-arrow-up-right"></i></a> }
+                        </li>
+                    }
+                </ul>
+            }
+            @if (item.Insights is not null)
+            {
+                <div class="pp-callout pp-tone-info small mt-2"><i class="bi bi-stars"></i><div>@foreach (var line in item.Insights.Split('\n', StringSplitOptions.RemoveEmptyEntries)) { <p class="mb-1">@line.TrimStart('-', '*', ' ')</p> }</div></div>
+            }
+            <div class="d-flex align-items-center gap-2 mt-2">
+                <button class="btn btn-outline-primary btn-sm" disabled="@(_busy || _aiOff is not null || media.Count == 0)" title="@(_aiOff ?? "")" @onclick="() => InsightsAsync(item.Id)">
+                    @if (_thinking == item.Id) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-stars me-1"></i> }Wnioski AI
+                </button>
+                @if (item.SyncedAt is { } at) { <span class="small text-muted ms-auto">@IgUi.When(at)</span> }
+            </div>
+        </article>
+    }
+</div>
+
+@code {
+    [Parameter] public EventCallback<(bool, string)> Flash { get; set; }
+
+    private static readonly System.Globalization.CultureInfo Pl = new("pl-PL");
+    private List<WatchItem> _items = [];
+    private Dictionary<int, int> _weekAgo = [];
+    private string _kind = "account", _value = "";
+    private string? _error, _aiOff;
+    private bool _busy;
+    private int? _thinking;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _aiOff = await Ai.UnavailableAsync();
+        (_, _, _error) = await Watch.ConnectionAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _items = await Watch.ListAsync();
+        _weekAgo = await Watch.FollowersWeekAgoAsync();
+    }
+
+    private async Task AddAsync()
+    {
+        _busy = true;
+        var r = await Watch.AddAsync(_kind, _value);
+        _busy = false;
+        if (r.Ok) _value = "";
+        await LoadAsync();
+        await Flash.InvokeAsync(r);
+    }
+
+    private async Task SyncAsync(int id)
+    {
+        _busy = true;
+        var r = await Watch.SyncOneAsync(id);
+        _busy = false;
+        await LoadAsync();
+        if (!r.Ok) await Flash.InvokeAsync(r);
+    }
+
+    private async Task RemoveAsync(int id)
+    {
+        await Watch.RemoveAsync(id);
+        await LoadAsync();
+    }
+
+    private async Task InsightsAsync(int id)
+    {
+        _thinking = id;
+        var (text, error) = await Watch.InsightsAsync(id);
+        _thinking = null;
+        if (text is null) await Flash.InvokeAsync((false, error ?? "AI nie odpowiedziało."));
+        await LoadAsync();
+    }
+}

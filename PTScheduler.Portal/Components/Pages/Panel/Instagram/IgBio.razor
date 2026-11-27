@@ -1,0 +1,163 @@
+@using PTScheduler.Portal.Services.Social
+@inject BioService Bio
+@inject IJSRuntime JS
+
+@* Edycja strony „link w bio” (hantly.pl/linki): nagłówek, przyciski (kolejność, wyróżnienie), ostatnie posty. *@
+
+<PanelCard Title="Strona „link w bio”" Icon="bi-phone" Subtitle="Jeden link do profilu na Instagramie i TikToku — przyciski liczą kliknięcia i rejestracje">
+    <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+        <code class="small">@Bio.Url</code>
+        <button class="btn btn-outline-secondary btn-sm" @onclick="() => CopyAsync(Bio.Url)"><i class="bi bi-copy me-1"></i>Kopiuj</button>
+        <a class="btn btn-outline-primary btn-sm" href="@BioService.Path" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i>Otwórz</a>
+        @if (Views is int v) { <span class="small text-muted ms-auto">@v @(v == 1 ? "wejście" : "wejść") w okresie</span> }
+    </div>
+
+    <div class="row g-2 mb-2">
+        <div class="col-sm-4">
+            <label class="form-label small fw-semibold" for="bio-title">Nagłówek</label>
+            <input id="bio-title" class="form-control form-control-sm" @bind="_title" maxlength="60" />
+        </div>
+        <div class="col-sm-8">
+            <label class="form-label small fw-semibold" for="bio-text">Opis</label>
+            <input id="bio-text" class="form-control form-control-sm" @bind="_text" maxlength="300" />
+        </div>
+    </div>
+    <div class="d-flex flex-wrap gap-3 align-items-center mb-3">
+        <label class="form-check form-switch small mb-0">
+            <input class="form-check-input" type="checkbox" @bind="_showPosts" />
+            <span class="form-check-label">Pokaż 6 ostatnich postów</span>
+        </label>
+        <button class="btn btn-primary btn-sm ms-auto" @onclick="SaveSettingsAsync"><i class="bi bi-save me-1"></i>Zapisz nagłówek</button>
+    </div>
+
+    <div class="bio-edit">
+        @foreach (var it in _items)
+        {
+            var item = it;
+            var row = item.Row;
+            <div class="bio-edit-row @(row.Enabled ? "" : "is-off")" @key="row.Id">
+                @if (_editing == row.Id)
+                {
+                    @ItemForm()
+                }
+                else
+                {
+                    <span class="sc-ico sm" style="--c:@(row.Highlight ? "#7C3AED" : "#64748b")"><i class="bi @row.Icon"></i></span>
+                    <div class="flex-grow-1 min-w-0">
+                        <div class="fw-semibold">@row.Title @if (row.Highlight) { <span class="pp-chip pp-tone-info ms-1">wyróżniony</span> } @if (!row.Enabled) { <span class="pp-chip pp-tone-muted ms-1">ukryty</span> }</div>
+                        <div class="small text-muted text-truncate">@row.Target @(item.External ? "· bez liczenia" : $"· {item.Clicks} klik.")</div>
+                    </div>
+                    <div class="d-flex gap-1">
+                        <button class="btn btn-link btn-sm p-0" title="W górę" aria-label="W górę" @onclick="() => MoveAsync(row.Id, -1)"><i class="bi bi-arrow-up"></i></button>
+                        <button class="btn btn-link btn-sm p-0" title="W dół" aria-label="W dół" @onclick="() => MoveAsync(row.Id, 1)"><i class="bi bi-arrow-down"></i></button>
+                        <button class="btn btn-link btn-sm p-0" title="Edytuj" aria-label="Edytuj" @onclick="() => Edit(item)"><i class="bi bi-pencil"></i></button>
+                        <button class="btn btn-link btn-sm p-0 text-danger" title="Usuń" aria-label="Usuń" @onclick="() => DeleteAsync(row.Id)"><i class="bi bi-trash3"></i></button>
+                    </div>
+                }
+            </div>
+        }
+        @if (_editing == 0)
+        {
+            <div class="bio-edit-row">@ItemForm()</div>
+        }
+        else if (_editing is null)
+        {
+            <button class="btn btn-outline-primary btn-sm align-self-start" @onclick="New"><i class="bi bi-plus-lg me-1"></i>Dodaj przycisk</button>
+        }
+    </div>
+</PanelCard>
+
+@code {
+    [Parameter] public EventCallback<(bool, string)> Flash { get; set; }
+    /// <summary>Wejścia na stronę w wybranym okresie (z raportu linków).</summary>
+    [Parameter] public int? Views { get; set; }
+
+    private List<BioService.Item> _items = [];
+    private string _title = "", _text = "";
+    private bool _showPosts = true;
+    private int? _editing;
+    private string _fTitle = "", _fSub = "", _fTarget = "/register", _fIcon = "bi-arrow-right";
+    private bool _fHighlight, _fEnabled = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var s = await Bio.SettingsAsync();
+        (_title, _text, _showPosts) = (s.Title, s.Text, s.ShowPosts);
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync() => _items = await Bio.ItemsAsync(enabledOnly: false);
+
+    private async Task SaveSettingsAsync()
+    {
+        await Bio.SaveSettingsAsync(_title, _text, _showPosts);
+        await Flash.InvokeAsync((true, "Zapisano stronę „link w bio”."));
+    }
+
+    private void New()
+    {
+        _editing = 0;
+        (_fTitle, _fSub, _fTarget, _fIcon, _fHighlight, _fEnabled) = ("", "", "/register", "bi-arrow-right", false, true);
+    }
+
+    private void Edit(BioService.Item item)
+    {
+        var r = item.Row;
+        _editing = r.Id;
+        (_fTitle, _fSub, _fTarget, _fIcon, _fHighlight, _fEnabled) = (r.Title, r.Subtitle ?? "", r.Target, r.Icon, r.Highlight, r.Enabled);
+    }
+
+    private async Task SaveItemAsync()
+    {
+        var (ok, msg) = await Bio.SaveItemAsync(_editing is > 0 ? _editing : null, _fTitle, _fSub, _fTarget, _fIcon, _fHighlight, _fEnabled);
+        if (ok) { _editing = null; await LoadAsync(); }
+        await Flash.InvokeAsync((ok, msg));
+    }
+
+    private async Task DeleteAsync(int id) { await Bio.DeleteItemAsync(id); await LoadAsync(); }
+    private async Task MoveAsync(int id, int delta) { await Bio.MoveAsync(id, delta); await LoadAsync(); }
+
+    private async Task CopyAsync(string text)
+    {
+        try { await JS.InvokeAsync<bool>("ptCopy", text); await Flash.InvokeAsync((true, "Adres skopiowany — wklej go w profilu (Edytuj profil → Linki).")); }
+        catch (JSException) { await Flash.InvokeAsync((false, "Nie udało się skopiować — zaznacz adres ręcznie.")); }
+    }
+
+    private RenderFragment ItemForm() => __builder =>
+    {
+        <div class="bio-form">
+            <div class="row g-2">
+                <div class="col-sm-6">
+                    <label class="form-label small fw-semibold" for="bf-title">Tekst przycisku</label>
+                    <input id="bf-title" class="form-control form-control-sm" @bind="_fTitle" @bind:event="oninput" maxlength="80" />
+                </div>
+                <div class="col-sm-6">
+                    <label class="form-label small fw-semibold" for="bf-sub">Dopisek (opcjonalnie)</label>
+                    <input id="bf-sub" class="form-control form-control-sm" @bind="_fSub" maxlength="120" />
+                </div>
+                <div class="col-sm-6">
+                    <label class="form-label small fw-semibold" for="bf-target">Prowadzi do</label>
+                    <input id="bf-target" class="form-control form-control-sm" @bind="_fTarget" list="bf-targets" placeholder="/register albo https://…" />
+                    <datalist id="bf-targets">
+                        @foreach (var (path, label) in LinkService.Targets) { <option value="@path">@label</option> }
+                    </datalist>
+                </div>
+                <div class="col-sm-6">
+                    <label class="form-label small fw-semibold" for="bf-icon">Ikona</label>
+                    <select id="bf-icon" class="form-select form-select-sm" @bind="_fIcon">
+                        @foreach (var (icon, label) in BioService.Icons) { <option value="@icon">@label</option> }
+                    </select>
+                </div>
+            </div>
+            <div class="d-flex flex-wrap gap-3 align-items-center mt-2">
+                <label class="form-check small mb-0"><input class="form-check-input" type="checkbox" @bind="_fHighlight" /> <span class="form-check-label">Wyróżniony</span></label>
+                <label class="form-check small mb-0"><input class="form-check-input" type="checkbox" @bind="_fEnabled" /> <span class="form-check-label">Widoczny</span></label>
+                <div class="ms-auto d-flex gap-2">
+                    <button class="btn btn-link btn-sm" @onclick="() => _editing = null">Anuluj</button>
+                    <button class="btn btn-primary btn-sm" disabled="@string.IsNullOrWhiteSpace(_fTitle)" @onclick="SaveItemAsync"><i class="bi bi-check-lg me-1"></i>Zapisz</button>
+                </div>
+            </div>
+            <div class="small text-muted mt-1">Ścieżka na stronie Hantly liczy kliknięcia i rejestracje; pełny adres https:// otwiera się bez liczenia.</div>
+        </div>
+    };
+}

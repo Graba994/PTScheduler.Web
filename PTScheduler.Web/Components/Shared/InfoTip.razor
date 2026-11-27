@@ -1,0 +1,24 @@
+@* Ikona (i) z krótkim wyjaśnieniem — zawsze widoczna (w odróżnieniu od HintButton, który zależy od
+   ustawienia „Podpowiedzi”). Natywny popover przeglądarki: działa bez JS i zamyka się kliknięciem obok. *@
+<button type="button" class="info-tip @Class" popovertarget="@_id" aria-label="@($"Wyjaśnienie: {Title}")" title="Co to jest?">
+    <i class="bi bi-info-circle"></i>
+</button>
+<div popover id="@_id" class="info-pop" role="dialog" aria-label="@Title">
+    <div class="info-pop-head">
+        <span class="info-pop-icon"><i class="bi bi-info-lg"></i></span>
+        <strong>@Title</strong>
+        <button type="button" class="btn-close ms-auto" popovertarget="@_id" popovertargetaction="hide" aria-label="Zamknij"></button>
+    </div>
+    <div class="info-pop-body">
+        @if (ChildContent is not null) { @ChildContent } else { @Text }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public string? Text { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public string? Class { get; set; }
+
+    private readonly string _id = "info-" + Guid.NewGuid().ToString("N")[..10];
+}

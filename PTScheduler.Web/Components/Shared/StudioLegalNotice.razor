@@ -1,0 +1,27 @@
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Web.Services
+
+@* Na stronach regulaminu, prywatności i cookies: właściciel studia widzi, czego brakuje w dokumentach (klient nie). *@
+
+@if (Info is { } i && i.Missing().Count > 0)
+{
+    <AuthorizeView Roles="@Roles.Admin">
+        <Authorized>
+            <div class="alert alert-warning small d-flex gap-2 align-items-start mb-3" role="note">
+                <i class="bi bi-pencil-square mt-1"></i>
+                <div>
+                    <b>Widzisz to tylko Ty.</b> W dokumentach dla klientów brakuje: @string.Join(", ", i.Missing()).
+                    <a href="/admin/regulamin" class="fw-semibold">Uzupełnij dane</a> — dokumenty zaktualizują się same.
+                </div>
+            </div>
+        </Authorized>
+    </AuthorizeView>
+}
+
+@code {
+    /// <summary>Data obowiązywania aktualnej wersji szablonów (zmienia się przy zmianie treści).</summary>
+    public const string EffectiveDate = "26 października 2026 r.";
+
+    [Parameter] public StudioLegalService.Info? Info { get; set; }
+}

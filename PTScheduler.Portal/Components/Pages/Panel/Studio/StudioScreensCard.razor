@@ -1,0 +1,128 @@
+@using PTScheduler.Portal.Services.Studio
+@inject StudioScreens Screens
+@inject StudioJobs Jobs
+@implements IDisposable
+
+@* Zrzuty prawdziwych ekranów aplikacji (konto demo, fikcyjne dane) do reklam: robot w rendererze + opis przez AI.
+   Logika: StudioScreens; zadanie „screens” w kolejce filmów. *@
+
+<PanelCard Title="Zrzuty aplikacji" Icon="bi-phone" IconClass="@(_state is { Screens.Count: > 0 } ? "pp-tone-ok" : "pp-tone-warn")"
+           Subtitle="@Subtitle">
+    @if (_tenantProblem is not null)
+    {
+        <div class="small text-warning mb-2"><i class="bi bi-info-circle me-1"></i>@_tenantProblem</div>
+    }
+    else if (_tenant is not null)
+    {
+        <div class="small text-muted mb-2">
+            Konto demo: <b>@_tenant</b>@(_state?.Scenario is { Length: > 0 } sc ? $" · scenariusz „{sc}”" : "") — tylko fikcyjne osoby.
+            Przycisk „Wypróbuj demo” na stronie zostaje wyłączony.
+        </div>
+    }
+
+    @if (_state is { } s)
+    {
+        <div class="st-counts mb-2">
+            <span><b>@s.Screens.Count(x => x.Good)</b> z @s.Screens.Count nadaje się do reklam</span>
+            <span><b>@s.Screens.Count(x => x.As == "client")</b> z widoku klienta</span>
+        </div>
+        @if (s.Warning is { Length: > 0 } w) { <div class="small text-warning mb-2"><i class="bi bi-exclamation-triangle me-1"></i>@w</div> }
+    }
+    else
+    {
+        <p class="small text-muted">Robot wejdzie na konto demo jako trener i jako klient, zrobi zrzuty ok. 20 ekranów telefonem (390×844), a AI opisze, co na nich widać. Około 3–4 minut.</p>
+    }
+
+    @if (_job is { Status: StudioJobStatus.Failed, Error: { } err } && !_queued)
+    {
+        <div class="small text-danger mb-2"><i class="bi bi-exclamation-triangle me-1"></i>@err</div>
+    }
+    else if (_job is { Status: StudioJobStatus.Pending, Attempts: > 0, Error: { } retryErr } && _queued)
+    {
+        <div class="small text-muted mb-2"><i class="bi bi-arrow-repeat me-1"></i>Ponowię za chwilę: @retryErr</div>
+    }
+
+    <div class="d-flex gap-2 flex-wrap mb-2">
+        <button class="btn btn-primary btn-sm" @onclick="RunAsync" disabled="@(_queued || _tenantProblem is not null)">
+            @if (_queued) { <span class="spinner-border spinner-border-sm me-1"></span><span>Robię zrzuty (3–4 min)…</span> }
+            else { <i class="bi bi-camera me-1"></i><span>@(_state is null ? "Zrób zrzuty" : "Odśwież zrzuty")</span> }
+        </button>
+        @if (_state is { Screens.Count: > 0 })
+        {
+            <button class="btn btn-outline-secondary btn-sm" @onclick="() => _open = !_open" aria-expanded="@(_open ? "true" : "false")">
+                <i class="bi bi-images me-1"></i>@(_open ? "Zwiń galerię" : "Galeria")
+            </button>
+        }
+    </div>
+
+    @if (_open && _state is { } st)
+    {
+        <div class="sc-grid">
+            @foreach (var shot in st.Screens)
+            {
+                <figure class="sc-item @(shot.Good ? "" : "sc-bad")" @key="shot.File">
+                    <img src="/api/panel/studio/screens/@StudioScreens.ThumbOf(shot.File)?v=@_version" alt="@shot.Shows" loading="lazy" />
+                    <figcaption>
+                        <div class="sc-route">@shot.Path@(shot.As == "client" ? " · klient" : "")</div>
+                        @if (shot.Feature.Length > 0) { <div class="sc-feature">@shot.Feature</div> }
+                        <div class="sc-shows">@shot.Shows</div>
+                        @if (!shot.Good) { <div class="sc-flag">nie do reklamy</div> }
+                        else if (StudioScreens.IsGarmin(shot)) { <div class="sc-flag sc-flag-info">tylko z opcją Garmin</div> }
+                    </figcaption>
+                </figure>
+            }
+        </div>
+        @if (st.Skipped.Count > 0)
+        {
+            <details class="mt-2">
+                <summary class="small">Pominięte (@st.Skipped.Count)</summary>
+                <ul class="small ps-3 mb-0">@foreach (var sk in st.Skipped) { <li><code>@sk.Path</code> — @sk.Reason</li> }</ul>
+            </details>
+        }
+    }
+</PanelCard>
+
+@code {
+    [Parameter] public EventCallback<(bool Ok, string Message)> Flash { get; set; }
+
+    private StudioScreens.State? _state;
+    private StudioJob? _job;
+    private string? _tenant, _tenantProblem;
+    private bool _queued, _open;
+    private long _version;
+    private Timer? _timer;
+
+    private string Subtitle => _state?.UpdatedAt is { } at ? $"Zrobione {InstagramRules.ToWarsaw(at):dd.MM.yyyy HH:mm}" : "Jeszcze nie zrobione";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var (t, problem) = await Screens.DemoTenantAsync();
+        (_tenant, _tenantProblem) = (t?.Slug, problem);
+        await LoadAsync();
+        _timer = new Timer(_ => InvokeAsync(TickAsync), null, TimeSpan.FromSeconds(6), TimeSpan.FromSeconds(6));
+    }
+
+    private async Task LoadAsync()
+    {
+        _state = await Screens.StateAsync();
+        _queued = await Jobs.IsQueuedAsync("screens");
+        _job = await Jobs.LastAsync("screens");
+        _version = _state?.UpdatedAt?.Ticks ?? 0;
+    }
+
+    private async Task TickAsync()
+    {
+        if (!_queued) return;
+        await LoadAsync();
+        StateHasChanged();
+    }
+
+    private async Task RunAsync()
+    {
+        await Jobs.EnqueueAsync("screens");
+        await LoadAsync();
+        await Flash.InvokeAsync((true, "Robot robi zrzuty w tle — zwykle 3–4 minuty. Możesz zamknąć stronę."));
+    }
+
+    public void Dispose() => _timer?.Dispose();
+}

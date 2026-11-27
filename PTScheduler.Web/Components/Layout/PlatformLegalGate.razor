@@ -1,0 +1,175 @@
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@inject IHttpContextAccessor HttpContextAccessor
+@inject PTScheduler.Web.Services.PlatformLegalService PlatformLegal
+@inject PTScheduler.Web.Services.AccountSwitchService Switcher
+@inject PTScheduler.Web.Services.PublicDemoService PublicDemo
+@rendermode PTScheduler.Web.RenderModes.Server
+
+@* Dokumenty platformy (regulamin, umowa powierzenia danych, polityka prywatności) do akceptacji przez właściciela
+   studia — przy pierwszym logowaniu, gdy aplikację założył administrator Portalu, i po każdej zmianie dokumentów. *@
+@if (_status is { Pending.Count: > 0 } status)
+{
+    var reading = _reading is { } rk ? status.Pending.FirstOrDefault(d => d.Key == rk) : null;
+    <div class="health-gate-backdrop lg-backdrop">
+        <div class="lg-sheet" role="dialog" aria-modal="true" aria-labelledby="legalGateTitle">
+            @if (reading is not null)
+            {
+                @* Czytanie dokumentu w tym samym oknie — bez nowej karty i bez wychodzenia z aplikacji. *@
+                <header class="lg-head">
+                    <button type="button" class="lg-back" @onclick="BackToList" aria-label="Wróć do listy dokumentów"><i class="bi bi-arrow-left"></i></button>
+                    <div class="min-w-0">
+                        <div class="lg-kicker">@status.PlatformName · wersja @reading.Version</div>
+                        <h5 class="lg-title" id="legalGateTitle">@reading.Title</h5>
+                    </div>
+                </header>
+                <div class="lg-body lg-doc" @key="reading.Key">
+                    @if (!string.IsNullOrWhiteSpace(reading.Html))
+                    {
+                        @((MarkupString)PTScheduler.Infrastructure.Services.SafeHtml.Sanitize(reading.Html))
+                    }
+                    else
+                    {
+                        <p class="text-muted">Nie udało się wczytać treści. <a href="@reading.Url" target="_blank" rel="noopener">Otwórz dokument w przeglądarce</a>.</p>
+                    }
+                </div>
+                <footer class="lg-foot">
+                    @if (NextUnread(status, reading.Key) is { } next)
+                    {
+                        <button class="btn btn-primary lg-btn" @onclick="() => Open(next.Key)">Dalej: @next.Title <i class="bi bi-arrow-right ms-1"></i></button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-primary lg-btn" @onclick="BackToList"><i class="bi bi-check2 me-1"></i>Przeczytane — wróć do akceptacji</button>
+                    }
+                </footer>
+            }
+            else if (_declined)
+            {
+                <header class="lg-head">
+                    <div class="lg-icon lg-icon-warn"><i class="bi bi-exclamation-lg"></i></div>
+                    <div class="min-w-0">
+                        <div class="lg-kicker">@status.PlatformName</div>
+                        <h5 class="lg-title" id="legalGateTitle">Bez akceptacji nie da się dalej korzystać z aplikacji</h5>
+                    </div>
+                </header>
+                <div class="lg-body">
+                    <p class="mb-0">Te dokumenty są umową między Tobą a @status.PlatformName. Jeśli ich nie akceptujesz, możesz zrezygnować z subskrypcji — dane klientów wyeksportujesz w ciągu 30 dni od końca umowy.</p>
+                </div>
+                <footer class="lg-foot">
+                    <div class="lg-actions">
+                        <button class="btn btn-primary lg-btn" @onclick="() => _declined = false">Wróć do dokumentów</button>
+                        @* Pełne przejście (nie nawigacja w aplikacji): adres przekierowuje do portalu Stripe, a to okno nie może zostać na wierzchu. *@
+                        <button type="button" class="lg-link" @onclick='() => Nav.NavigateTo("/admin/subscription", forceLoad: true)'>Zarządzaj subskrypcją</button>
+                    </div>
+                </footer>
+            }
+            else
+            {
+                <header class="lg-head">
+                    <div class="lg-icon"><i class="bi bi-file-earmark-text"></i></div>
+                    <div class="min-w-0">
+                        <div class="lg-kicker">@status.PlatformName · do akceptacji</div>
+                        <h5 class="lg-title" id="legalGateTitle">Zasady korzystania z aplikacji</h5>
+                    </div>
+                </header>
+                <div class="lg-body">
+                    <p class="lg-lead">Zmieniły się dokumenty @status.PlatformName. Przeczytaj je i potwierdź — zajmie to chwilę.</p>
+                    <div class="lg-docs">
+                        @foreach (var d in status.Pending)
+                        {
+                            var read = _read.Contains(d.Key);
+                            <button type="button" class="lg-doc-row @(read ? "is-read" : "")" @onclick="() => Open(d.Key)">
+                                <span class="lg-doc-ic"><i class="bi @(read ? "bi-check-lg" : "bi-file-earmark-text")"></i></span>
+                                <span class="lg-doc-name"><b>@d.Title</b><small>@(read ? "Przeczytane" : "Wersja " + d.Version)</small></span>
+                                <span class="lg-doc-go">@(read ? "Otwórz" : "Czytaj")<i class="bi bi-chevron-right"></i></span>
+                            </button>
+                        }
+                    </div>
+                    @if (_error is not null)
+                    {
+                        <div class="alert alert-danger py-2 small mt-3 mb-0">@_error</div>
+                    }
+                </div>
+                <footer class="lg-foot">
+                    <label class="lg-check">
+                        <input class="form-check-input" type="checkbox" @bind="_checked" />
+                        <span>Akceptuję Regulamin wraz z Umową powierzenia przetwarzania danych osobowych (załącznik nr 1) i potwierdzam zapoznanie się z Polityką prywatności.</span>
+                    </label>
+                    <div class="lg-actions">
+                        <button class="btn btn-primary lg-btn" disabled="@(!_checked || _busy)" @onclick="AcceptAsync">
+                            <i class="bi bi-check-lg me-1"></i>@(_busy ? "Zapisuję…" : "Akceptuję")
+                        </button>
+                        <button type="button" class="lg-link" disabled="@_busy" @onclick="() => _declined = true">Nie akceptuję</button>
+                    </div>
+                </footer>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [PersistentState] public string? ClientIp { get; set; }
+    [PersistentState] public string? ClientAgent { get; set; }
+
+    private PTScheduler.Web.Services.PlatformLegalService.Status? _status;
+    private string? _email;
+    private bool _checked;
+    private bool _declined;
+    private bool _busy;
+    private string? _error;
+    private string? _reading;
+    private readonly HashSet<string> _read = [];
+
+    private void Open(string key)
+    {
+        _reading = key;
+        _read.Add(key);
+    }
+
+    private void BackToList() => _reading = null;
+
+    private static PTScheduler.Web.Services.PlatformLegalService.Doc? NextUnread(PTScheduler.Web.Services.PlatformLegalService.Status s, string current)
+    {
+        var after = s.Pending.SkipWhile(d => d.Key != current).Skip(1);
+        return after.FirstOrDefault();
+    }
+
+    protected override void OnInitialized()
+    {
+        // Prerendering ma żądanie HTTP — zapamiętujemy IP i przeglądarkę jako dowód akceptacji.
+        var ctx = HttpContextAccessor.HttpContext;
+        ClientIp ??= ctx?.Request.Headers["X-Forwarded-For"].ToString().Split(',')[0].Trim() is { Length: > 0 } fwd ? fwd : ctx?.Connection.RemoteIpAddress?.ToString();
+        ClientAgent ??= ctx?.Request.Headers.UserAgent.ToString();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var path = "/" + Nav.ToBaseRelativePath(Nav.Uri);
+            if (path.StartsWith("/admin/subscription", StringComparison.OrdinalIgnoreCase) || path.StartsWith("/admin/upgrade", StringComparison.OrdinalIgnoreCase)) return;
+            // Publiczne demo: gość nie akceptuje dokumentów za właściciela konta pokazowego.
+            if (PublicDemo.IsOn) return;
+            var user = (await AuthState.GetAuthenticationStateAsync()).User;
+            if (await Switcher.GetOwnerActorAsync(user) is not { } owner) return;
+            _email = owner.Email;
+            _status = await PlatformLegal.PendingAsync();
+            if (_status is { Pending.Count: > 0 }) StateHasChanged();
+        }
+        catch { } // Nie blokujemy aplikacji, gdy Portal nie odpowiada.
+    }
+
+    private async Task AcceptAsync()
+    {
+        if (_status is null || string.IsNullOrEmpty(_email)) return;
+        _busy = true;
+        _error = null;
+        if (await PlatformLegal.AcceptAsync(_email, _status.Pending.Select(d => d.Key), ClientIp, ClientAgent))
+            _status = null;
+        else
+            _error = "Nie udało się zapisać akceptacji. Spróbuj ponownie za chwilę.";
+        _busy = false;
+    }
+}

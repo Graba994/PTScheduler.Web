@@ -1,0 +1,463 @@
+@page "/panel/setup/services"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject SiteSettingsService Settings
+@inject VideoHubService VideoHub
+@inject ImageHubService ImageHub
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject GoogleOAuthBroker Google
+@inject NavigationManager Nav
+@inject TenantService Tenants
+@rendermode InteractiveServer
+
+<PageTitle>Usługi dla trenerów — Hantly Portal</PageTitle>
+
+<PanelHeader Title="Usługi dla trenerów" Icon="bi-plug" BackHref="/panel/setup" BackLabel="Konfiguracja platformy" Subtitle="SMS, wideo, poczta i Google — konfigurujesz raz, trenerzy tylko dokupują pakiety." />
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    @if (_message is not null)
+    {
+        <div class="alert @(_ok ? "alert-success" : "alert-danger") alert-dismissible py-2 small">
+            @_message
+            <button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null"></button>
+        </div>
+    }
+
+    <!-- Ćwiczenia -->
+    <section id="exercises" class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <h2 class="pp-card-title pp-card-title-icon mb-3"><span class="pp-icon pp-icon-sm"><i class="bi bi-person-arms-up"></i></span>Ćwiczenia</h2>
+            <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" role="switch" id="muscleMapOn" checked="@_muscleMapOn" @onchange="ToggleMuscleMapAsync" />
+                <label class="form-check-label small fw-semibold" for="muscleMapOn">Mapa mięśni przy ćwiczeniach</label>
+                <div class="form-text">Postać z zaznaczonymi partiami w katalogu ćwiczeń i wybór mięśni na postaci przy dodawaniu własnych ćwiczeń. Wyłączona — zostają same nazwy partii.</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SMS -->
+    <section id="sms" class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <h2 class="pp-card-title pp-card-title-icon mb-3"><span class="pp-icon pp-icon-sm"><i class="bi bi-chat-dots"></i></span>SMS (SMSAPI.pl)</h2>
+            <p class="small text-muted">Jedno konto platformy. Trenerzy kupują pakiety SMS w sklepie usług, a przypomnienia schodzą z ich puli.</p>
+            <div class="form-check form-switch mb-3">
+                <input class="form-check-input" type="checkbox" role="switch" id="smsOn" checked="@_smsOn" @onchange="ToggleSmsAsync" />
+                <label class="form-check-label small fw-semibold" for="smsOn">SMS-y widoczne dla trenerów i klientów</label>
+                <div class="form-text">
+                    @if (!_smsTokenSet)
+                    {
+                        <span>Bez tokenu SMSAPI opcje SMS są ukryte wszędzie — w aplikacjach studiów, w sklepie i w cenniku na stronie głównej.</span>
+                    }
+                    else if (_smsOn)
+                    {
+                        <span>Działa: trenerzy widzą przypomnienia SMS, klienci — ustawienia SMS.</span>
+                    }
+                    else
+                    {
+                        <span>Wyłączone: SMS-y nie wychodzą, a trenerzy i klienci nie widzą żadnych opcji SMS.</span>
+                    }
+                </div>
+            </div>
+            <div class="row g-3">
+                <div class="col-md-7">
+                    <label class="form-label small fw-semibold" for="smsToken">Token API (OAuth)</label>
+                    <input id="smsToken" type="password" class="form-control font-monospace" @bind="_smsToken" placeholder="@(_smsTokenSet ? "Zapisany — wpisz nowy, aby zmienić" : "")" autocomplete="off" />
+                    <div class="form-text">SMSAPI → Ustawienia API → Tokeny API (uprawnienie „SMS”).</div>
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label small fw-semibold" for="smsSender">Nazwa nadawcy</label>
+                    <input id="smsSender" class="form-control" maxlength="11" @bind="_smsSender" placeholder="np. Hantly" />
+                    <div class="form-text">Zarejestrowana w SMSAPI (do 11 znaków). Puste = numer systemowy.</div>
+                </div>
+            </div>
+            <button class="btn btn-primary btn-sm mt-3" @onclick="SaveSmsAsync">Zapisz SMS</button>
+        </div>
+    </section>
+
+    <!-- Wideo -->
+    <section id="video" class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <h2 class="pp-card-title pp-card-title-icon mb-3"><span class="pp-icon pp-icon-sm"><i class="bi bi-camera-video"></i></span>Wideo (Bunny Stream)</h2>
+            <p class="small text-muted">
+                Jedna biblioteka Bunny Stream dla wszystkich trenerów. Portal zakłada w niej każdemu trenerowi foldery (kolekcje)
+                <code>slug · kursy</code> i <code>slug · cwiczenia</code>. Klucz zostaje w Portalu — aplikacja trenera dostaje tylko jednorazowy podpis
+                przesłania jednego filmu, a usunąć może wyłącznie swoje filmy. Limit miejsca = pakiet z wideo + dodatki + dokupione GB.
+            </p>
+            <div class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold" for="bunnyLib">Library ID</label>
+                    <input id="bunnyLib" class="form-control font-monospace" @bind="_bunnyLibrary" placeholder="np. 123456" autocomplete="off" />
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label small fw-semibold" for="bunnyKey">Klucz API biblioteki</label>
+                    <input id="bunnyKey" type="password" class="form-control font-monospace" @bind="_bunnyKey" placeholder="@(_bunnyKeySet ? "Zapisany — wpisz nowy, aby zmienić" : "Stream → biblioteka → API")" autocomplete="off" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold" for="bunnyCdn">Host CDN <span class="fw-normal text-muted">(opcjonalnie)</span></label>
+                    <input id="bunnyCdn" class="form-control font-monospace" @bind="_bunnyCdn" placeholder="vz-xxxx.b-cdn.net" autocomplete="off" />
+                </div>
+            </div>
+            <div class="d-flex flex-wrap gap-2 mt-3">
+                <button class="btn btn-primary btn-sm" @onclick="SaveBunnyAsync">Zapisz i sprawdź</button>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="TestBunnyAsync" disabled="@(string.IsNullOrWhiteSpace(_bunnyLibrary) || (!_bunnyKeySet && string.IsNullOrWhiteSpace(_bunnyKey)))">Testuj</button>
+            </div>
+            <div class="pp-label mt-4">Ochrona filmów (podpisane linki)</div>
+            <p class="small text-muted mb-2">
+                Bez tego każdy, kto zobaczy link do filmu, może go osadzić u siebie. Z kluczem tokenów Portal podpisuje linki na @((int)VideoHubService.EmbedWindow.TotalHours) godzin —
+                skopiowany link po tym czasie przestaje działać.
+                @(_bunnyTokenSet ? "" : "Teraz linki są bez podpisu.")
+            </p>
+            <details class="small mb-2">
+                <summary class="fw-semibold">Jak włączyć (jednorazowo)</summary>
+                <ol class="mt-2 mb-0">
+                    <li>Bunny → <em>Stream → Twoja biblioteka → Security</em>: skopiuj <strong>Token authentication key</strong> i wklej poniżej, zapisz.</li>
+                    <li>Otwórz dowolny film w aplikacji trenera — powinien działać jak dotąd (link ma już podpis).</li>
+                    <li>Dopiero wtedy w Bunny włącz <strong>Embed view token authentication</strong>. Odwrotna kolejność zatrzyma filmy do czasu zapisania klucza.</li>
+                </ol>
+            </details>
+            <div class="row g-2 align-items-end">
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold" for="bunnyToken">Token authentication key</label>
+                    <input id="bunnyToken" type="password" class="form-control font-monospace" @bind="_bunnyToken" @bind:event="oninput" placeholder="@(_bunnyTokenSet ? "Zapisany — wpisz nowy, aby zmienić" : "Stream → biblioteka → Security")" autocomplete="off" />
+                </div>
+                <div class="col-md-auto d-flex gap-2">
+                    <button class="btn btn-primary btn-sm" @onclick="SaveTokenAsync" disabled="@string.IsNullOrWhiteSpace(_bunnyToken)">Zapisz klucz</button>
+                    @if (_bunnyTokenSet)
+                    {
+                        <button class="btn btn-outline-danger btn-sm" @onclick="ClearTokenAsync">Wyłącz podpisywanie</button>
+                    }
+                </div>
+            </div>
+            @if (_bunnyTokenSet)
+            {
+                <div class="small text-success mt-2"><i class="bi bi-shield-check me-1"></i>Linki do filmów z centralnej biblioteki są podpisane.</div>
+            }
+
+            <div class="small text-muted mt-3">
+                Filmy trenerów: <strong>@_videosCount</strong> · zajęte <strong>@VideoHubService.Gb(_videosBytes)</strong> · trenerzy z filmami: <strong>@_videoTenants</strong> z @_tenantsCount.
+                @if (_librariesCount > 0)
+                {
+                    <div class="alert alert-light border py-2 mt-2 mb-0">
+                        <i class="bi bi-info-circle me-1"></i>
+                        @_librariesCount trenerów ma jeszcze starą, osobną bibliotekę — ich dawne filmy nadal się odtwarzają, nowe trafiają już do centralnej.
+                        Stara biblioteka znika przy „Usuń wszystkie dane wideo” u trenera albo przy usunięciu instancji.
+                    </div>
+                }
+            </div>
+        </div>
+    </section>
+
+    <!-- Zdjęcia -->
+    <section id="images" class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <h2 class="pp-card-title pp-card-title-icon mb-3"><span class="pp-icon pp-icon-sm"><i class="bi bi-images"></i></span>Zdjęcia (Bunny Storage)</h2>
+            <p class="small text-muted">
+                Zdjęcia ćwiczeń trenerów trafiają do jednej strefy Bunny Storage, do folderów <code>slug/cwiczenia</code>, i wyświetlają się przez CDN.
+                Aplikacja zmniejsza je przed wysłaniem (WebP, do 1600 px, bez danych o lokalizacji). Liczą się do tego samego limitu co filmy.
+                Bez tej konfiguracji zdjęcia zapisują się na serwerze aplikacji trenera.
+            </p>
+            <details class="small mb-3">
+                <summary class="fw-semibold">Jak utworzyć strefę w Bunny (jednorazowo)</summary>
+                <ol class="mt-2 mb-0 ps-3">
+                    <li>Bunny → <em>Storage → Add Storage Zone</em>: nazwa np. <code>hantly-media</code>, typ <strong>Standard</strong>, region główny w Europie (Falkenstein), bez replikacji.</li>
+                    <li>W strefie: <em>Connected Pull Zones → Connect Pull Zone</em> (np. <code>hantly-media</code>) — to adres CDN, np. <code>hantly-media.b-cdn.net</code>.</li>
+                    <li><em>FTP &amp; API Access</em>: skopiuj <strong>Password</strong> (nie „Read-only password”) i <strong>Hostname</strong> regionu (np. <code>storage.bunnycdn.com</code>).</li>
+                </ol>
+            </details>
+            <div class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold" for="stZone">Nazwa strefy</label>
+                    <input id="stZone" class="form-control font-monospace" @bind="_stZone" placeholder="np. hantly-media" autocomplete="off" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold" for="stKey">Hasło strefy</label>
+                    <input id="stKey" type="password" class="form-control font-monospace" @bind="_stKey" placeholder="@(_stKeySet ? "Zapisane — wpisz nowe, aby zmienić" : "FTP & API Access → Password")" autocomplete="new-password" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold" for="stHost">Host regionu</label>
+                    <input id="stHost" class="form-control font-monospace" @bind="_stHost" placeholder="@ImageHubService.DefaultHost" autocomplete="off" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold" for="stCdn">Adres CDN</label>
+                    <input id="stCdn" class="form-control font-monospace" @bind="_stCdn" placeholder="hantly-media.b-cdn.net" autocomplete="off" />
+                </div>
+            </div>
+            <div class="d-flex gap-2 mt-3">
+                <button class="btn btn-primary btn-sm" @onclick="SaveStorageAsync">Zapisz i sprawdź</button>
+            </div>
+            <div class="small text-muted mt-3">Zdjęcia trenerów: <strong>@_imagesCount</strong> · zajęte <strong>@VideoHubService.Gb(_imagesBytes)</strong>.</div>
+        </div>
+    </section>
+
+    <!-- Google -->
+    <section id="google" class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <h2 class="pp-card-title pp-card-title-icon mb-3"><span class="pp-icon pp-icon-sm"><i class="bi bi-google"></i></span>Google Calendar i Meet</h2>
+            <p class="small text-muted">
+                Jeden klient OAuth platformy. Trener w swojej aplikacji klika tylko <strong>„Połącz z Google”</strong> — wizyty trafiają do jego kalendarza,
+                zajęte terminy z kalendarza blokują grafik, a wizyty online dostają link Meet. Tokeny trenerów zostają w Portalu (zaszyfrowane).
+            </p>
+            <details class="small mb-3">
+                <summary class="fw-semibold">Jak utworzyć klienta w Google Cloud (jednorazowo)</summary>
+                <ol class="mt-2 mb-0 ps-3">
+                    <li>Google Cloud Console → nowy projekt → <em>APIs &amp; Services → Library</em> → włącz <strong>Google Calendar API</strong>.</li>
+                    <li><em>OAuth consent screen</em>: typ „External”, nazwa aplikacji, e-mail kontaktowy, domena Portalu; zakresy: <code>openid</code>, <code>email</code>, <code>.../auth/calendar.events</code>.</li>
+                    <li><em>Credentials → Create credentials → OAuth client ID</em> → „Web application”; w <em>Authorized redirect URIs</em> wklej adres poniżej.</li>
+                    <li>Skopiuj Client ID i Client Secret tutaj.</li>
+                    <li>Zakres kalendarza jest „wrażliwy”: do czasu weryfikacji aplikacji przez Google trener zobaczy ostrzeżenie „aplikacja niezweryfikowana”, a limit to 100 kont. Weryfikację zgłaszasz w tym samym ekranie zgody (potrzebna polityka prywatności na domenie Portalu).</li>
+                </ol>
+            </details>
+            <div class="mb-3">
+                <label class="form-label small fw-semibold" for="gRedirect">Adres przekierowania (Authorized redirect URI)</label>
+                <div class="input-group input-group-sm">
+                    <input id="gRedirect" class="form-control font-monospace" @bind="_googleRedirect" />
+                    <button class="btn btn-outline-secondary" type="button" @onclick="() => _googleRedirect = SuggestedRedirect" title="Użyj adresu tego Portalu">Ten Portal</button>
+                </div>
+                <div class="form-text">Musi być publiczny (HTTPS) i identyczny jak w Google Cloud.</div>
+            </div>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold" for="gId">Client ID</label>
+                    <input id="gId" class="form-control font-monospace" @bind="_googleId" placeholder="….apps.googleusercontent.com" autocomplete="off" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold" for="gSecret">Client Secret</label>
+                    <input id="gSecret" type="password" class="form-control font-monospace" @bind="_googleSecret" placeholder="@(_googleSecretSet ? "Zapisany — wpisz nowy, aby zmienić" : "")" autocomplete="off" />
+                </div>
+            </div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mt-3">
+                <button class="btn btn-primary btn-sm" @onclick="SaveGoogleAsync">Zapisz i sprawdź</button>
+                <span class="small text-muted">Połączone konta trenerów: <strong>@_googleGrants</strong></span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Poczta -->
+    <section id="email" class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <h2 class="pp-card-title pp-card-title-icon mb-3"><span class="pp-icon pp-icon-sm"><i class="bi bi-envelope-at"></i></span>Poczta dla trenerów</h2>
+            <p class="small text-muted mb-2">
+                Aplikacje trenerów wysyłają e-maile przez <a href="/panel/email">serwer SMTP Portalu</a>. Nadawcą jest nazwa studia,
+                a odpowiedzi klientów trafiają do trenera. Trener nie wpisuje żadnych danych serwera.
+            </p>
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="shareSmtp" checked="@_shareSmtp" @onchange="ToggleShareSmtpAsync" />
+                <label class="form-check-label" for="shareSmtp">Udostępniaj SMTP Portalu aplikacjom trenerów</label>
+            </div>
+            @if (!_smtpConfigured)
+            {
+                <div class="small text-warning mt-2"><i class="bi bi-exclamation-triangle me-1"></i>SMTP Portalu nie jest jeszcze ustawiony — <a href="/panel/email">skonfiguruj go</a>.</div>
+            }
+        </div>
+    </section>
+}
+
+@code {
+    private bool _loading = true;
+    private string? _message;
+    private bool _ok;
+
+    private string _smsToken = "";
+    private bool _smsTokenSet, _smsOn;
+    private string _smsSender = "";
+
+    private string _bunnyKey = "";
+    private string _bunnyLibrary = "";
+    private string _bunnyCdn = "";
+    private bool _bunnyKeySet;
+    private string _bunnyToken = "";
+    private bool _bunnyTokenSet;
+    private int _librariesCount, _tenantsCount, _videosCount, _videoTenants;
+    private long _videosBytes;
+
+    private string _stZone = "", _stKey = "", _stHost = "", _stCdn = "";
+    private bool _stKeySet;
+    private int _imagesCount;
+    private long _imagesBytes;
+
+    private bool _shareSmtp;
+    private bool _smtpConfigured;
+
+    private string _googleId = "";
+    private string _googleSecret = "";
+    private bool _googleSecretSet;
+    private string _googleRedirect = "";
+    private int _googleGrants;
+    private string SuggestedRedirect => Nav.BaseUri.TrimEnd('/') + GoogleOAuthBroker.CallbackPath;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var s = await Settings.GetAllAsync(
+            SiteSettingsService.Keys.PlatformSmsApiToken, SiteSettingsService.Keys.PlatformSmsSenderName, SiteSettingsService.Keys.PlatformSmsEnabled,
+            SiteSettingsService.Keys.PlatformBunnyLibraryId, SiteSettingsService.Keys.PlatformBunnyApiKey, SiteSettingsService.Keys.PlatformBunnyCdnHostname,
+            SiteSettingsService.Keys.ShareSmtpWithTenants, SiteSettingsService.Keys.SmtpHost,
+            SiteSettingsService.Keys.PlatformGoogleClientId, SiteSettingsService.Keys.PlatformGoogleClientSecret,
+            SiteSettingsService.Keys.PlatformGoogleRedirectUri,
+            SiteSettingsService.Keys.PlatformBunnyStorageZone, SiteSettingsService.Keys.PlatformBunnyStorageKey,
+            SiteSettingsService.Keys.PlatformBunnyStorageHost, SiteSettingsService.Keys.PlatformBunnyStorageCdn);
+        _stZone = s[SiteSettingsService.Keys.PlatformBunnyStorageZone];
+        _stKeySet = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformBunnyStorageKey]);
+        _stHost = s[SiteSettingsService.Keys.PlatformBunnyStorageHost];
+        _stCdn = s[SiteSettingsService.Keys.PlatformBunnyStorageCdn];
+        _smsTokenSet = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformSmsApiToken]);
+        _smsSender = s[SiteSettingsService.Keys.PlatformSmsSenderName];
+        _smsOn = _smsTokenSet && s[SiteSettingsService.Keys.PlatformSmsEnabled] != "false";
+        _muscleMapOn = await Settings.GetAsync(SiteSettingsService.Keys.MuscleMapEnabled) != "false";
+        _bunnyKeySet = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformBunnyApiKey]);
+        _bunnyTokenSet = await VideoHub.TokenKeySetAsync();
+        _bunnyLibrary = s[SiteSettingsService.Keys.PlatformBunnyLibraryId];
+        _bunnyCdn = s[SiteSettingsService.Keys.PlatformBunnyCdnHostname];
+        _shareSmtp = s[SiteSettingsService.Keys.ShareSmtpWithTenants] != "false";
+        _smtpConfigured = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.SmtpHost]);
+        _googleId = s[SiteSettingsService.Keys.PlatformGoogleClientId];
+        _googleSecretSet = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformGoogleClientSecret]);
+        _googleRedirect = string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformGoogleRedirectUri])
+            ? SuggestedRedirect : s[SiteSettingsService.Keys.PlatformGoogleRedirectUri];
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _tenantsCount = await db.Tenants.CountAsync(t => t.Status != TenantStatus.Destroyed);
+        _librariesCount = await db.Tenants.CountAsync(t => t.BunnyLibraryId != null);
+        _videosCount = await db.TenantVideos.CountAsync();
+        _videosBytes = await db.TenantVideos.SumAsync(v => (long?)v.SizeBytes) ?? 0;
+        _videoTenants = await db.TenantVideos.Select(v => v.TenantId).Distinct().CountAsync();
+        _googleGrants = await db.GoogleCalendarGrants.CountAsync();
+        _imagesCount = await db.TenantImages.CountAsync();
+        _imagesBytes = await db.TenantImages.SumAsync(i => (long?)i.SizeBytes) ?? 0;
+        _loading = false;
+    }
+
+    private async Task SaveSmsAsync()
+    {
+        var values = new Dictionary<string, string> { [SiteSettingsService.Keys.PlatformSmsSenderName] = _smsSender.Trim() };
+        if (!string.IsNullOrWhiteSpace(_smsToken)) values[SiteSettingsService.Keys.PlatformSmsApiToken] = _smsToken.Trim();
+        var wasOn = await Settings.PlatformSmsOnAsync();
+        await Settings.SetManyAsync(values);
+        _smsToken = "";
+        await LoadAsync();
+        // Pierwszy token odsłania SMS-y w studiach — uprawnienia lecą od razu, bez czekania na synchronizację.
+        if (wasOn != _smsOn) await PushSmsAsync("Zapisano ustawienia SMS.");
+        else Show("Zapisano ustawienia SMS.", true);
+    }
+
+    private async Task ToggleSmsAsync(ChangeEventArgs e)
+    {
+        await Settings.SetAsync(SiteSettingsService.Keys.PlatformSmsEnabled, e.Value is true ? "true" : "false");
+        await LoadAsync();
+        await PushSmsAsync(_smsOn ? "SMS-y włączone." : "SMS-y ukryte u trenerów i klientów.");
+    }
+
+    private bool _muscleMapOn = true;
+
+    private async Task ToggleMuscleMapAsync(ChangeEventArgs e)
+    {
+        await Settings.SetAsync(SiteSettingsService.Keys.MuscleMapEnabled, e.Value is true ? "true" : "false");
+        await LoadAsync();
+        await PushSmsAsync(_muscleMapOn ? "Mapa mięśni włączona." : "Mapa mięśni wyłączona.");
+    }
+
+    private async Task PushSmsAsync(string done)
+    {
+        try
+        {
+            var (pushed, total) = await Tenants.PushAllEntitlementsAsync();
+            Show($"{done} Zaktualizowano studia: {pushed}/{total}.", pushed == total);
+        }
+        catch { Show($"{done} Studia odświeżą ustawienia przy najbliższej synchronizacji (do 15 min).", true); }
+    }
+
+    private async Task SaveBunnyAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_bunnyLibrary)) { Show("Wpisz Library ID biblioteki Bunny Stream.", false); return; }
+        var key = string.IsNullOrWhiteSpace(_bunnyKey) ? (await VideoHub.LibraryAsync())?.ApiKey : _bunnyKey.Trim();
+        if (string.IsNullOrWhiteSpace(key)) { Show("Wpisz klucz API biblioteki.", false); return; }
+        var (ok, msg) = await VideoHub.TestAsync(_bunnyLibrary, key);
+        if (!ok) { Show(msg, false); return; }
+        await VideoHub.SaveLibraryAsync(_bunnyLibrary, string.IsNullOrWhiteSpace(_bunnyKey) ? null : _bunnyKey, _bunnyCdn);
+        _bunnyKey = "";
+        Show("Zapisano bibliotekę — foldery trenerów powstaną przy pierwszym filmie.", true);
+        await LoadAsync();
+    }
+
+    private async Task SaveTokenAsync()
+    {
+        var key = _bunnyToken.Trim();
+        if (key.Length < 16 || key.Any(char.IsWhiteSpace)) { Show("To nie wygląda na klucz tokenów — skopiuj „Token authentication key” z Security biblioteki.", false); return; }
+        await VideoHub.SaveTokenKeyAsync(key);
+        _bunnyToken = "";
+        Show("Zapisano — aplikacje trenerów dostają już podpisane linki (do 10 min). Teraz możesz włączyć Embed view token authentication w Bunny.", true);
+        await LoadAsync();
+    }
+
+    private async Task ClearTokenAsync()
+    {
+        await VideoHub.SaveTokenKeyAsync(null);
+        Show("Podpisywanie wyłączone. Najpierw wyłącz Embed view token authentication w Bunny, inaczej filmy przestaną się odtwarzać.", true);
+        await LoadAsync();
+    }
+
+    private async Task TestBunnyAsync()
+    {
+        var key = string.IsNullOrWhiteSpace(_bunnyKey) ? (await VideoHub.LibraryAsync())?.ApiKey : _bunnyKey.Trim();
+        if (string.IsNullOrWhiteSpace(key)) { Show("Wpisz klucz API biblioteki.", false); return; }
+        var (ok, msg) = await VideoHub.TestAsync(_bunnyLibrary, key);
+        Show(msg, ok);
+    }
+
+    private async Task SaveStorageAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_stZone)) { Show("Wpisz nazwę strefy Bunny Storage.", false); return; }
+        if (ImageHubService.CleanHost(_stCdn) is null) { Show("Wpisz adres CDN strefy, np. hantly-media.b-cdn.net.", false); return; }
+        var key = string.IsNullOrWhiteSpace(_stKey) ? await ImageHub.SavedKeyAsync() : _stKey.Trim();
+        if (string.IsNullOrWhiteSpace(key)) { Show("Wpisz hasło strefy.", false); return; }
+        var (ok, msg) = await ImageHub.TestAsync(_stZone, key, _stHost);
+        if (!ok) { Show(msg, false); return; }
+        await ImageHub.SaveStorageAsync(_stZone, string.IsNullOrWhiteSpace(_stKey) ? null : _stKey, _stHost, _stCdn);
+        _stKey = "";
+        Show("Zapisano — nowe zdjęcia ćwiczeń trafią do Bunny Storage.", true);
+        await LoadAsync();
+    }
+
+    private async Task SaveGoogleAsync()
+    {
+        var id = _googleId.Trim();
+        var secret = string.IsNullOrWhiteSpace(_googleSecret)
+            ? await Settings.GetAsync(SiteSettingsService.Keys.PlatformGoogleClientSecret)
+            : _googleSecret.Trim();
+        var redirect = _googleRedirect.Trim();
+        if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(secret)) { Show("Wpisz Client ID i Client Secret.", false); return; }
+        if (!Uri.TryCreate(redirect, UriKind.Absolute, out var uri) || !redirect.EndsWith(GoogleOAuthBroker.CallbackPath, StringComparison.Ordinal))
+        {
+            Show($"Adres przekierowania musi być pełnym adresem kończącym się na {GoogleOAuthBroker.CallbackPath}.", false);
+            return;
+        }
+        var (ok, msg) = await Google.TestClientAsync(id, secret);
+        if (!ok) { Show(msg, false); return; }
+        await Settings.SetManyAsync(new Dictionary<string, string>
+        {
+            [SiteSettingsService.Keys.PlatformGoogleClientId] = id,
+            [SiteSettingsService.Keys.PlatformGoogleClientSecret] = secret,
+            [SiteSettingsService.Keys.PlatformGoogleRedirectUri] = redirect
+        });
+        _googleSecret = "";
+        Show(uri.Scheme == Uri.UriSchemeHttps
+            ? "Zapisano. Trenerzy mogą już łączyć swoje kalendarze Google."
+            : "Zapisano, ale adres przekierowania nie jest HTTPS — Google przyjmie go tylko dla localhost.", uri.Scheme == Uri.UriSchemeHttps);
+        await LoadAsync();
+    }
+
+    private async Task ToggleShareSmtpAsync(ChangeEventArgs e)
+    {
+        _shareSmtp = e.Value is true;
+        await Settings.SetAsync(SiteSettingsService.Keys.ShareSmtpWithTenants, _shareSmtp ? "true" : "false");
+        Show(_shareSmtp ? "Aplikacje trenerów wysyłają e-maile przez SMTP Portalu." : "Udostępnianie SMTP wyłączone.", true);
+    }
+
+    private void Show(string message, bool ok) { _message = message; _ok = ok; }
+}

@@ -1,0 +1,199 @@
+@inject InstagramService Ig
+@inject PTScheduler.Portal.Services.Social.SocialService Social
+
+@* Plan: pasek dwóch tygodni i lista postów po dniach (nadchodzące, szkice, opublikowane). *@
+
+<div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+    <div class="pp-seg" role="group" aria-label="Które posty">
+        @foreach (var (key, label) in Filters)
+        {
+            <button type="button" class="@(_filter == key ? "active" : "")" aria-pressed="@(_filter == key ? "true" : "false")" @onclick="() => SetFilterAsync(key)">@label</button>
+        }
+    </div>
+    <span class="ms-auto small text-muted">@_posts.Count @(_posts.Count == 1 ? "post" : "postów")</span>
+</div>
+
+@if (_filter == "upcoming")
+{
+    <div class="ig-strip" aria-label="Najbliższe 14 dni">
+        @foreach (var day in _days)
+        {
+            var d = day;
+            var onDay = _posts.Where(p => p.ScheduledAt is { } s && InstagramRules.ToWarsaw(s).Date == d).ToList();
+            <div class="ig-day @(_postDays.Contains(InstagramRules.IsoDay(d)) ? "is-slot" : "") @(d == _today ? "is-today" : "")">
+                <span class="ig-day-name">@InstagramRules.DayShort(InstagramRules.IsoDay(d))</span>
+                <span class="ig-day-num">@d.Day</span>
+                <span class="ig-day-posts">
+                    @foreach (var p in onDay.Take(2))
+                    {
+                        var post = p;
+                        <button type="button" class="ig-day-post st-@post.Status.ToString().ToLowerInvariant()" title="@post.Title" @onclick='() => Go.InvokeAsync(("plan", post.Id))'><IgThumb Post="post" /></button>
+                    }
+                </span>
+            </div>
+        }
+    </div>
+    <div class="small text-muted mb-3"><span class="ig-legend-slot"></span> dni publikacji z autopilota · kliknij miniaturę, żeby otworzyć post</div>
+}
+
+@if (_posts.Count == 0)
+{
+    <div class="pp-card"><div class="pp-empty">
+        <i class="bi bi-calendar2-plus"></i>
+        <div class="pp-empty-title">@(_filter switch { "drafts" => "Brak szkiców", "published" => "Nic jeszcze nie opublikowano", _ => "Nic nie jest zaplanowane" })</div>
+        <p>Dodaj post ręcznie albo poproś AI o pomysły — gotowe grafiki i opisy powstaną od razu.</p>
+        <div class="d-flex gap-2 justify-content-center flex-wrap">
+            <button class="btn btn-primary btn-sm" @onclick='() => Go.InvokeAsync(("pomysly", null))'><i class="bi bi-lightbulb me-1"></i>Pomysły</button>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="NewAsync"><i class="bi bi-plus-lg me-1"></i>Nowy post</button>
+        </div>
+    </div></div>
+}
+else
+{
+    @foreach (var group in _posts.GroupBy(p => p.ScheduledAt is { } s ? InstagramRules.ToWarsaw(s).Date : (p.PublishedAt is { } pa ? InstagramRules.ToWarsaw(pa).Date : (DateTime?)null)))
+    {
+        <div class="ig-group-head">@(group.Key is { } gk ? $"{InstagramRules.DayName(InstagramRules.IsoDay(gk))}, {gk:dd.MM.yyyy}" : "Bez terminu")</div>
+        <div class="ig-posts">
+            @foreach (var p in group)
+            {
+                var post = p;
+                <div class="ig-post" @key="post.Id">
+                    <button type="button" class="ig-post-thumb" @onclick='() => Go.InvokeAsync(("plan", post.Id))' aria-label="Otwórz post"><IgThumb Post="post" /></button>
+                    <div class="ig-post-main">
+                        <div class="ig-post-top">
+                            <span class="pp-chip pp-tone-@InstagramRules.StatusTone(post.Status)">@InstagramRules.StatusLabel(post.Status)</span>
+                            <span class="ig-post-kind"><i class="bi @InstagramRules.KindIcon(post.Kind) me-1"></i>@InstagramRules.KindLabel(post.Kind)</span>
+                            @if (!string.IsNullOrEmpty(post.Pillar)) { <span class="ig-post-kind">· @InstagramRules.PillarLabel(post.Pillar)</span> }
+                            @if (post.Source != "manual") { <span class="ig-post-kind">· @IgUi.Source(post.Source)</span> }
+                            <span class="ms-auto ig-post-when">@(post.Status == InstagramPostStatus.Published ? IgUi.When(post.PublishedAt) : IgUi.When(post.ScheduledAt))</span>
+                        </div>
+                        <button type="button" class="ig-post-title" @onclick='() => Go.InvokeAsync(("plan", post.Id))'>@(string.IsNullOrWhiteSpace(post.Title) ? "Bez tytułu" : post.Title)</button>
+                        <div class="sc-badges">
+                            @if (post.ToInstagram)
+                            {
+                                <span class="sc-badge st-@(post.Status == InstagramPostStatus.Published ? "ok" : post.Status == InstagramPostStatus.Failed ? "danger" : "muted")" title="Instagram"><i class="bi bi-instagram"></i></span>
+                            }
+                            @foreach (var t in _targets.GetValueOrDefault(post.Id) ?? [])
+                            {
+                                var info = PTScheduler.Portal.Services.Social.SocialPlatforms.Get(t.Channel!.Platform);
+                                <span class="sc-badge st-@PTScheduler.Portal.Services.Social.SocialPlatforms.TargetTone(t.Status)" title="@($"{info.Label}: {PTScheduler.Portal.Services.Social.SocialPlatforms.TargetLabel(t.Status)}")"><i class="bi @info.Icon"></i></span>
+                            }
+                        </div>
+                        <div class="ig-post-cap">@InstagramGraphics.Clean(post.Caption, 140)</div>
+                        @if (post.Status == InstagramPostStatus.Failed && post.Error is not null)
+                        {
+                            <div class="ig-post-err"><i class="bi bi-exclamation-triangle me-1"></i>@post.Error</div>
+                        }
+                        <div class="ig-post-actions">
+                            @if (post.Status == InstagramPostStatus.ToApprove)
+                            {
+                                <button class="btn btn-success btn-sm" @onclick="() => RunAsync(() => Ig.ApproveAsync(post.Id))" disabled="@_busy"><i class="bi bi-check-lg me-1"></i>Akceptuj</button>
+                            }
+                            @if (post.Status is InstagramPostStatus.Draft or InstagramPostStatus.Idea or InstagramPostStatus.Failed)
+                            {
+                                <button class="btn btn-outline-primary btn-sm" @onclick="() => RunAsync(() => Ig.ScheduleAsync(post.Id, null))" disabled="@_busy"><i class="bi bi-calendar-plus me-1"></i>W najbliższy termin</button>
+                            }
+                            @if (post.Status is not (InstagramPostStatus.Published or InstagramPostStatus.Publishing))
+                            {
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="() => RunAsync(() => Ig.PublishNowAsync(post.Id))" disabled="@_busy"><i class="bi bi-send me-1"></i>Opublikuj teraz</button>
+                            }
+                            @if (post.Status is InstagramPostStatus.Scheduled or InstagramPostStatus.ToApprove)
+                            {
+                                <button class="btn btn-link btn-sm" @onclick="() => UnscheduleAsync(post.Id)" disabled="@_busy">Do szkiców</button>
+                            }
+                            @if (post.Permalink is not null)
+                            {
+                                <a class="btn btn-link btn-sm" href="@post.Permalink" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i>Na Instagramie</a>
+                            }
+                            @if (post.Status != InstagramPostStatus.Publishing)
+                            {
+                                @if (_confirmDelete == post.Id)
+                                {
+                                    <span class="ms-auto d-inline-flex gap-1 align-items-center small">
+                                        @(post.Status == InstagramPostStatus.Published ? "Usunąć z Portalu (na Instagramie zostanie)?" : "Usunąć?")
+                                        <button class="btn btn-danger btn-sm" @onclick="() => DeleteAsync(post.Id)">Usuń</button>
+                                        <button class="btn btn-link btn-sm" @onclick="() => _confirmDelete = null">Nie</button>
+                                    </span>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-link btn-sm text-danger ms-auto" title="Usuń" aria-label="Usuń" @onclick="() => _confirmDelete = post.Id"><i class="bi bi-trash3"></i></button>
+                                }
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public EventCallback<(string, int?)> Go { get; set; }
+    [Parameter] public EventCallback<(bool, string)> Flash { get; set; }
+
+    private static readonly (string Key, string Label)[] Filters =
+        [("upcoming", "Nadchodzące"), ("drafts", "Szkice"), ("published", "Opublikowane"), ("all", "Wszystkie")];
+
+    private string _filter = "upcoming";
+    private List<InstagramPost> _posts = [];
+    private Dictionary<int, List<SocialPostTarget>> _targets = [];
+    private List<DateTime> _days = [];
+    private DateTime _today;
+    private HashSet<int> _postDays = [];
+    private bool _busy;
+    private int? _confirmDelete;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _today = InstagramRules.ToWarsaw(DateTime.UtcNow).Date;
+        _days = Enumerable.Range(0, 14).Select(i => _today.AddDays(i)).ToList();
+        _postDays = (await Ig.AutopilotAsync()).Days;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _posts = _filter switch
+        {
+            "drafts" => await Ig.PostsAsync(q => q.Where(p => p.Status == InstagramPostStatus.Draft || p.Status == InstagramPostStatus.Idea).OrderByDescending(p => p.UpdatedAt)),
+            "published" => await Ig.PostsAsync(q => q.Where(p => p.Status == InstagramPostStatus.Published).OrderByDescending(p => p.PublishedAt).Take(60)),
+            "all" => await Ig.PostsAsync(q => q.OrderByDescending(p => p.UpdatedAt).Take(100)),
+            _ => await Ig.PostsAsync(q => q.Where(p => p.Status == InstagramPostStatus.ToApprove || p.Status == InstagramPostStatus.Scheduled
+                || p.Status == InstagramPostStatus.Publishing || p.Status == InstagramPostStatus.Failed).OrderBy(p => p.ScheduledAt))
+        };
+        _targets = await Social.TargetsForAsync(_posts.Select(p => p.Id));
+    }
+
+    private async Task SetFilterAsync(string f) { _filter = f; await LoadAsync(); }
+
+    private async Task RunAsync(Func<Task<(bool Ok, string Message)>> action)
+    {
+        _busy = true;
+        var r = await action();
+        await LoadAsync();
+        _busy = false;
+        await Flash.InvokeAsync(r);
+    }
+
+    private async Task UnscheduleAsync(int id)
+    {
+        await Ig.UnscheduleAsync(id);
+        await LoadAsync();
+        await Flash.InvokeAsync((true, "Post wrócił do szkiców."));
+    }
+
+    private async Task DeleteAsync(int id)
+    {
+        await Ig.DeletePostAsync(id);
+        _confirmDelete = null;
+        await LoadAsync();
+        await Flash.InvokeAsync((true, "Post usunięty."));
+    }
+
+    private async Task NewAsync()
+    {
+        var id = await Ig.CreatePostAsync(InstagramPostKind.Image);
+        await Go.InvokeAsync(("plan", id));
+    }
+}

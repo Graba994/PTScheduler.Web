@@ -1,0 +1,163 @@
+@page "/trainer/asystent"
+@using Microsoft.AspNetCore.Authorization
+@using PTScheduler.Domain.Constants
+@attribute [Authorize(Roles = Roles.Admin + "," + Roles.Trainer)]
+@inject PlatformAssistantService Platform
+@inject MessageDraftService Drafts
+@inject AuthenticationStateProvider AuthState
+@inject IJSRuntime JS
+@rendermode PTScheduler.Web.RenderModes.Server
+
+@* „Asystent i AI” w jednym miejscu: jak asystent pisze w Twoim imieniu, co może proponować, poranny brief
+   i co dzieje się z danymi. Wygląd i animacje maskotki ustala Hantly (Portal) — trener może je tylko przyciszyć.
+   Na szerokim ekranie dwie kolumny: po lewej styl, brief, maskotka i prywatność, po prawej lista pomysłów. *@
+
+<AppTitle Page="Asystent i AI" />
+
+<div class="ast">
+    <header class="ast-hero">
+        <div class="ast-hero-text">
+            <h4 class="mb-1 fw-bold"><i class="bi bi-stars me-2"></i>Asystent i AI</h4>
+            <p class="ast-sub">@(_name ?? "Asystent") podpowiada i szkicuje — Ty decydujesz. Wszystko działa też bez AI (na gotowych szablonach i regułach).</p>
+            <div class="ast-chips">
+                <span class="ast-chip @(_ai ? "on" : "")"><i class="bi @(_ai ? "bi-stars" : "bi-slash-circle")"></i>@(_ai ? "AI włączone" : "AI wyłączone")</span>
+                <span class="ast-chip"><i class="bi bi-person-check"></i>Nic nie wychodzi do klienta bez Ciebie</span>
+            </div>
+        </div>
+        @if (_config is not null)
+        {
+            <div class="ast-hero-mascot" aria-hidden="true">
+                @if (_config.AnimatedSvg is { Length: > 0 } svg)
+                {
+                    <span class="hm-fx" data-hm-motion="@_config.Motion" data-hm-fx="@PlatformAssistantService.PageFx(_config)"><span class="hm-live st-idle md-hello">@((MarkupString)svg)</span></span>
+                }
+                else if (_config.Icons.TryGetValue("hello", out var icon))
+                {
+                    <img src="@icon" alt="" width="96" height="96" />
+                }
+            </div>
+        }
+    </header>
+
+    <div class="ast-grid">
+        <div class="ast-col">
+            <section class="ast-card">
+                <div class="ast-card-head">
+                    <span class="ast-ic"><i class="bi bi-chat-heart"></i></span>
+                    <div class="min-w-0">
+                        <b>Twój styl wiadomości</b>
+                        <span>Tak asystent pisze szkice do klientów: przypomnienia o płatności, zaproszenia na wolne okienka, powroty po przerwie.</span>
+                    </div>
+                </div>
+                @if (_style is { } st)
+                {
+                    <ul class="ast-facts ast-facts-row">
+                        <li><i class="bi bi-person"></i>@(st.Address == "pan" ? "Forma grzecznościowa (bez zgadywania płci)" : "Na „Ty”")</li>
+                        <li><i class="bi bi-emoji-smile"></i>Emoji: @st.Emoji</li>
+                        <li><i class="bi bi-text-paragraph"></i>@(st.Length == "krotko" ? "Krótko" : "Dłużej")</li>
+                        @if (!string.IsNullOrWhiteSpace(st.Signature)) { <li><i class="bi bi-pen"></i>Podpis: @st.Signature</li> }
+                    </ul>
+                }
+                <a class="btn btn-sm btn-outline-primary align-self-start" href="/trainer/styl"><i class="bi bi-sliders me-1"></i>Ustaw styl i przykłady</a>
+            </section>
+
+            <section class="ast-card">
+                <div class="ast-card-head">
+                    <span class="ast-ic"><i class="bi bi-sunrise"></i></span>
+                    <div class="min-w-0">
+                        <b>Poranny brief</b>
+                        <span>Rano e-mail lub powiadomienie: wizyty na dziś, sprawy do załatwienia i powody do dumy. Godzinę i kanały ustawisz w powiadomieniach.</span>
+                    </div>
+                </div>
+                <a class="btn btn-sm btn-outline-primary align-self-start" href="/Account/Manage/Notifications"><i class="bi bi-bell me-1"></i>Powiadomienia i brief</a>
+            </section>
+
+            <section class="ast-card">
+                <div class="ast-card-head">
+                    <span class="ast-ic"><i class="bi bi-emoji-smile"></i></span>
+                    <div class="min-w-0">
+                        <b>Maskotka @(_name)</b>
+                        <span>Wygląd i animacje ustala zespół Hantly. U siebie możesz je przyciszyć.</span>
+                    </div>
+                </div>
+                <div class="ast-motion" role="radiogroup" aria-label="Ruch maskotki">
+                    <span>Ruch na tym urządzeniu:</span>
+                    @foreach (var (key, label) in MotionChoices)
+                    {
+                        var motion = key;
+                        <button type="button" role="radio" aria-checked="@(_motion == motion ? "true" : "false")" class="@(_motion == motion ? "on" : "")" @onclick="() => SetMotionAsync(motion)">@label</button>
+                    }
+                    @if (_motionSaved) { <small class="text-success"><i class="bi bi-check2"></i> zapisane</small> }
+                </div>
+                <ul class="ast-facts">
+                    <li><i class="bi bi-moon"></i>„Wycisz” — maskotka zasypia i nie otwiera dymka sama.</li>
+                    <li><i class="bi bi-x-lg"></i>Pojedynczą podpowiedź zamkniesz krzyżykiem — wróci jutro albo wcale.</li>
+                </ul>
+            </section>
+
+            <section class="ast-card">
+                <div class="ast-card-head">
+                    <span class="ast-ic"><i class="bi bi-shield-check"></i></span>
+                    <div class="min-w-0">
+                        <b>AI i prywatność</b>
+                        <span>@(_ai ? "AI jest włączone — asystent może przeredagować tekst i podsumować liczby." : "AI jest teraz wyłączone — asystent korzysta z gotowych szablonów i reguł.")</span>
+                    </div>
+                </div>
+                <ul class="ast-facts">
+                    <li><i class="bi bi-check2"></i>Do AI nie trafiają imiona, nazwiska, telefony ani e-maile klientów — tylko liczby i znaczniki typu [klient].</li>
+                    <li><i class="bi bi-check2"></i>Nic nie wychodzi do klienta samo: każdą wiadomość czytasz i wysyłasz Ty.</li>
+                </ul>
+            </section>
+        </div>
+
+        <div class="ast-col">
+            <section class="ast-card ast-card-ideas">
+                <div class="ast-card-head">
+                    <span class="ast-ic"><i class="bi bi-lightbulb"></i></span>
+                    <div class="min-w-0">
+                        <b>Pomysły od asystenta</b>
+                        <span>Ciche propozycje: nie wyskakują same, dziennie widać najwyżej dwie. Wyłącz te, które Ci nie pomagają.</span>
+                    </div>
+                </div>
+                <AssistantIdeasToggles />
+            </section>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string? _name;
+    private bool _ai;
+    private PlatformAssistantService.Config? _config;
+    private PTScheduler.Domain.Entities.TrainerStyle? _style;
+    private static readonly (string Key, string Label)[] MotionChoices = [("", "Żywy"), ("calm", "Spokojny"), ("off", "Bez ruchu")];
+    private string _motion = "";
+    private bool _motionSaved;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var m = await JS.InvokeAsync<string>("ptFirstSetup.getMotion");
+            _motion = m is "calm" or "off" ? m : "";
+            StateHasChanged();
+        }
+        catch (JSException) { }
+    }
+
+    /// <summary>Ten sam zapis co w Pierwszych ustawieniach (pamięć przeglądarki) — maskotka bierze go po odświeżeniu.</summary>
+    private async Task SetMotionAsync(string key)
+    {
+        _motion = key;
+        try { await JS.InvokeVoidAsync("ptFirstSetup.setMotion", key); _motionSaved = true; } catch (JSException) { }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        try { _config = await Platform.GetConfigAsync(); _name = _config?.Name; _ai = _config?.Ai == true; } catch { }
+        try { _style = await Drafts.GetStyleAsync(userId); } catch { }
+    }
+}

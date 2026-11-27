@@ -1,0 +1,76 @@
+@using PTScheduler.Domain.Rules
+@inject PTScheduler.Web.Services.TrainerProposalsService Proposals
+@inject AuthenticationStateProvider AuthState
+
+@* Profil klienta po kliknięciu propozycji asystenta: ?szkic=Comeback|Package|Congrats — gotowy szkic wiadomości
+   w stylu trenera; ?przypomnienie=1 — dodatkowe przypomnienie 2 h przed wizytą (tylko dla tej osoby).
+   Włączone przypomnienie widać tu zawsze, żeby dało się je łatwo wyłączyć. *@
+@if (_purpose is { } purpose && !_hideDraft)
+{
+    <section class="cnc">
+        <div class="cnc-head">
+            <i class="bi bi-chat-heart"></i>
+            <b>Wiadomość od asystenta: @PTScheduler.Application.Messaging.MessageTemplates.Label(purpose).ToLowerInvariant()</b>
+            <button type="button" class="btn-close btn-sm ms-auto" aria-label="Zamknij" @onclick="() => _hideDraft = true"></button>
+        </div>
+        <MessageDraftBox ClientId="ClientId" Phone="@Phone" Purpose="purpose" Fixed="true" AutoDraft="true" />
+    </section>
+}
+@if (_extra is true && !ShowReminder)
+{
+    @* Włączone wcześniej — jedna linijka z możliwością wyłączenia, bez całej karty. *@
+    <div class="cnc-line">
+        <i class="bi bi-alarm"></i><span>Dodatkowe przypomnienie 2 h przed wizytą: <b>włączone</b></span>
+        <button type="button" class="btn btn-link btn-sm p-0 ms-auto" disabled="@_busy" @onclick="TurnOffAsync">Wyłącz</button>
+    </div>
+}
+else if (_extra is { } on && ShowReminder)
+{
+    <section class="cnc">
+        <div class="cnc-head">
+            <i class="bi bi-alarm"></i>
+            <b>Dodatkowe przypomnienie 2 godziny przed wizytą</b>
+        </div>
+        <p class="cnc-text">Oprócz zwykłego przypomnienia dzień wcześniej ta osoba dostanie jeszcze krótkie powiadomienie 2 godziny przed treningiem. Tylko ona — reszta klientów bez zmian.</p>
+        <div class="form-check form-switch m-0">
+            <input class="form-check-input" type="checkbox" id="cnc-extra" checked="@on" disabled="@_busy" @onchange="ToggleAsync" />
+            <label class="form-check-label" for="cnc-extra">@(on ? "Włączone" : "Wyłączone")</label>
+        </div>
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public int ClientId { get; set; }
+    [Parameter] public string? Phone { get; set; }
+    [SupplyParameterFromQuery(Name = "szkic")] public string? DraftQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "przypomnienie")] public int? ReminderQuery { get; set; }
+
+    private bool ShowReminder => ReminderQuery == 1;
+    private DraftPurpose? _purpose;
+    private bool? _extra;
+    private bool _hideDraft, _busy, _isAdmin;
+    private string _userId = "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        _userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        _isAdmin = user.IsInRole(PTScheduler.Domain.Constants.Roles.Admin);
+        _purpose = DraftQuery is "Comeback" or "Package" or "Congrats" or "Motivation" && Enum.TryParse<DraftPurpose>(DraftQuery, out var p) ? p : null;
+        try { _extra = await Proposals.GetExtraReminderAsync(_userId, _isAdmin, ClientId); } catch { _extra = null; }
+    }
+
+    private async Task TurnOffAsync()
+    {
+        _busy = true;
+        try { if (await Proposals.SetExtraReminderAsync(_userId, _isAdmin, ClientId, false)) _extra = false; }
+        finally { _busy = false; }
+    }
+
+    private async Task ToggleAsync(ChangeEventArgs e)
+    {
+        _busy = true;
+        try { if (await Proposals.SetExtraReminderAsync(_userId, _isAdmin, ClientId, e.Value is true)) _extra = e.Value is true; }
+        finally { _busy = false; }
+    }
+}

@@ -1,0 +1,114 @@
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Domain.Constants
+@inject PTScheduler.Application.Interfaces.IClientDocumentService DocumentSvc
+@inject IHttpContextAccessor HttpContextAccessor
+
+@* Pulpit klienta: dokumenty od trenera do przeczytania (regulamin, zgody). Zamiast okna, które zasłania
+   aplikację — spokojna karta: lista, czytanie na miejscu i jedno kliknięcie. Po wszystkim karta znika. *@
+@if (_docs.Count > 0 || _justFinished)
+{
+    <section class="cdoc @(_justFinished ? "is-done" : "")" aria-labelledby="cdoc-title">
+        @if (_justFinished)
+        {
+            <div class="cdoc-done">
+                <span class="cdoc-done-ic"><i class="bi bi-check2-all"></i></span>
+                <div>
+                    <b id="cdoc-title">Dziękujemy, wszystko gotowe!</b>
+                    <small>Kopie znajdziesz zawsze w <a href="/my/documents">Moich dokumentach</a>.</small>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="cdoc-head">
+                <span class="cdoc-ic"><i class="bi bi-file-earmark-text"></i></span>
+                <div class="min-w-0 flex-grow-1">
+                    <h6 id="cdoc-title">@(_docs.Count == 1 ? "Jeden dokument od trenera" : $"{_docs.Count} {PTScheduler.Web.Services.AssistantTipsService.Plural(_docs.Count, "dokument", "dokumenty", "dokumentów")} od trenera")</h6>
+                    <small>Przeczytaj i potwierdź — zajmie to minutę.</small>
+                </div>
+                <span class="cdoc-count">@_doneCount / @_total</span>
+            </div>
+            <div class="cdoc-bar" aria-hidden="true"><span style="width:@(_total == 0 ? 0 : _doneCount * 100 / _total)%"></span></div>
+
+            <ul class="cdoc-list">
+                @foreach (var d in _docs)
+                {
+                    var required = d.Kind == DocumentKinds.Required;
+                    var open = _openId == d.DocumentId;
+                    <li class="cdoc-item @(open ? "open" : "")">
+                        <button type="button" class="cdoc-row" aria-expanded="@(open ? "true" : "false")" @onclick="() => Toggle(d.DocumentId)">
+                            <i class="bi @(required ? "bi-file-earmark-check" : "bi-hand-thumbs-up") cdoc-row-ic"></i>
+                            <span class="cdoc-row-txt">
+                                <b>@d.Title</b>
+                                <small>@(required ? "Do akceptacji" : "Zgoda — decydujesz Ty")@(d.DecidedVersion is not null ? " · nowa wersja" : "")</small>
+                            </span>
+                            <span class="cdoc-row-cta">@(open ? "Zwiń" : "Przeczytaj")<i class="bi bi-chevron-@(open ? "up" : "down")"></i></span>
+                        </button>
+                        @if (open)
+                        {
+                            <div class="cdoc-body">
+                                <div class="cdoc-text" tabindex="0">@d.Content</div>
+                                @if (_error is not null) { <div class="cdoc-err" role="alert">@_error</div> }
+                                <div class="cdoc-actions">
+                                    @if (!required)
+                                    {
+                                        <button type="button" class="btn btn-light" disabled="@_busy" @onclick="() => DecideAsync(d, false)">Nie, dziękuję</button>
+                                    }
+                                    <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="() => DecideAsync(d, true)">
+                                        @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-check-lg me-1"></i> }
+                                        @(required ? "Akceptuję" : "Zgadzam się")
+                                    </button>
+                                </div>
+                                @if (!required) { <div class="cdoc-hint">Zgodę możesz zmienić w każdej chwili w Moich dokumentach.</div> }
+                            </div>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public int ClientId { get; set; }
+    /// <summary>Podgląd pulpitu klienta przez trenera — bez zapisywania decyzji.</summary>
+    [Parameter] public bool Preview { get; set; }
+
+    private List<ClientDocumentStatusDto> _docs = [];
+    private int _total;
+    private int _doneCount;
+    private int? _openId;
+    private bool _busy;
+    private bool _justFinished;
+    private string? _error;
+    private string? _ip;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _ip = HttpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
+        try { _docs = (await DocumentSvc.GetForClientAsync(ClientId)).Where(d => d.Pending).ToList(); }
+        catch { _docs = []; }
+        _total = _docs.Count;
+        if (_docs.Count == 1) _openId = _docs[0].DocumentId;
+    }
+
+    private void Toggle(int id) { _error = null; _openId = _openId == id ? null : id; }
+
+    private async Task DecideAsync(ClientDocumentStatusDto d, bool accepted)
+    {
+        if (Preview) { _error = "To podgląd — decyzję podejmuje klient."; return; }
+        _busy = true;
+        _error = null;
+        try
+        {
+            await DocumentSvc.DecideAsync(ClientId, d.DocumentId, accepted, _ip);
+            _docs.Remove(d);
+            _doneCount++;
+            _openId = _docs.FirstOrDefault()?.DocumentId;
+            if (_docs.Count == 0) _justFinished = true;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException) { _error = ex.Message; }
+        catch { _error = "Nie udało się zapisać. Spróbuj jeszcze raz."; }
+        finally { _busy = false; }
+    }
+}

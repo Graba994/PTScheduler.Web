@@ -1,0 +1,161 @@
+@using PTScheduler.Portal.Services.Social
+@inject InstagramService Ig
+@inject SocialService Social
+
+@* Kalendarz tygodnia: posty wszystkich kanałów po dniach, przeciąganie na inny dzień (godzina zostaje),
+   przyciski ← → (bez myszy) i najlepsze pory każdej platformy z własnych wyników. *@
+
+<div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+    <div class="btn-group btn-group-sm" role="group" aria-label="Tydzień">
+        <button class="btn btn-outline-secondary" @onclick="() => ShiftAsync(-7)" aria-label="Poprzedni tydzień"><i class="bi bi-chevron-left"></i></button>
+        <button class="btn btn-outline-secondary" @onclick="TodayAsync">Ten tydzień</button>
+        <button class="btn btn-outline-secondary" @onclick="() => ShiftAsync(7)" aria-label="Następny tydzień"><i class="bi bi-chevron-right"></i></button>
+    </div>
+    <b class="ms-1">@_monday.ToString("d MMMM", Pl) – @_monday.AddDays(6).ToString("d MMMM yyyy", Pl)</b>
+    <span class="ms-auto small text-muted">Przeciągnij post na inny dzień — godzina zostaje.</span>
+</div>
+
+@if (_best.Count > 0)
+{
+    <div class="cal-best mb-3">
+        <span class="small fw-semibold"><i class="bi bi-stars me-1"></i>Najlepsze pory (90 dni):</span>
+        @foreach (var (platform, slots) in _best)
+        {
+            <span class="cal-best-group">
+                <i class="bi @(platform switch { "facebook" => "bi-facebook", "threads" => "bi-threads", _ => "bi-instagram" })" title="@platform"></i>
+                @foreach (var s in slots)
+                {
+                    <span class="pp-chip pp-tone-info" title="@($"{s.Posts} post(ów), średnio {s.Score}% zaangażowania")">@InstagramRules.DayShort(s.Day) @($"{s.Hour:00}:00")</span>
+                }
+            </span>
+        }
+    </div>
+}
+
+<div class="cal-week">
+    @for (var i = 0; i < 7; i++)
+    {
+        var day = _monday.AddDays(i);
+        var iso = InstagramRules.IsoDay(day);
+        var items = _posts.Where(p => DayOf(p) == day).OrderBy(p => TimeOf(p)).ToList();
+        var hints = _best.SelectMany(b => b.Value.Where(s => s.Day == iso).Select(s => (b.Key, s.Hour))).ToList();
+        <section class="cal-day @(day == _today ? "is-today" : "") @(day < _today ? "is-past" : "") @(_dragOver == day ? "is-over" : "")"
+                 @ondragover:preventDefault="true" @ondragover="() => _dragOver = day" @ondragleave="() => _dragOver = null"
+                 @ondrop="() => DropAsync(day)" aria-label="@InstagramRules.DayName(iso) @day.ToString("d.MM")">
+            <header class="cal-day-head">
+                <span>@InstagramRules.DayShort(iso)</span><b>@day.Day</b>
+                @if (hints.Count > 0)
+                {
+                    <span class="cal-hint" title="Najlepsze pory tego dnia">★ @string.Join(", ", hints.Select(h => $"{h.Hour:00}:00").Distinct())</span>
+                }
+            </header>
+            @foreach (var p in items)
+            {
+                var post = p;
+                var movable = post.Status is InstagramPostStatus.Scheduled or InstagramPostStatus.ToApprove;
+                <article class="cal-post st-@post.Status.ToString().ToLowerInvariant()" @key="post.Id" draggable="@(movable ? "true" : "false")"
+                         @ondragstart="() => _dragging = post.Id" @ondragend="() => { _dragging = null; _dragOver = null; }">
+                    <button type="button" class="cal-post-open" @onclick='() => Go.InvokeAsync(("plan", post.Id))'>
+                        <span class="cal-thumb"><IgThumb Post="post" /></span>
+                        <span class="cal-post-main">
+                            <small>@TimeOf(post).ToString("HH:mm") · @StatusLabel(post.Status)</small>
+                            <span class="cal-title">@(string.IsNullOrWhiteSpace(post.Title) ? "Bez tytułu" : post.Title)</span>
+                        </span>
+                    </button>
+                    <div class="d-flex align-items-center gap-1">
+                        <div class="sc-badges">
+                            @if (post.ToInstagram) { <span class="sc-badge st-@(post.Status == InstagramPostStatus.Published ? "ok" : post.Status == InstagramPostStatus.Failed ? "danger" : "muted")" title="Instagram"><i class="bi bi-instagram"></i></span> }
+                            @foreach (var t in _targets.GetValueOrDefault(post.Id) ?? [])
+                            {
+                                var info = SocialPlatforms.Get(t.Channel!.Platform);
+                                <span class="sc-badge st-@SocialPlatforms.TargetTone(t.Status)" title="@($"{info.Label}: {SocialPlatforms.TargetLabel(t.Status)}")"><i class="bi @info.Icon"></i></span>
+                            }
+                        </div>
+                        @if (movable)
+                        {
+                            <span class="ms-auto d-flex">
+                                <button class="btn btn-link btn-sm p-0" title="Dzień wcześniej" aria-label="Dzień wcześniej" @onclick="() => MoveAsync(post, -1)"><i class="bi bi-arrow-left-short"></i></button>
+                                <button class="btn btn-link btn-sm p-0" title="Dzień później" aria-label="Dzień później" @onclick="() => MoveAsync(post, 1)"><i class="bi bi-arrow-right-short"></i></button>
+                            </span>
+                        }
+                    </div>
+                </article>
+            }
+            @if (items.Count == 0 && day >= _today)
+            {
+                <div class="cal-empty">—</div>
+            }
+        </section>
+    }
+</div>
+<div class="small text-muted mt-2">Przesuwać można posty zaplanowane i czekające na akceptację. Opublikowane zostają tam, gdzie wyszły.</div>
+
+@code {
+    [Parameter] public EventCallback<(string, int?)> Go { get; set; }
+    [Parameter] public EventCallback<(bool, string)> Flash { get; set; }
+
+    private static readonly System.Globalization.CultureInfo Pl = new("pl-PL");
+    private DateTime _today, _monday;
+    private List<InstagramPost> _posts = [];
+    private Dictionary<int, List<SocialPostTarget>> _targets = [];
+    private Dictionary<string, List<InstagramRules.Slot>> _best = [];
+    private int? _dragging;
+    private DateTime? _dragOver;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _today = InstagramRules.ToWarsaw(DateTime.UtcNow).Date;
+        _monday = Monday(_today);
+        _best = await Ig.BestSlotsByPlatformAsync();
+        await LoadAsync();
+    }
+
+    private static DateTime Monday(DateTime d) => d.AddDays(-(InstagramRules.IsoDay(d) - 1));
+
+    private static DateTime TimeOf(InstagramPost p) =>
+        InstagramRules.ToWarsaw(p.Status == InstagramPostStatus.Published ? p.PublishedAt ?? p.ScheduledAt ?? p.CreatedAt : p.ScheduledAt ?? p.CreatedAt);
+
+    private static DateTime DayOf(InstagramPost p) => TimeOf(p).Date;
+
+    private static string StatusLabel(InstagramPostStatus s) => s switch
+    {
+        InstagramPostStatus.Published => "opublikowany",
+        InstagramPostStatus.Scheduled => "zaplanowany",
+        InstagramPostStatus.ToApprove => "do akceptacji",
+        InstagramPostStatus.Publishing => "publikuję",
+        InstagramPostStatus.Failed => "błąd",
+        _ => "szkic"
+    };
+
+    private async Task LoadAsync()
+    {
+        var from = InstagramRules.ToUtc(_monday);
+        var to = InstagramRules.ToUtc(_monday.AddDays(7));
+        _posts = await Ig.PostsAsync(q => q.Where(p =>
+            (p.Status == InstagramPostStatus.Published && (p.PublishedAt ?? p.ScheduledAt) >= from && (p.PublishedAt ?? p.ScheduledAt) < to)
+            || (p.Status != InstagramPostStatus.Published && p.ScheduledAt >= from && p.ScheduledAt < to)));
+        _targets = await Social.TargetsForAsync(_posts.Select(p => p.Id));
+    }
+
+    private async Task ShiftAsync(int days) { _monday = _monday.AddDays(days); await LoadAsync(); }
+    private async Task TodayAsync() { _monday = Monday(_today); await LoadAsync(); }
+
+    private async Task DropAsync(DateTime day)
+    {
+        _dragOver = null;
+        if (_dragging is not int id || _posts.FirstOrDefault(p => p.Id == id) is not { } post) return;
+        _dragging = null;
+        if (DayOf(post) == day) return;
+        await MoveToAsync(post, day);
+    }
+
+    private Task MoveAsync(InstagramPost post, int days) => MoveToAsync(post, DayOf(post).AddDays(days));
+
+    private async Task MoveToAsync(InstagramPost post, DateTime day)
+    {
+        var local = day.Add(TimeOf(post).TimeOfDay);
+        var r = await Ig.RescheduleAsync(post.Id, InstagramRules.ToUtc(local));
+        await LoadAsync();
+        await Flash.InvokeAsync(r);
+    }
+}

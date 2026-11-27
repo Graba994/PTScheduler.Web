@@ -1,0 +1,31 @@
+@page "/"
+@layout PublicLayout
+@inject SiteSettingsService Settings
+
+@* Strona główna: szablon wybrany w Panelu (Strona publiczna). ?szablon=klasyczna|nowa — podgląd bez zmiany ustawienia. *@
+@if (_template == "klasyczna")
+{
+    <HomeClassic />
+}
+else
+{
+    <HomeLanding />
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "szablon")] public string? Preview { get; set; }
+
+    private string _template = "nowa";
+
+    public static readonly (string Key, string Name, string Description)[] Templates =
+    [
+        ("nowa", "Nowa — prawdziwe ekrany i filmy", "Sprzedażowa strona z nagraniami z aplikacji: dzień trenera, płatności, aplikacja klienta, asystent AI."),
+        ("klasyczna", "Klasyczna", "Poprzednia strona główna: makiety, kalkulator czasu, kreator „Zbuduj w 60 sekund”."),
+    ];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var saved = await Settings.GetAsync(SiteSettingsService.Keys.HomeTemplate);
+        _template = Preview is "klasyczna" or "nowa" ? Preview : saved == "klasyczna" ? "klasyczna" : "nowa";
+    }
+}

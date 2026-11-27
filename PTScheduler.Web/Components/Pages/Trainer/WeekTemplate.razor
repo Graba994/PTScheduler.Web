@@ -1,0 +1,179 @@
+@page "/trainer/szablon-tygodnia"
+@using Microsoft.AspNetCore.Authorization
+@using PTScheduler.Domain.Constants
+@using System.Globalization
+@attribute [Authorize(Roles = Roles.Admin + "," + Roles.Trainer)]
+@inject WeekTemplateService Template
+@inject PTScheduler.Application.Interfaces.IAppClock Clock
+@inject AuthenticationStateProvider AuthState
+@rendermode PTScheduler.Web.RenderModes.Server
+
+@* Szablon tygodnia: wybierasz tydzień, zaznaczasz wizyty i liczbę tygodni — podgląd pokazuje, co wejdzie, co koliduje,
+   a jedno kliknięcie kopiuje grafik (np. na wakacje albo nowy sezon). Kolizji nie nadpisujemy. *@
+
+<AppTitle Page="Szablon tygodnia" />
+
+<div class="wkt">
+    <header class="wkt-head">
+        <h4 class="mb-1 fw-bold"><i class="bi bi-calendar-range me-2"></i>Szablon tygodnia</h4>
+        <p class="wkt-sub">Skopiuj wizyty z jednego tygodnia na kolejne — te same dni, godziny i osoby. Zajętych terminów nie ruszamy.</p>
+    </header>
+
+    <section class="wkt-card">
+        <div class="wkt-row">
+            <span class="wkt-label">Tydzień do skopiowania</span>
+            <div class="wkt-week">
+                <button type="button" class="btn btn-sm btn-light" aria-label="Poprzedni tydzień" @onclick="() => ShiftAsync(-7)"><i class="bi bi-chevron-left"></i></button>
+                <b>@_week.ToString("d MMM", Pl) – @_week.AddDays(6).ToString("d MMM yyyy", Pl)</b>
+                <button type="button" class="btn btn-sm btn-light" aria-label="Następny tydzień" @onclick="() => ShiftAsync(7)"><i class="bi bi-chevron-right"></i></button>
+            </div>
+        </div>
+
+        @if (_loading)
+        {
+            <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div></div>
+        }
+        else if (_sources.Count == 0)
+        {
+            <p class="text-muted small mb-0">W tym tygodniu nie ma wizyt do skopiowania.</p>
+        }
+        else
+        {
+            <ul class="wkt-list">
+                @foreach (var s in _sources)
+                {
+                    var on = _picked.Contains(s.SessionId);
+                    <li class="@(s.Skip is not null ? "is-skip" : "")">
+                        <label class="wkt-item">
+                            <input type="checkbox" class="form-check-input" checked="@on" disabled="@(s.Skip is not null)" @onchange="e => Toggle(s.SessionId, e.Value is true)" />
+                            <span class="wkt-when">@Cap(s.Start.ToString("ddd", Pl)) @s.Start.ToString("HH:mm")</span>
+                            <span class="min-w-0"><b>@s.ClientName</b><small>@s.TypeName · @s.Minutes min@(s.Skip is not null ? $" · {s.Skip}" : "")</small></span>
+                        </label>
+                    </li>
+                }
+            </ul>
+
+            <div class="wkt-row">
+                <label class="wkt-label" for="wkt-weeks">Na ile kolejnych tygodni</label>
+                <select id="wkt-weeks" class="form-select form-select-sm wkt-weeks" value="@_weeks" @onchange="WeeksChangedAsync">
+                    @for (var i = 1; i <= 12; i++)
+                    {
+                        <option value="@i">@i @AssistantTipsService.Plural(i, "tydzień", "tygodnie", "tygodni")</option>
+                    }
+                </select>
+            </div>
+            <label class="form-check small mb-0">
+                <input type="checkbox" class="form-check-input" @bind="_notify" />
+                <span class="form-check-label">Wyślij klientom potwierdzenia nowych wizyt (bez tego dostaną zwykłe przypomnienie dzień przed)</span>
+            </label>
+
+            <div class="wkt-actions">
+                <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(_busy || _picked.Count == 0)" @onclick="PreviewAsync"><i class="bi bi-eye me-1"></i>Pokaż podgląd</button>
+                @if (_preview is not null)
+                {
+                    <button type="button" class="btn btn-sm btn-primary" disabled="@(_busy || OkCount == 0)" @onclick="ApplyAsync">
+                        @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-copy me-1"></i> }
+                        Skopiuj @OkCount @AssistantTipsService.Plural(OkCount, "wizytę", "wizyty", "wizyt")
+                    </button>
+                }
+            </div>
+        }
+    </section>
+
+    @if (_result is { } r)
+    {
+        <div class="alert alert-success small mb-0">
+            <i class="bi bi-check-circle me-1"></i>Dodano @r.Created @AssistantTipsService.Plural(r.Created, "wizytę", "wizyty", "wizyt")@(r.Skipped > 0 ? $", pominięto {r.Skipped} (zajęte albo już były)" : "").
+            <a href="/calendar" class="ms-1">Zobacz kalendarz</a>
+            @foreach (var e in r.Errors) { <div class="text-danger mt-1">@e</div> }
+        </div>
+    }
+
+    @if (_preview is { } p && _result is null)
+    {
+        <section class="wkt-card">
+            @{ var conflicts = p.Count(t => t.State == WeekTemplateService.TargetState.Conflict); var existing = p.Count(t => t.State == WeekTemplateService.TargetState.Exists); }
+            <div class="wkt-sum">
+                <span class="ok"><i class="bi bi-check-circle"></i>@OkCount wolnych</span>
+                @if (conflicts != 0) { <span class="warn"><i class="bi bi-exclamation-circle"></i>@conflicts zajętych</span> }
+                @if (existing != 0) { <span><i class="bi bi-dash-circle"></i>@existing już jest</span> }
+            </div>
+            <ul class="wkt-preview">
+                @foreach (var group in p.GroupBy(t => WeekOf(t.Start)).OrderBy(g => g.Key))
+                {
+                    <li class="wkt-pweek">Tydzień od @group.Key.ToString("d MMM", Pl)</li>
+                    @foreach (var t in group.OrderBy(t => t.Start))
+                    {
+                        var s = _sources.First(x => x.SessionId == t.SessionId);
+                        <li class="wkt-prow st-@t.State.ToString().ToLowerInvariant()">
+                            <span class="wkt-when">@Cap(t.Start.ToString("ddd d.MM", Pl)) @t.Start.ToString("HH:mm")</span>
+                            <span class="min-w-0">@s.ClientName</span>
+                            <span class="wkt-state">@(t.State == WeekTemplateService.TargetState.Ok ? "wolne" : t.Note)</span>
+                        </li>
+                    }
+                }
+            </ul>
+        </section>
+    }
+</div>
+
+@code {
+    private static readonly CultureInfo Pl = CultureInfo.GetCultureInfo("pl-PL");
+    private DateOnly _week;
+    private int _weeks = 4;
+    private bool _loading = true, _busy, _notify;
+    private string _userId = "";
+    private List<WeekTemplateService.Source> _sources = [];
+    private readonly HashSet<int> _picked = [];
+    private List<WeekTemplateService.Target>? _preview;
+    private WeekTemplateService.Outcome? _result;
+
+    private int OkCount => _preview?.Count(t => t.State == WeekTemplateService.TargetState.Ok) ?? 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        _userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        _week = WeekOf(Clock.LocalNow);
+        await LoadAsync();
+    }
+
+    private static DateOnly WeekOf(DateTime d) => PTScheduler.Application.Scheduling.TrainerNudges.WeekStart(DateOnly.FromDateTime(d));
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _preview = null; _result = null;
+        try { _sources = await Template.SourcesAsync(_userId, _week); } catch { _sources = []; }
+        _picked.Clear();
+        foreach (var s in _sources.Where(s => s.Skip is null)) _picked.Add(s.SessionId);
+        _loading = false;
+    }
+
+    private async Task ShiftAsync(int days) { _week = _week.AddDays(days); await LoadAsync(); }
+
+    private void Toggle(int id, bool on) { if (on) _picked.Add(id); else _picked.Remove(id); _preview = null; }
+
+    private async Task WeeksChangedAsync(ChangeEventArgs e)
+    {
+        _weeks = int.TryParse(e.Value?.ToString(), out var w) ? Math.Clamp(w, 1, 12) : 4;
+        if (_preview is not null) await PreviewAsync();
+    }
+
+    private List<WeekTemplateService.Source> Picked() => _sources.Where(s => _picked.Contains(s.SessionId) && s.Skip is null).ToList();
+
+    private async Task PreviewAsync()
+    {
+        _busy = true; _result = null;
+        try { _preview = await Template.PreviewAsync(_userId, Picked(), _weeks); }
+        finally { _busy = false; }
+    }
+
+    private async Task ApplyAsync()
+    {
+        _busy = true;
+        try { _result = await Template.ApplyAsync(_userId, Picked(), _weeks, _notify); _preview = null; }
+        finally { _busy = false; }
+    }
+
+    private static string Cap(string s) => s.Length == 0 ? s : char.ToUpper(s[0]) + s[1..];
+}

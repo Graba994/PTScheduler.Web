@@ -1,0 +1,195 @@
+@inject InstagramService Ig
+
+@* Przegląd: najważniejsze liczby, co zrobić teraz, najbliższe posty i najlepszy post — bez szczegółów. *@
+
+@if (_o is null)
+{
+    <div class="text-muted small py-4 text-center"><span class="spinner-border spinner-border-sm me-2"></span>Wczytuję…</div>
+}
+else if (_o.Account is null)
+{
+    <div class="pp-hero pp-tone-info">
+        <div class="pp-hero-icon"><i class="bi bi-instagram"></i></div>
+        <div class="pp-hero-body">
+            <div class="pp-hero-title">Podłącz kanały marki</div>
+            <div class="pp-hero-text">
+                Instagram, Facebook i Threads przez API, a TikTok, YouTube, LinkedIn, X i Pinterest jako kanały ręczne z przypomnieniem.
+                Portal publikuje w terminie, zbiera statystyki i komentarze. Prowadzimy krok po kroku — posty możesz przygotowywać już teraz.
+            </div>
+        </div>
+        <div class="pp-hero-actions">
+            <button class="btn btn-primary btn-sm" @onclick='() => Go.InvokeAsync(("polaczenie", null))'><i class="bi bi-plug me-1"></i>Podłącz</button>
+            <button class="btn btn-outline-secondary btn-sm" @onclick='() => Go.InvokeAsync(("pomysly", null))'><i class="bi bi-lightbulb me-1"></i>Pomysły na posty</button>
+        </div>
+    </div>
+    <ExplainCard />
+}
+else
+{
+    var a = _o.Account;
+    <div class="ig-profile">
+        @if (!string.IsNullOrEmpty(a.PictureUrl))
+        {
+            <img src="@a.PictureUrl" alt="" class="ig-avatar" referrerpolicy="no-referrer" />
+        }
+        else
+        {
+            <span class="ig-avatar ig-avatar-empty"><i class="bi bi-instagram"></i></span>
+        }
+        <div class="min-w-0">
+            <div class="ig-profile-name">@(a.Name ?? a.Username)</div>
+            <div class="text-muted small">@@@a.Username · @a.MediaCount postów · @a.Follows obserwowanych</div>
+        </div>
+        <div class="ms-auto d-flex gap-2 align-items-center flex-wrap">
+            <span class="small text-muted">@(a.LastSyncAt is { } s ? $"Odświeżone {Ago(s)}" : "Jeszcze nie odświeżone")</span>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="SyncAsync" disabled="@_busy"><i class="bi bi-arrow-repeat me-1"></i>Odśwież</button>
+        </div>
+    </div>
+
+    <div class="pp-stats">
+        <StatTile Label="Obserwujący" Value="@a.Followers.ToString("N0")" Icon="bi-people" Tone="info"
+                  Meta="@(_o.FollowersDelta7 == 0 ? "bez zmian w 7 dni" : $"{_o.FollowersDelta7:+#;-#} w 7 dni")" />
+        <StatTile Label="Zasięg 7 dni" Value="@(_o.Reach7?.ToString("N0") ?? "—")" Icon="bi-broadcast" Tone="ok" Meta="@Change(_o.Reach7, _o.Reach7Prev)" />
+        <StatTile Label="Wyświetlenia 7 dni" Value="@(_o.Views7?.ToString("N0") ?? "—")" Icon="bi-eye" Tone="info" Meta="ile razy pokazano treści" />
+        <StatTile Label="Zaangażowanie" Value="@(_o.Engagement30 is { } e ? $"{e:0.0}%" : "—")" Icon="bi-heart" Tone="warn" Meta="średnio na post, 30 dni" />
+    </div>
+
+    <div class="ig-grid">
+        <div>
+            <PanelCard Title="Co teraz" Icon="bi-check2-square" Subtitle="Najważniejsze rzeczy na dziś">
+                @if (_o.Tips.Count == 0)
+                {
+                    <div class="text-muted small"><i class="bi bi-emoji-smile me-1"></i>Wszystko pod kontrolą — plan jest pełny, komentarze obsłużone.</div>
+                }
+                else
+                {
+                    <ul class="ig-tips">
+                        @foreach (var t in _o.Tips)
+                        {
+                            var tip = t;
+                            <li class="pp-tone-@tip.Tone">
+                                <i class="bi @tip.Icon"></i>
+                                <span>@tip.Text</span>
+                                @if (tip.Tab is not null)
+                                {
+                                    <button class="btn btn-link btn-sm p-0 ms-auto" @onclick='() => Go.InvokeAsync((tip.Tab!, null))'>Przejdź</button>
+                                }
+                            </li>
+                        }
+                    </ul>
+                }
+            </PanelCard>
+
+            <PanelCard Title="Najbliższe posty" Icon="bi-calendar-week">
+                <Actions><button class="btn btn-outline-secondary btn-sm" @onclick='() => Go.InvokeAsync(("plan", null))'>Cały plan</button></Actions>
+                <ChildContent>
+                    @if (_o.Next.Count == 0)
+                    {
+                        <div class="pp-empty py-3">
+                            <i class="bi bi-calendar-plus"></i>
+                            <div class="pp-empty-title">Plan jest pusty</div>
+                            <p>Wymyśl kilka postów z AI albo włącz autopilota — przygotuje tydzień publikacji.</p>
+                            <button class="btn btn-primary btn-sm" @onclick='() => Go.InvokeAsync(("pomysly", null))'><i class="bi bi-lightbulb me-1"></i>Pomysły</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="ig-next">
+                            @foreach (var p in _o.Next)
+                            {
+                                var post = p;
+                                <button type="button" class="ig-next-item" @onclick='() => Go.InvokeAsync(("plan", post.Id))'>
+                                    <IgThumb Post="post" />
+                                    <span class="ig-next-when">@IgUi.When(post.ScheduledAt)</span>
+                                    <span class="ig-next-title">@(string.IsNullOrWhiteSpace(post.Title) ? "Bez tytułu" : post.Title)</span>
+                                    <span class="pp-chip pp-tone-@InstagramRules.StatusTone(post.Status)">@InstagramRules.StatusLabel(post.Status)</span>
+                                </button>
+                            }
+                        </div>
+                    }
+                </ChildContent>
+            </PanelCard>
+        </div>
+
+        <div>
+            <PanelCard Title="Autopilot" Icon="bi-robot" IconClass="@(_o.AutopilotMode == "off" ? "" : "pp-tone-ok")">
+                <div class="small">
+                    @(_o.AutopilotMode switch
+                    {
+                        "auto" => "Publikuje sam: co rano uzupełnia plan na tydzień i publikuje w ustalone dni.",
+                        "drafts" => "Przygotowuje posty na tydzień — czekają na Twoją akceptację.",
+                        _ => "Wyłączony. Posty przygotowujesz i planujesz samodzielnie."
+                    })
+                </div>
+                <div class="d-flex gap-2 mt-2 flex-wrap">
+                    @if (_o.ToApprove > 0)
+                    {
+                        <button class="btn btn-warning btn-sm" @onclick='() => Go.InvokeAsync(("plan", null))'><i class="bi bi-hourglass-split me-1"></i>Do akceptacji: @_o.ToApprove</button>
+                    }
+                    <button class="btn btn-outline-secondary btn-sm" @onclick='() => Go.InvokeAsync(("autopilot", null))'>Ustawienia</button>
+                </div>
+            </PanelCard>
+
+            <PanelCard Title="Najlepszy post (30 dni)" Icon="bi-trophy" IconClass="pp-tone-warn">
+                @if (_o.Best is { } b)
+                {
+                    <a class="ig-best" href="@b.Permalink" target="_blank" rel="noopener">
+                        @if (!string.IsNullOrEmpty(b.ThumbnailUrl))
+                        {
+                            <img src="@b.ThumbnailUrl" alt="" referrerpolicy="no-referrer" />
+                        }
+                        <span class="ig-best-text">
+                            <span class="ig-best-cap">@InstagramGraphics.Clean(b.Caption, 90)</span>
+                            <span class="ig-best-nums">
+                                <span title="Zasięg"><i class="bi bi-broadcast"></i>@(b.Reach?.ToString("N0") ?? "—")</span>
+                                <span title="Polubienia"><i class="bi bi-heart"></i>@b.Likes</span>
+                                <span title="Komentarze"><i class="bi bi-chat"></i>@b.Comments</span>
+                                <span title="Zapisania"><i class="bi bi-bookmark"></i>@(b.Saved?.ToString() ?? "—")</span>
+                            </span>
+                        </span>
+                    </a>
+                }
+                else
+                {
+                    <div class="text-muted small">Pojawi się po pierwszych publikacjach.</div>
+                }
+            </PanelCard>
+
+            <PanelCard Title="Szybkie akcje" Icon="bi-lightning">
+                <div class="d-grid gap-2">
+                    <button class="btn btn-outline-primary btn-sm text-start" @onclick='() => Go.InvokeAsync(("pomysly", null))'><i class="bi bi-stars me-2"></i>Wymyśl posty z AI</button>
+                    <button class="btn btn-outline-primary btn-sm text-start" @onclick='() => Go.InvokeAsync(("komentarze", null))'><i class="bi bi-chat-dots me-2"></i>Odpowiedz na komentarze@(_o.OpenComments > 0 ? $" ({_o.OpenComments})" : "")</button>
+                    <button class="btn btn-outline-primary btn-sm text-start" @onclick='() => Go.InvokeAsync(("statystyki", null))'><i class="bi bi-graph-up me-2"></i>Co działa najlepiej</button>
+                </div>
+            </PanelCard>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public EventCallback<(string, int?)> Go { get; set; }
+    [Parameter] public EventCallback<(bool, string)> Flash { get; set; }
+
+    private InstagramService.Overview? _o;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync() => _o = await Ig.OverviewAsync();
+
+    private async Task SyncAsync()
+    {
+        _busy = true;
+        var (ok, msg) = await Ig.SyncAsync();
+        _o = await Ig.OverviewAsync();
+        _busy = false;
+        await Flash.InvokeAsync((ok, msg));
+    }
+
+    private static string? Change(int? now, int? prev) =>
+        now is null ? "po pierwszej dobie danych" : prev is null or 0 ? "poprzedni tydzień: brak danych" : $"{(now.Value - prev.Value) * 100.0 / prev.Value:+0;-0}% do poprzedniego tygodnia";
+
+    private static string Ago(DateTime utc)
+    {
+        var d = DateTime.UtcNow - utc;
+        return d.TotalMinutes < 2 ? "przed chwilą" : d.TotalHours < 1 ? $"{(int)d.TotalMinutes} min temu" : d.TotalDays < 1 ? $"{(int)d.TotalHours} godz. temu" : $"{(int)d.TotalDays} dni temu";
+    }
+}

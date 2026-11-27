@@ -1,0 +1,181 @@
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Progress
+@using PTScheduler.Domain.Rules
+@inject PTScheduler.Application.Interfaces.IClientProgressService ProgressService
+@inject PTScheduler.Application.Interfaces.IModuleSettingsService ModuleSettings
+@inject PTScheduler.Web.Services.PlatformAssistantService Assistant
+
+@* Postępy klienta: liczby z dziennika treningów i pomiarów (reguły), krótkie podsumowanie (AI albo tekst podstawowy)
+   i — u trenera — odstępstwa od planu z konkretną propozycją. U klienta karta „Twoje postępy” pod marką trenera. *@
+@if (_progress is null)
+{
+    if (ForTrainer)
+    {
+        <section class="prg-card"><div class="text-muted small"><span class="spinner-border spinner-border-sm me-2"></span>Liczę postępy…</div></section>
+    }
+}
+else if (!_progress.HasData)
+{
+    if (ForTrainer)
+    {
+        <section class="prg-card">
+            <h6 class="prg-title"><i class="bi bi-graph-up-arrow"></i>Postępy i wnioski</h6>
+            <p class="text-muted small mb-0">Za mało danych. Podsumowanie pojawi się po 3 treningach albo po zapisaniu ćwiczeń z dwóch dni.</p>
+        </section>
+    }
+}
+else
+{
+    var p = _progress;
+    <section class="@(ForTrainer ? "prg-card" : "cdx-card prg-client")">
+        <div class="prg-head">
+            <h6 class="prg-title"><i class="bi bi-graph-up-arrow"></i>@(ForTrainer ? "Postępy i wnioski" : "Twoje postępy")</h6>
+            @if (p.Since is { } since)
+            {
+                <span class="prg-since">od @since.ToString("d MMMM yyyy", Pl)</span>
+            }
+        </div>
+
+        <div class="prg-summary @(ForTrainer && _mascot is not null ? "with-mascot" : "") @(ForTrainer ? "" : "prg-praise")">
+            @if (ForTrainer && _mascot is not null)
+            {
+                <img src="@_mascot" alt="" width="40" height="40" />
+            }
+            else if (!ForTrainer)
+            {
+                <span class="prg-praise-ic" aria-hidden="true"><i class="bi bi-stars"></i></span>
+            }
+            <p class="mb-0">
+                @if (ForTrainer && _mascotName is not null)
+                {
+                    <b class="prg-who">@_mascotName</b>
+                }
+                @_text
+            </p>
+        </div>
+
+        <div class="prg-tiles">
+            <div><b>@(p.CompletedSessions > 0 ? p.CompletedSessions : p.WorkoutDays)</b><span>@(p.CompletedSessions > 0 ? ProgressSummaryText.Plural(p.CompletedSessions, "trening", "treningi", "treningów") : "dni z zapisem")</span></div>
+            @if (p.TotalMinutes >= 60)
+            {
+                <div><b>@ProgressSummaryText.Hours(p.TotalMinutes).Split(' ')[0] h</b><span>łącznie na treningach</span></div>
+            }
+            @if (p.WeekStreak >= 2)
+            {
+                <div><b>@p.WeekStreak</b><span>@ProgressSummaryText.Plural(p.WeekStreak, "tydzień", "tygodnie", "tygodni") z rzędu</span></div>
+            }
+            @if (p.WeightFromKg is { } wf && p.WeightToKg is { } wt)
+            {
+                <div><b>@Signed(wt - wf) kg</b><span>masa ciała</span></div>
+            }
+            @if (p.WaistFromCm is { } af && p.WaistToCm is { } at)
+            {
+                <div><b>@Signed(at - af) cm</b><span>talia</span></div>
+            }
+            @if (p.Attended30 + p.Missed30 > 0)
+            {
+                <div><b>@(100 * p.Attended30 / (p.Attended30 + p.Missed30))%</b><span>obecność (30 dni)</span></div>
+            }
+        </div>
+
+        @if (p.Strength.Count > 0)
+        {
+            <ul class="prg-strength">
+                @foreach (var s in p.Strength)
+                {
+                    <li>
+                        <span class="prg-ex">@s.Exercise</span>
+                        <span class="prg-kg">@N(s.FromKg) → @N(s.ToKg) kg</span>
+                        <span class="prg-up"><i class="bi bi-arrow-up-short"></i>@N(s.DeltaKg) kg</span>
+                    </li>
+                }
+            </ul>
+        }
+
+        @if (ForTrainer && p.Insights.Count > 0)
+        {
+            <div class="prg-insights" id="plan-wnioski">
+                <div class="prg-insights-title"><i class="bi bi-lightbulb"></i>Na podstawie ostatnich treningów</div>
+                @foreach (var i in p.Insights)
+                {
+                    <div class="prg-insight">
+                        <div class="prg-insight-top">
+                            <span class="prg-ex">@i.Exercise</span>
+                            <span class="prg-tag @TagClass(i.Kind)">@TagLabel(i.Kind)</span>
+                        </div>
+                        <div class="small text-muted">Plan: @i.Planned · ostatnio: @i.LastDone</div>
+                        <div class="small">@i.Finding</div>
+                        <div class="prg-rec"><i class="bi bi-arrow-return-right"></i>@i.Recommendation</div>
+                    </div>
+                }
+                <a class="btn btn-sm btn-outline-primary mt-1" href="@($"/plans/edit/{p.Insights[0].PlanId}")"><i class="bi bi-pencil me-1"></i>Popraw plan</a>
+            </div>
+        }
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public int ClientId { get; set; }
+    /// <summary>True = profil klienta u trenera (wnioski, głos asystenta); false = pulpit klienta.</summary>
+    [Parameter] public bool ForTrainer { get; set; }
+
+    private static readonly System.Globalization.CultureInfo Pl = System.Globalization.CultureInfo.GetCultureInfo("pl-PL");
+    private ClientProgressDto? _progress;
+    private string? _text;
+    private string? _mascot;
+    private string? _mascotName;
+    private int _loadedFor = -1;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == ClientId) return;
+        _loadedFor = ClientId;
+        _progress = null;
+        if (!ForTrainer && !(await ModuleSettings.GetAsync()).ClientProgressSummariesEnabled)
+        {
+            _progress = new ClientProgressDto(); // HasData = false → karta się nie pokazuje
+            return;
+        }
+        try
+        {
+            _progress = await ProgressService.GetAsync(ClientId);
+        }
+        catch
+        {
+            _progress = new ClientProgressDto();
+            return;
+        }
+        if (!_progress.HasData) return;
+
+        var summary = ForTrainer ? ProgressSummaryText.ForTrainer(_progress) : ProgressSummaryText.ForClient(_progress);
+        _text = summary.Fallback;
+        var config = await Assistant.GetConfigAsync();
+        if (ForTrainer && config is { Enabled: true })
+        {
+            _mascot = config.Icons.TryGetValue(_progress.Insights.Count > 0 ? "think" : "happy", out var icon) ? icon : null;
+            _mascotName = config.Name;
+        }
+        if (config is { Ai: true })
+        {
+            StateHasChanged();
+            var key = $"progress-{(ForTrainer ? "t" : "c")}-{ClientId}";
+            _text = await Assistant.PhraseAsync(key, ForTrainer ? "podsumowanie_trenera" : "podsumowanie_klienta",
+                summary.Facts, summary.Fallback, ai: true, audience: ForTrainer ? "trener" : "klient");
+        }
+    }
+
+    private static string N(decimal v) => v.ToString("0.##", Pl);
+    private static string Signed(decimal v) => (v > 0 ? "+" : v < 0 ? "−" : "") + N(Math.Abs(v));
+
+    private static string TagLabel(InsightKind kind) => kind switch
+    {
+        InsightKind.LastSetDrop => "spada ostatnia seria",
+        InsightKind.BelowRange => "za ciężko",
+        InsightKind.FewerSets => "mniej serii",
+        InsightKind.BelowTarget => "poniżej celu",
+        InsightKind.Stagnation => "stagnacja",
+        _ => ""
+    };
+
+    private static string TagClass(InsightKind kind) => kind is InsightKind.Stagnation or InsightKind.BelowTarget or InsightKind.BelowRange ? "warn" : "info";
+}

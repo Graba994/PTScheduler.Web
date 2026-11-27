@@ -1,0 +1,99 @@
+@using PTScheduler.Portal.Services.Social
+@inject VideoChannelService Video
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+@* TikTok i YouTube przez API (OAuth). Do audytu TikToka i weryfikacji projektu Google filmy wychodzą prywatnie —
+   prywatność ustawiasz tutaj; kanały ręczne mogą działać obok. *@
+
+<PanelCard Title="TikTok i YouTube przez API" Icon="bi-camera-reels" Subtitle="Automatyczna publikacja filmów — po zatwierdzeniu aplikacji przez platformy">
+    <div class="row g-3">
+        <div class="col-lg-6">
+            <div class="fw-semibold mb-1"><i class="bi bi-tiktok me-1"></i>TikTok</div>
+            <ol class="ig-steps small">
+                <li>Na <b>developers.tiktok.com</b> utwórz aplikację, dodaj <i>Login Kit</i> i <i>Content Posting API</i> (z „Direct Post”), uprawnienia: <code class="sc-scopes">@string.Join(", ", TikTokClient.Scopes)</code>.</li>
+                <li>Jako adres przekierowania wpisz: <code>@Video.RedirectUri(SocialPlatform.TikTok)</code> <button class="btn btn-link btn-sm p-0" @onclick="() => CopyAsync(Video.RedirectUri(SocialPlatform.TikTok))" aria-label="Kopiuj adres"><i class="bi bi-copy"></i></button></li>
+                <li>Do audytu TikTok publikuje <b>tylko prywatnie</b> (widoczne dla Ciebie) — potem zmień prywatność niżej.</li>
+            </ol>
+            <div class="row g-2">
+                <div class="col-6"><input class="form-control form-control-sm" @bind="_ttKey" placeholder="Client key" aria-label="Client key TikTok" /></div>
+                <div class="col-6"><input type="password" class="form-control form-control-sm" @bind="_ttSecret" placeholder="@(_keys?.TikTokSecret == true ? "Secret zapisany" : "Client secret")" aria-label="Client secret TikTok" autocomplete="new-password" /></div>
+            </div>
+            <div class="d-flex gap-2 mt-2 flex-wrap">
+                <button class="btn btn-outline-primary btn-sm" @onclick="() => SaveKeysAsync(SocialPlatform.TikTok)">Zapisz klucze</button>
+                <button class="btn btn-primary btn-sm" @onclick="() => ConnectAsync(SocialPlatform.TikTok)"><i class="bi bi-tiktok me-1"></i>Połącz TikTok</button>
+            </div>
+            <label class="form-label small fw-semibold mt-2" for="tt-priv">Prywatność filmów</label>
+            <select id="tt-priv" class="form-select form-select-sm" @bind="_ttPrivacy" @bind:after="SavePrivacyAsync">
+                <option value="SELF_ONLY">Tylko ja (przed audytem)</option>
+                <option value="MUTUAL_FOLLOW_FRIENDS">Znajomi</option>
+                <option value="FOLLOWER_OF_CREATOR">Obserwujący</option>
+                <option value="PUBLIC_TO_EVERYONE">Wszyscy (po audycie)</option>
+            </select>
+        </div>
+        <div class="col-lg-6">
+            <div class="fw-semibold mb-1"><i class="bi bi-youtube me-1"></i>YouTube Shorts</div>
+            <ol class="ig-steps small">
+                <li>W <b>Google Cloud Console</b> włącz <i>YouTube Data API v3</i>, ustaw ekran zgody OAuth (dodaj siebie jako testera) i utwórz <i>Identyfikator klienta OAuth</i> (aplikacja internetowa).</li>
+                <li>Autoryzowany URI przekierowania: <code>@Video.RedirectUri(SocialPlatform.YouTube)</code> <button class="btn btn-link btn-sm p-0" @onclick="() => CopyAsync(Video.RedirectUri(SocialPlatform.YouTube))" aria-label="Kopiuj adres"><i class="bi bi-copy"></i></button></li>
+                <li>Projekt bez weryfikacji (audytu) Google wrzuca filmy jako <b>prywatne</b> — potem zmień prywatność niżej.</li>
+            </ol>
+            <div class="row g-2">
+                <div class="col-6"><input class="form-control form-control-sm" @bind="_ytId" placeholder="Client ID" aria-label="Client ID Google" /></div>
+                <div class="col-6"><input type="password" class="form-control form-control-sm" @bind="_ytSecret" placeholder="@(_keys?.GoogleSecret == true ? "Secret zapisany" : "Client secret")" aria-label="Client secret Google" autocomplete="new-password" /></div>
+            </div>
+            <div class="d-flex gap-2 mt-2 flex-wrap">
+                <button class="btn btn-outline-primary btn-sm" @onclick="() => SaveKeysAsync(SocialPlatform.YouTube)">Zapisz klucze</button>
+                <button class="btn btn-primary btn-sm" @onclick="() => ConnectAsync(SocialPlatform.YouTube)"><i class="bi bi-youtube me-1"></i>Połącz YouTube</button>
+            </div>
+            <label class="form-label small fw-semibold mt-2" for="yt-priv">Prywatność filmów</label>
+            <select id="yt-priv" class="form-select form-select-sm" @bind="_ytPrivacy" @bind:after="SavePrivacyAsync">
+                <option value="private">Prywatny (przed weryfikacją)</option>
+                <option value="unlisted">Niepubliczny (z linkiem)</option>
+                <option value="public">Publiczny</option>
+            </select>
+        </div>
+    </div>
+    <div class="small text-muted mt-2">Połączone kanały pojawią się na liście wyżej jako „przez API”. Kanał ręczny (paczka + przypomnienie) może zostać obok — wybierasz go przy poście.</div>
+</PanelCard>
+
+@code {
+    [Parameter] public EventCallback<(bool, string)> Flash { get; set; }
+
+    private VideoChannelService.Keys? _keys;
+    private string _ttKey = "", _ttSecret = "", _ytId = "", _ytSecret = "", _ttPrivacy = "SELF_ONLY", _ytPrivacy = "private";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _keys = await Video.KeysAsync();
+        (_ttKey, _ytId, _ttPrivacy, _ytPrivacy) = (_keys.TikTokKey, _keys.GoogleId, _keys.TikTokPrivacyLevel, _keys.YouTubePrivacyLevel);
+    }
+
+    private async Task SaveKeysAsync(SocialPlatform p)
+    {
+        if (p == SocialPlatform.TikTok) { await Video.SaveKeysAsync(p, _ttKey, _ttSecret); _ttSecret = ""; }
+        else { await Video.SaveKeysAsync(p, _ytId, _ytSecret); _ytSecret = ""; }
+        _keys = await Video.KeysAsync();
+        await Flash.InvokeAsync((true, "Zapisano klucze (sekret zaszyfrowany)."));
+    }
+
+    private async Task ConnectAsync(SocialPlatform p)
+    {
+        if ((p == SocialPlatform.TikTok ? _ttSecret : _ytSecret).Length > 0) await SaveKeysAsync(p);
+        var (url, error) = await Video.AuthorizeUrlAsync(p);
+        if (url is null) { await Flash.InvokeAsync((false, error ?? "Nie można rozpocząć logowania.")); return; }
+        Nav.NavigateTo(url, forceLoad: true);
+    }
+
+    private async Task SavePrivacyAsync()
+    {
+        await Video.SavePrivacyAsync(_ttPrivacy, _ytPrivacy);
+        await Flash.InvokeAsync((true, "Zapisano prywatność filmów."));
+    }
+
+    private async Task CopyAsync(string text)
+    {
+        try { await JS.InvokeAsync<bool>("ptCopy", text); await Flash.InvokeAsync((true, "Skopiowano.")); }
+        catch (JSException) { await Flash.InvokeAsync((false, "Nie udało się skopiować — zaznacz tekst ręcznie.")); }
+    }
+}

@@ -1,0 +1,143 @@
+using Microsoft.EntityFrameworkCore;
+using PTScheduler.Application.Interfaces;
+using PTScheduler.Infrastructure.Data;
+using PTScheduler.Web.Components.Layout;
+using Perms = PTScheduler.Domain.Constants.Permissions;
+
+namespace PTScheduler.Web.Services;
+
+/// <summary>Krok samouczka „Pierwsze kroki”.</summary>
+public sealed record SetupStep(string Title, string Hint, string Href, string Icon, bool Done);
+
+/// <summary>Stan opcji ustawień: tekst na kafelku i ton (ok — skonfigurowane, warn — do zrobienia, muted — opcjonalne).</summary>
+public readonly record struct SetupStatus(string? Text, string Tone)
+{
+    public bool IsConfigured => Tone == "ok";
+}
+
+public sealed class SetupState
+{
+    public List<SetupStep> Steps { get; init; } = [];
+    public Dictionary<string, SetupStatus> Status { get; init; } = [];
+    public int DoneCount => Steps.Count(s => s.Done);
+    public bool AllDone => Steps.All(s => s.Done);
+
+    /// <summary>Krok, którego dotyczy ta strona (np. /admin/branding → „Dodaj logo i kolory”).</summary>
+    public SetupStep? StepFor(string path) =>
+        Steps.FirstOrDefault(s => path.StartsWith(s.Href.TrimStart('/'), StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Następny niezrobiony krok (pomijając bieżący).</summary>
+    public SetupStep? NextAfter(SetupStep? current) =>
+        Steps.FirstOrDefault(s => !s.Done && s != current);
+
+    public SetupStatus StatusOf(AdminMenuItem item) =>
+        item.StatusKey is not null ? Status.GetValueOrDefault(item.StatusKey) : default;
+}
+
+/// <summary>
+/// Liczy „Pierwsze kroki” i stan opcji ustawień — jedno źródło dla strony „Zarządzanie”, Pulpitu,
+/// ekranu Dziś i paska samouczka na podstronach (jedna lista, jeden licznik).
+/// </summary>
+public sealed class SetupGuide(
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    IPaymentSettingsService paymentSettings,
+    EntitlementService entitlements,
+    ILogger<SetupGuide> logger)
+{
+    public async Task<SetupState> GetAsync(string userId, AdminAccess access)
+    {
+        try
+        {
+            await using var db = dbFactory.CreateDbContext();
+            var windows = await db.TrainerAvailabilities.AsNoTracking()
+                .Where(a => a.TrainerUserId == userId && a.IsActive && a.DayOfWeek != null)
+                .Select(a => new { a.StartTime, a.EndTime }).ToListAsync();
+            var weeklyHours = windows.Sum(w => (w.EndTime - w.StartTime).TotalHours);
+            var sessionTypes = await db.SessionTypes.CountAsync(t => t.IsActive);
+            var packages = await db.PackageOffers.CountAsync(p => p.IsActive);
+            var memberships = await db.MembershipPlans.CountAsync();
+            var coupons = await db.Coupons.CountAsync(c => c.IsActive);
+            var courses = await db.Courses.CountAsync();
+            var users = await db.Users.CountAsync();
+            var clients = await db.Clients.CountAsync();
+            var trainers = await (from ur in db.UserRoles
+                                  join r in db.Roles on ur.RoleId equals r.Id
+                                  where r.Name == Domain.Constants.Roles.Trainer
+                                  select ur.UserId).CountAsync();
+            var hasLogo = await db.AppBrandings.AnyAsync(b => b.LogoPath != null && b.LogoPath != "");
+            // „Klienci płacą na miejscu” wybrane w /witaj — krok płatności jest wtedy załatwiony bez bramki.
+            var payOffline = Infrastructure.Services.SetupService.HasDecision(
+                await db.AppBrandings.AsNoTracking().Select(b => b.OnboardingJson).FirstOrDefaultAsync(), "payments-offline");
+            var paymentsEnabled = false;
+            try { paymentsEnabled = (await paymentSettings.GetAsync()).Enabled; }
+            catch (Exception ex) { logger.LogWarning(ex, "Nie udało się wczytać ustawień płatności."); }
+
+            static SetupStatus Count(int n, string one, string few, string many, string empty = "Brak", string emptyTone = "warn") =>
+                n == 0 ? new(empty, emptyTone) : new($"{n} {Pl(n, one, few, many)}", "ok");
+
+            var status = new Dictionary<string, SetupStatus>
+            {
+                ["availability"] = weeklyHours > 0 ? new($"{weeklyHours:0.#} h w tygodniu", "ok") : new("Do ustawienia", "warn"),
+                ["sessionTypes"] = Count(sessionTypes, "rodzaj", "rodzaje", "rodzajów", "Do ustawienia"),
+                ["packages"] = Count(packages, "pakiet", "pakiety", "pakietów"),
+                ["memberships"] = Count(memberships, "karnet", "karnety", "karnetów", emptyTone: "muted"),
+                ["payments"] = paymentsEnabled ? new("Włączone", "ok") : new("Wyłączone", "muted"),
+                ["coupons"] = Count(coupons, "aktywny", "aktywne", "aktywnych", emptyTone: "muted"),
+                ["courses"] = Count(courses, "kurs", "kursy", "kursów", emptyTone: "muted"),
+                ["branding"] = hasLogo ? new("Logo dodane", "ok") : new("Dodaj logo", "warn"),
+                ["users"] = new($"{users} {Pl(users, "konto", "konta", "kont")}", "muted")
+            };
+
+            // Jedna lista „Pierwsze kroki” — ta sama w Zarządzaniu, na Pulpicie, na ekranie Dziś i na podstronach.
+            // Zalicza też to, co trener zrobił w kreatorze na hantly.pl i w „Pierwszych ustawieniach” (/witaj).
+            // Tylko kroki, które ta osoba może wykonać (asystent bez uprawnień do wyglądu nie dostanie linku do niego).
+            var steps = new List<SetupStep>();
+            if (access.IsOwner)
+            {
+                var iTrain = await (from ur in db.UserRoles
+                                    join r in db.Roles on ur.RoleId equals r.Id
+                                    where ur.UserId == userId && r.Name == Domain.Constants.Roles.Trainer
+                                    select ur.UserId).AnyAsync();
+                if (access.IsAdmin && !iTrain && trainers == 0)
+                    // Samo konto administratora (bez roli trenera) nie przyjmuje zapisów — potrzebny profil trenera.
+                    // Właściciel, który sam trenuje, dostaje rolę trenera na tym samym koncie (pytanie w /witaj).
+                    steps.Add(new("Zdecyduj, kto prowadzi treningi", "Ty — na tym samym koncie, albo osobny trener", "/witaj", "bi-person-badge", false));
+                else
+                {
+                    var hoursSet = iTrain ? weeklyHours > 0
+                        : await db.TrainerAvailabilities.AnyAsync(a => a.IsActive && a.DayOfWeek != null);
+                    steps.Add(new("Ustaw godziny pracy", "Kiedy klienci mogą się zapisać", "/trainer/availability", "bi-clock", hoursSet));
+                }
+                if (access.IsAdmin)
+                    steps.Add(new("Dodaj rodzaj treningu", "Np. trening personalny 60 min", "/admin/session-types", "bi-lightning-charge", sessionTypes > 0));
+                if (access.IsAdmin)
+                    steps.Add(new("Dodaj swoje logo", "Kolor już jest — logo zobaczą klienci w aplikacji i w e-mailach", "/admin/branding", "bi-palette", hasLogo));
+
+                var mine = access.IsAdmin ? db.Clients : db.Clients.Where(c => c.TrainerUserId == userId);
+                var mineIds = mine.Select(c => c.Id);
+                if (access.Can(Perms.ManageClients))
+                    steps.Add(new("Dodaj swoich klientów", "Z Excela, z kontaktów w telefonie albo ręcznie", "/clients", "bi-people", await mine.AnyAsync()));
+                steps.Add(new("Zaplanuj pierwszą wizytę", "Klient dostanie potwierdzenie i przypomnienie", "/calendar?nowa=1", "bi-calendar-plus",
+                    await db.Sessions.AnyAsync(x => mineIds.Contains(x.ClientId))));
+                if (entitlements.IsAllowed("TrainingPlansEnabled"))
+                    steps.Add(new("Przypisz pierwszy plan", "Klient zobaczy go w aplikacji, Ty — na wizycie", "/plans/new", "bi-clipboard-check",
+                        await db.TrainingPlans.AnyAsync(x => x.ClientId != null && mineIds.Contains(x.ClientId!.Value))));
+                steps.Add(new("Włącz powiadomienia na telefonie", "Nowe rezerwacje i wiadomości od razu na ekranie", "/Account/Manage/Notifications", "bi-bell",
+                    await db.PushSubscriptions.AnyAsync(x => x.UserId == userId)));
+                if (access.Can(Perms.ManagePayments) && entitlements.IsAllowed("PaymentsEnabled"))
+                    steps.Add(paymentsEnabled || !payOffline
+                        ? new("Włącz płatności online", "BLIK i karta — pieniądze od razu u Ciebie", "/admin/payments", "bi-credit-card", paymentsEnabled)
+                        : new("Płatności: na miejscu", "Klienci płacą u Ciebie — online włączysz, kiedy zechcesz", "/admin/payments", "bi-credit-card", true));
+            }
+            return new SetupState { Steps = steps, Status = status };
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Nie udało się policzyć stanu ustawień.");
+            return new SetupState();
+        }
+    }
+
+    public static string Pl(int n, string one, string few, string many) =>
+        n == 1 ? one : n % 10 is >= 2 and <= 4 && n % 100 is < 12 or > 14 ? few : many;
+}

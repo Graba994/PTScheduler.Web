@@ -1,0 +1,256 @@
+@page "/panel/administratorzy"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject UserManager<IdentityUser> UserMgr
+@inject AuthenticationStateProvider AuthState
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject SiteSettingsService Settings
+@inject EmailService EmailSvc
+@inject NavigationManager Nav
+@rendermode InteractiveServer
+
+<PageTitle>Administratorzy — Hantly Portal</PageTitle>
+
+<PanelHeader Title="Administratorzy" Icon="bi-people" BackHref="/panel" BackLabel="Pulpit"
+             Subtitle="Osoby z dostępem do panelu Hantly. Każda ma własne konto, hasło i weryfikację dwuetapową — wszyscy mają pełne uprawnienia." />
+
+@if (_message is not null)
+{
+    <div class="alert @(_isError ? "alert-danger" : "alert-success") py-2 small">@_message</div>
+}
+
+@if (_inviteLink is not null)
+{
+    <div class="pp-callout pp-tone-info">
+        <i class="bi bi-link-45deg"></i>
+        <div class="flex-grow-1" style="min-width:0">
+            <div class="fw-semibold mb-1">Link do ustawienia hasła (ważny 24 godziny)</div>
+            <code class="d-block text-break small mb-2">@_inviteLink</code>
+            <span class="small text-muted">@_inviteNote</span>
+        </div>
+        <button class="btn btn-sm btn-outline-secondary" @onclick="() => _inviteLink = null">Zamknij</button>
+    </div>
+}
+
+<div class="row g-3">
+    <div class="col-lg-8">
+        <PanelCard Title="Konta administratorów" Icon="bi-person-lock" IconClass="pp-icon-cyan">
+            <ChildContent>
+                @if (_rows is null)
+                {
+                    <div class="text-center py-4"><div class="spinner-border text-primary"></div></div>
+                }
+                else
+                {
+                    <ul class="adm-list">
+                        @foreach (var r in _rows)
+                        {
+                            var row = r;
+                            <li class="adm-row">
+                                <span class="adm-avatar">@Initial(row.Email)</span>
+                                <div class="adm-main">
+                                    <div class="adm-email">@row.Email @if (row.IsMe) { <span class="pp-chip pp-tone-info">to Ty</span> }</div>
+                                    <div class="adm-meta">
+                                        <span class="pp-chip @(row.TwoFactor ? "pp-tone-ok" : "pp-tone-warn")"><i class="bi @(row.TwoFactor ? "bi-shield-check" : "bi-shield-exclamation")"></i>2FA @(row.TwoFactor ? "włączone" : "wyłączone")</span>
+                                        @if (row.Locked) { <span class="pp-chip pp-tone-danger"><i class="bi bi-lock"></i>zablokowane</span> }
+                                        <span class="text-muted small">@(row.LastLogin is { } l ? $"ostatnio: {l.ToLocalTime():dd.MM.yyyy HH:mm}" : "jeszcze bez logowania")</span>
+                                    </div>
+                                </div>
+                                @if (!row.IsMe)
+                                {
+                                    <div class="dropdown">
+                                        <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="dropdown" aria-label="Akcje: @row.Email"><i class="bi bi-three-dots"></i></button>
+                                        <ul class="dropdown-menu dropdown-menu-end">
+                                            <li><button class="dropdown-item" @onclick="() => SendLinkAsync(row.Id, false)"><i class="bi bi-envelope me-2"></i>Wyślij link do ustawienia hasła</button></li>
+                                            @if (row.TwoFactor)
+                                            {
+                                                <li><button class="dropdown-item" @onclick="() => ResetTwoFactorAsync(row.Id)"><i class="bi bi-phone me-2"></i>Wyłącz 2FA (zgubiony telefon)</button></li>
+                                            }
+                                            @if (row.Locked)
+                                            {
+                                                <li><button class="dropdown-item" @onclick="() => UnlockAsync(row.Id)"><i class="bi bi-unlock me-2"></i>Odblokuj</button></li>
+                                            }
+                                            <li><hr class="dropdown-divider" /></li>
+                                            <li><button class="dropdown-item text-danger" @onclick="() => _confirmDelete = row.Id"><i class="bi bi-trash me-2"></i>Usuń dostęp</button></li>
+                                        </ul>
+                                    </div>
+                                }
+                            </li>
+                            @if (_confirmDelete == row.Id)
+                            {
+                                <li class="adm-confirm">
+                                    <span>Usunąć dostęp dla <b>@row.Email</b>? Ta osoba od razu straci dostęp do panelu i instancji.</span>
+                                    <span class="d-flex gap-2">
+                                        <button class="btn btn-sm btn-danger" @onclick="() => DeleteAsync(row.Id)">Usuń</button>
+                                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmDelete = null">Anuluj</button>
+                                    </span>
+                                </li>
+                            }
+                        }
+                    </ul>
+                }
+            </ChildContent>
+        </PanelCard>
+    </div>
+
+    <div class="col-lg-4 d-flex flex-column gap-3">
+        <PanelCard Title="Zaproś administratora" Icon="bi-person-plus">
+            <label class="form-label small fw-semibold" for="adm-email">E-mail</label>
+            <input id="adm-email" type="email" class="form-control mb-2" placeholder="osoba@hantly.pl" @bind="_newEmail" @bind:event="oninput" />
+            <button class="btn btn-primary w-100" @onclick="InviteAsync" disabled="@(_busy || !ValidEmail(_newEmail))">
+                @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-send me-1"></i> }
+                Wyślij zaproszenie
+            </button>
+            <p class="small text-muted mt-2 mb-0">Wyślemy e-mail z linkiem do ustawienia hasła (ważny 24 godziny). Link pokażemy też tutaj — na wypadek, gdyby e-mail nie doszedł.</p>
+        </PanelCard>
+
+        <PanelCard Title="Zasady" Icon="bi-shield-lock" IconClass="pp-tone-ok">
+            <label class="form-check form-switch mb-1">
+                <input class="form-check-input" type="checkbox" checked="@_require2fa" @onchange="ToggleRequireAsync" disabled="@(!_meHas2fa && !_require2fa)" />
+                <span class="form-check-label fw-semibold">Wymagaj 2FA od wszystkich</span>
+            </label>
+            <p class="small text-muted mb-0">
+                Konta bez weryfikacji dwuetapowej po zalogowaniu trafią najpierw do jej włączenia.
+                @if (!_meHas2fa) { <span class="d-block mt-1">Najpierw włącz ją u siebie w zakładce <a href="/panel/bezpieczenstwo">Bezpieczeństwo</a>.</span> }
+            </p>
+        </PanelCard>
+    </div>
+</div>
+
+<style>
+    .adm-list { list-style: none; margin: 0; padding: 0; }
+    .adm-row { display: flex; align-items: center; gap: .8rem; padding: .7rem 0; }
+    .adm-row + .adm-row, .adm-confirm + .adm-row { border-top: 1px solid var(--line); }
+    .adm-avatar { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; flex-shrink: 0; background: var(--accent-bg); color: var(--accent); font-weight: 700; text-transform: uppercase; }
+    .adm-main { flex: 1; min-width: 0; }
+    .adm-email { font-weight: 600; color: var(--ink); overflow-wrap: anywhere; display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
+    .adm-meta { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; margin-top: .2rem; }
+    .adm-confirm { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; justify-content: space-between; padding: .7rem .8rem; margin-bottom: .4rem; border-radius: 10px; background: var(--danger-bg); border: 1px solid var(--danger-bd); font-size: .88rem; }
+</style>
+
+@code {
+    private sealed record Row(string Id, string Email, bool TwoFactor, bool Locked, DateTime? LastLogin, bool IsMe);
+
+    private List<Row>? _rows;
+    private string? _meId;
+    private bool _meHas2fa;
+    private bool _require2fa;
+    private string _newEmail = "";
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+    private string? _inviteLink;
+    private string? _inviteNote;
+    private string? _confirmDelete;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var principal = (await AuthState.GetAuthenticationStateAsync()).User;
+        _meId = UserMgr.GetUserId(principal);
+        var admins = await UserMgr.GetUsersInRoleAsync("Admin");
+        var emails = admins.Select(a => a.Email ?? "").ToList();
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var last = await db.LoginLogs.AsNoTracking().Where(l => l.Success && emails.Contains(l.Email))
+            .GroupBy(l => l.Email).Select(g => new { Email = g.Key, At = g.Max(x => x.CreatedAt) }).ToListAsync();
+        _rows = admins.OrderBy(a => a.Email)
+            .Select(a => new Row(a.Id, a.Email ?? a.UserName ?? "", a.TwoFactorEnabled, a.LockoutEnd > DateTimeOffset.UtcNow,
+                last.FirstOrDefault(l => string.Equals(l.Email, a.Email, StringComparison.OrdinalIgnoreCase))?.At, a.Id == _meId))
+            .ToList();
+        _meHas2fa = _rows.FirstOrDefault(r => r.IsMe)?.TwoFactor ?? false;
+        _require2fa = await Settings.GetAsync(SiteSettingsService.Keys.RequireAdmin2fa) == "true";
+    }
+
+    private void Show(string message, bool error) { _message = message; _isError = error; }
+    private static bool ValidEmail(string e) => System.Net.Mail.MailAddress.TryCreate(e.Trim(), out var a) && a.Address == e.Trim() && e.Contains('.');
+    private static string Initial(string email) => email.Length > 0 ? email[..1] : "?";
+
+    private async Task InviteAsync()
+    {
+        var email = _newEmail.Trim().ToLowerInvariant();
+        if (!ValidEmail(email)) return;
+        _busy = true;
+        try
+        {
+            var user = await UserMgr.FindByEmailAsync(email);
+            if (user is not null && await UserMgr.IsInRoleAsync(user, "Admin")) { Show($"{email} już ma dostęp do panelu.", true); return; }
+            if (user is null)
+            {
+                user = new IdentityUser { UserName = email, Email = email, EmailConfirmed = true };
+                // Losowe hasło tylko po to, żeby konto istniało — nowa osoba ustawi własne z linku.
+                var random = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24)) + "aA1!";
+                var created = await UserMgr.CreateAsync(user, random);
+                if (!created.Succeeded) { Show("Nie udało się utworzyć konta: " + string.Join(", ", created.Errors.Select(e => e.Description)), true); return; }
+            }
+            await UserMgr.AddToRoleAsync(user, "Admin");
+            await SendLinkAsync(user.Id, true);
+            _newEmail = "";
+            await LoadAsync();
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task SendLinkAsync(string userId, bool invite)
+    {
+        var user = await UserMgr.FindByIdAsync(userId);
+        if (user?.Email is null) return;
+        var token = await UserMgr.GeneratePasswordResetTokenAsync(user);
+        _inviteLink = $"{Nav.BaseUri.TrimEnd('/')}/zaproszenie-admina?u={Uri.EscapeDataString(user.Id)}&t={Uri.EscapeDataString(token)}";
+        var me = (await AuthState.GetAuthenticationStateAsync()).User.Identity?.Name ?? "Administrator";
+        var subject = invite ? "Zaproszenie do panelu Hantly" : "Ustaw hasło do panelu Hantly";
+        var body = $"""
+            <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;color:#1A1625">
+              <h2 style="color:#7C3AED;margin-bottom:8px">{(invite ? "Masz dostęp do panelu Hantly" : "Nowy link do ustawienia hasła")}</h2>
+              <p>{System.Net.WebUtility.HtmlEncode(me)} {(invite ? "zaprasza Cię do panelu administracyjnego Hantly" : "wysyła Ci link do ustawienia hasła w panelu Hantly")}.</p>
+              <p style="margin:24px 0"><a href="{_inviteLink}" style="background:#7C3AED;color:#fff;padding:12px 22px;border-radius:10px;text-decoration:none;font-weight:bold">Ustaw hasło</a></p>
+              <p style="color:#5E5872;font-size:14px">Link działa 24 godziny. Po zalogowaniu włącz weryfikację dwuetapową w zakładce „Bezpieczeństwo”.</p>
+              <p style="color:#94a3b8;font-size:12px">Hantly · wiadomość wysłana automatycznie</p>
+            </div>
+            """;
+        var (ok, error) = await EmailSvc.SendAsync(user.Email, subject, body);
+        _inviteNote = ok ? $"E-mail wysłany na {user.Email}." : $"E-mail nie wyszedł ({error}) — przekaż link sam, np. komunikatorem.";
+        Show(invite ? $"Zaproszono {user.Email}." : $"Nowy link dla {user.Email} jest gotowy.", false);
+    }
+
+    private async Task ResetTwoFactorAsync(string userId)
+    {
+        var user = await UserMgr.FindByIdAsync(userId);
+        if (user is null) return;
+        await UserMgr.SetTwoFactorEnabledAsync(user, false);
+        await UserMgr.ResetAuthenticatorKeyAsync(user);
+        await LoadAsync();
+        Show($"Wyłączono 2FA dla {user.Email} — przy następnym logowaniu ustawi ją na nowym telefonie.", false);
+    }
+
+    private async Task UnlockAsync(string userId)
+    {
+        var user = await UserMgr.FindByIdAsync(userId);
+        if (user is null) return;
+        await UserMgr.SetLockoutEndDateAsync(user, null);
+        await UserMgr.ResetAccessFailedCountAsync(user);
+        await LoadAsync();
+        Show($"Odblokowano {user.Email}.", false);
+    }
+
+    private async Task DeleteAsync(string userId)
+    {
+        _confirmDelete = null;
+        if (userId == _meId) { Show("Nie możesz usunąć własnego konta.", true); return; }
+        if ((_rows?.Count ?? 0) <= 1) { Show("Musi zostać co najmniej jeden administrator.", true); return; }
+        var user = await UserMgr.FindByIdAsync(userId);
+        if (user is null) return;
+        await UserMgr.DeleteAsync(user);
+        await LoadAsync();
+        Show($"Usunięto dostęp dla {user.Email}.", false);
+    }
+
+    private async Task ToggleRequireAsync(ChangeEventArgs e)
+    {
+        var on = e.Value is true;
+        if (on && !_meHas2fa) { Show("Najpierw włącz weryfikację dwuetapową u siebie.", true); return; }
+        await Settings.SetAsync(SiteSettingsService.Keys.RequireAdmin2fa, on ? "true" : "false");
+        _require2fa = on;
+        Show(on ? "Od teraz każdy administrator musi mieć włączone 2FA." : "Weryfikacja dwuetapowa nie jest już wymagana.", false);
+    }
+}

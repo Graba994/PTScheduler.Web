@@ -1,0 +1,314 @@
+@using PTScheduler.Portal.Services.Social
+@inject AdsService Ads
+@inject InstagramService Ig
+@inject NavigationManager Nav
+
+@* Promowanie postów w Meta Ads. Bezpieczeństwo pieniędzy: promocja powstaje WSTRZYMANA, uruchomienie wymaga
+   potwierdzenia pełnej kwoty, budżet ma limity, a konto reklamowe sprawdzamy przed startem. *@
+
+<div class="ig-grid">
+    <div>
+        <PanelCard Title="Nowa promocja" Icon="bi-megaphone" Subtitle="Powstaje wstrzymana — uruchamiasz ją osobno, po sprawdzeniu">
+            @if (_posts.Count == 0)
+            {
+                <div class="text-muted small">Najpierw przygotuj post z grafiką (albo opublikuj go, żeby go podbić).</div>
+            }
+            else
+            {
+                <label class="form-label small fw-semibold" for="ad-post">Post</label>
+                <select id="ad-post" class="form-select form-select-sm mb-2" @bind="_postId" @bind:after="PostChanged">
+                    @foreach (var p in _posts)
+                    {
+                        <option value="@p.Id">@(string.IsNullOrWhiteSpace(p.Title) ? $"Post #{p.Id}" : p.Title) · @(p.Status == InstagramPostStatus.Published ? "opublikowany" : "nieopublikowany")</option>
+                    }
+                </select>
+
+                <div class="ad-modes mb-2" role="radiogroup" aria-label="Rodzaj promocji">
+                    <label class="ad-mode @(_mode == "traffic" ? "active" : "")">
+                        <input type="radio" name="ad-mode" class="form-check-input" checked="@(_mode == "traffic")" @onchange='() => _mode = "traffic"' />
+                        <span><b>Ruch na stronę</b><small>Nowa reklama z grafiką posta i przyciskiem „Zarejestruj się”. Rejestracje policzą się w „Linki i wyniki”.</small></span>
+                    </label>
+                    <label class="ad-mode @(_mode == "boost" ? "active" : "") @(Published ? "" : "is-disabled")">
+                        <input type="radio" name="ad-mode" class="form-check-input" checked="@(_mode == "boost")" disabled="@(!Published)" @onchange='() => _mode = "boost"' />
+                        <span><b>Podbicie posta</b><small>Więcej osób zobaczy opublikowany post (zasięg i interakcje). @(Published ? "" : "Dostępne po publikacji.")</small></span>
+                    </label>
+                </div>
+
+                <div class="row g-2">
+                    <div class="col-6 col-sm-3">
+                        <label class="form-label small fw-semibold" for="ad-daily">Zł dziennie</label>
+                        <input id="ad-daily" type="number" min="@AdsService.MinDaily" max="@AdsService.MaxDaily" step="1" class="form-control form-control-sm" @bind="_daily" @bind:event="oninput" />
+                    </div>
+                    <div class="col-6 col-sm-3">
+                        <label class="form-label small fw-semibold" for="ad-days">Dni</label>
+                        <input id="ad-days" type="number" min="1" max="@AdsService.MaxDays" class="form-control form-control-sm" @bind="_days" @bind:event="oninput" />
+                    </div>
+                    <div class="col-6 col-sm-3">
+                        <label class="form-label small fw-semibold" for="ad-age1">Wiek od</label>
+                        <input id="ad-age1" type="number" min="18" max="64" class="form-control form-control-sm" @bind="_ageMin" />
+                    </div>
+                    <div class="col-6 col-sm-3">
+                        <label class="form-label small fw-semibold" for="ad-age2">do</label>
+                        <input id="ad-age2" type="number" min="19" max="65" class="form-control form-control-sm" @bind="_ageMax" />
+                    </div>
+                </div>
+                <div class="d-flex gap-3 mt-2 small">
+                    <label class="form-check mb-0"><input class="form-check-input" type="checkbox" @bind="_onIg" /> <span class="form-check-label">Instagram</span></label>
+                    <label class="form-check mb-0"><input class="form-check-input" type="checkbox" @bind="_onFb" /> <span class="form-check-label">Facebook</span></label>
+                    <span class="text-muted">Polska</span>
+                </div>
+
+                <label class="form-label small fw-semibold mt-2" for="ad-int">Zainteresowania (opcjonalnie)</label>
+                <div class="input-group input-group-sm">
+                    <input id="ad-int" class="form-control" placeholder="np. trening personalny, fitness" @bind="_interestQuery" />
+                    <button class="btn btn-outline-secondary" @onclick="SearchInterestsAsync">Szukaj</button>
+                </div>
+                @if (_interestResults.Count > 0)
+                {
+                    <div class="ad-chips mt-1">
+                        @foreach (var i in _interestResults)
+                        {
+                            var it = i;
+                            <button type="button" class="pp-chip pp-tone-muted" @onclick="() => AddInterest(it)">+ @it.Name @(it.Size is long n ? $"({(n / 1000).ToString("N0", Pl)} tys.)" : "")</button>
+                        }
+                    </div>
+                }
+                @if (_interests.Count > 0)
+                {
+                    <div class="ad-chips mt-1">
+                        @foreach (var i in _interests)
+                        {
+                            var it = i;
+                            <span class="pp-chip pp-tone-info">@it.Name <button type="button" class="btn-close btn-close-sm ms-1" aria-label="Usuń @it.Name" @onclick="() => _interests.Remove(it)"></button></span>
+                        }
+                    </div>
+                }
+
+                @if (Garmin)
+                {
+                    <div class="small text-warning mt-2"><i class="bi bi-exclamation-triangle me-1"></i>Post wspomina Garmina — reklama nie może sugerować współpracy z marką; zostaw informację o znakach towarowych.</div>
+                }
+                <div class="ad-total mt-3">
+                    Łącznie najwyżej <b>@((_daily * _days).ToString("0.##", Pl)) zł</b> (@_daily.ToString("0.##", Pl) zł × @_days @(_days == 1 ? "dzień" : "dni"))
+                </div>
+                <button class="btn btn-primary btn-sm mt-2" disabled="@(_busy || AdsService.Validate(CurrentForm()) is not null)" @onclick="CreateAsync">
+                    @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-plus-lg me-1"></i> }Przygotuj promocję (wstrzymana)
+                </button>
+                @if (AdsService.Validate(CurrentForm()) is { } why) { <div class="small text-muted mt-1">@why</div> }
+            }
+        </PanelCard>
+
+        <PanelCard Title="Promocje" Icon="bi-graph-up-arrow" Subtitle="Wyniki z Meta odświeżają się co godzinę">
+            @if (_rows.Count == 0)
+            {
+                <div class="text-muted small">Nie ma jeszcze promocji.</div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle ig-table mb-0">
+                        <thead><tr><th>Promocja</th><th class="text-end">Wydano</th><th class="text-end">Zasięg</th><th class="text-end">Kliknięcia</th><th class="text-end">Rejestracje</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var r in _rows)
+                            {
+                                var row = r;
+                                var p = row.Promotion;
+                                <tr @key="p.Id">
+                                    <td>
+                                        <div class="fw-semibold">@p.Title</div>
+                                        <div class="small text-muted">
+                                            <span class="pp-chip pp-tone-@StatusTone(p.Status)">@StatusLabel(p.Status)</span>
+                                            @(p.Mode == "traffic" ? "ruch na stronę" : "podbicie") · @p.DailyBudget.ToString("0.##", Pl) @p.Currency/dzień × @p.Days · @InstagramRules.ToWarsaw(p.StartAt).ToString("dd.MM")–@InstagramRules.ToWarsaw(p.EndAt).ToString("dd.MM")
+                                        </div>
+                                        @if (p.Error is not null) { <div class="small text-danger">@p.Error</div> }
+                                    </td>
+                                    <td class="text-end tnum">@p.Spend.ToString("0.00", Pl) @p.Currency</td>
+                                    <td class="text-end tnum">@p.Reach.ToString("N0", Pl)</td>
+                                    <td class="text-end tnum">@p.Clicks.ToString("N0", Pl)</td>
+                                    <td class="text-end tnum">
+                                        @if (p.Mode == "traffic")
+                                        {
+                                            <b>@row.Signups</b>@if (row.Signups > 0 && p.Spend > 0) { <div class="small text-muted">@((p.Spend / row.Signups).ToString("0.00", Pl)) / rej.</div> }
+                                        }
+                                        else { <span class="text-muted">—</span> }
+                                    </td>
+                                    <td class="text-end text-nowrap">
+                                        @if (_confirm == p.Id)
+                                        {
+                                            <div class="small mb-1">Uruchomić? Najwyżej <b>@((p.DailyBudget * p.Days).ToString("0.##", Pl)) @p.Currency</b></div>
+                                            <button class="btn btn-success btn-sm" disabled="@_busy" @onclick="() => ActivateAsync(p.Id)">Tak, uruchom</button>
+                                            <button class="btn btn-link btn-sm" @onclick="() => _confirm = null">Nie</button>
+                                        }
+                                        else if (p.Status == AdPromotionStatus.Paused && p.AdId is not null && p.EndAt > DateTime.UtcNow)
+                                        {
+                                            <button class="btn btn-outline-success btn-sm" @onclick="() => _confirm = p.Id"><i class="bi bi-play-fill me-1"></i>Uruchom</button>
+                                        }
+                                        else if (p.Status == AdPromotionStatus.Active)
+                                        {
+                                            <button class="btn btn-outline-secondary btn-sm" disabled="@_busy" @onclick="() => PauseAsync(p.Id)"><i class="bi bi-pause-fill me-1"></i>Wstrzymaj</button>
+                                        }
+                                        @if (p.CampaignId is not null)
+                                        {
+                                            <button class="btn btn-link btn-sm p-0 ms-1" title="Odśwież wyniki" aria-label="Odśwież wyniki" @onclick="() => RefreshAsync(p.Id)"><i class="bi bi-arrow-repeat"></i></button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </PanelCard>
+    </div>
+
+    <aside>
+        <PanelCard Title="Konto reklamowe" Icon="bi-credit-card-2-front">
+            @if (_account is { } a)
+            {
+                <div class="fw-semibold">@a.Name</div>
+                <div class="small text-muted mb-1">@a.Id · @a.Currency · wydano łącznie @a.Spent.ToString("0.00", Pl) @a.Currency</div>
+                <span class="pp-chip pp-tone-@(a.Status == 1 ? "ok" : "danger")">@AdsClient.StatusText(a.Status)</span>
+                @if (!a.HasFunding) { <div class="small text-warning mt-1">Brak metody płatności — dodaj ją w Menedżerze reklam, inaczej reklama się nie wyświetli.</div> }
+            }
+            else if (_accountError is not null)
+            {
+                <div class="small text-warning mb-2"><i class="bi bi-exclamation-triangle me-1"></i>@_accountError</div>
+            }
+            <div class="input-group input-group-sm mt-2">
+                <input class="form-control" placeholder="act_1234567890" @bind="_act" aria-label="Konto reklamowe" />
+                <button class="btn btn-outline-primary" @onclick="SaveAccountAsync">Zapisz</button>
+            </div>
+            <button class="btn btn-link btn-sm px-0" @onclick="LoadAccountsAsync">Pokaż moje konta reklamowe</button>
+            @foreach (var acc in _accounts)
+            {
+                var x = acc;
+                <button class="btn btn-outline-secondary btn-sm w-100 text-start mb-1" @onclick="() => PickAccountAsync(x.Id)">@x.Name <span class="text-muted">· @x.Id · @x.Currency</span></button>
+            }
+        </PanelCard>
+        <div class="pp-callout pp-tone-muted small">
+            <i class="bi bi-shield-check"></i>
+            <div>Promocja zawsze powstaje <b>wstrzymana</b>. Limity: @AdsService.MinDaily.ToString("0", Pl)–@AdsService.MaxDaily.ToString("0", Pl) zł dziennie, do @AdsService.MaxDays dni, łącznie do @AdsService.MaxTotal.ToString("0", Pl) zł.
+                Token potrzebuje uprawnień <code>ads_management</code> i <code>ads_read</code> (Kanały → Facebook).</div>
+        </div>
+    </aside>
+</div>
+
+@code {
+    [Parameter] public EventCallback<(bool, string)> Flash { get; set; }
+
+    private static readonly System.Globalization.CultureInfo Pl = new("pl-PL");
+    private List<InstagramPost> _posts = [];
+    private List<AdsService.Row> _rows = [];
+    private AdsClient.Account? _account;
+    private string? _accountError;
+    private string _act = "";
+    private List<(string Id, string Name, string Currency)> _accounts = [];
+    private int _postId;
+    private string _mode = "traffic";
+    private decimal _daily = 20;
+    private int _days = 7, _ageMin = 21, _ageMax = 55;
+    private bool _onIg = true, _onFb = true, _busy;
+    private string _interestQuery = "";
+    private List<AdsClient.Interest> _interestResults = [];
+    private readonly List<AdsClient.Interest> _interests = [];
+    private int? _confirm;
+
+    private InstagramPost? Selected => _posts.FirstOrDefault(p => p.Id == _postId);
+    private bool Published => Selected?.Status == InstagramPostStatus.Published;
+    private bool Garmin => Selected?.Caption.Contains("Garmin", StringComparison.OrdinalIgnoreCase) == true;
+
+    private AdsService.Form CurrentForm() => new(_postId, _mode, _daily, _days, _ageMin, _ageMax,
+        _interests.Select(i => (i.Id, i.Name)).ToList(), _onIg, _onFb);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _posts = await Ig.PostsAsync(q => q.OrderByDescending(p => p.Id).Take(60));
+        _posts = _posts.Where(p => p.Status == InstagramPostStatus.Published || p.Assets.Any(a => a.Kind == "image")).ToList();
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query);
+        _postId = query.TryGetValue("post", out var v) && int.TryParse(v, out var id) && _posts.Any(p => p.Id == id) ? id : _posts.FirstOrDefault()?.Id ?? 0;
+        PostChanged();
+        _act = await Ads.AccountIdAsync();
+        (_account, _accountError) = await Ads.CheckAsync();
+        _rows = await Ads.ListAsync();
+    }
+
+    private void PostChanged()
+    {
+        if (!Published) _mode = "traffic";
+    }
+
+    private static string StatusLabel(AdPromotionStatus s) => s switch
+    {
+        AdPromotionStatus.Active => "działa", AdPromotionStatus.Ended => "zakończona", AdPromotionStatus.Failed => "błąd", _ => "wstrzymana"
+    };
+
+    private static string StatusTone(AdPromotionStatus s) => s switch
+    {
+        AdPromotionStatus.Active => "ok", AdPromotionStatus.Failed => "danger", AdPromotionStatus.Ended => "muted", _ => "warn"
+    };
+
+    private async Task SaveAccountAsync()
+    {
+        await Ads.SaveAccountAsync(_act);
+        _act = await Ads.AccountIdAsync();
+        (_account, _accountError) = await Ads.CheckAsync();
+        _accounts = [];
+    }
+
+    private async Task PickAccountAsync(string id) { _act = id; await SaveAccountAsync(); }
+
+    private async Task LoadAccountsAsync()
+    {
+        var (list, error) = await Ads.AccountsAsync();
+        _accounts = list;
+        if (error is not null) await Flash.InvokeAsync((false, error));
+        else if (list.Count == 0) await Flash.InvokeAsync((false, "Token nie widzi żadnego konta reklamowego — sprawdź uprawnienia ads_management i ads_read."));
+    }
+
+    private async Task SearchInterestsAsync()
+    {
+        var (items, error) = await Ads.InterestsAsync(_interestQuery);
+        _interestResults = items.Where(i => _interests.All(x => x.Id != i.Id)).ToList();
+        if (error is not null) await Flash.InvokeAsync((false, error));
+    }
+
+    private void AddInterest(AdsClient.Interest i)
+    {
+        if (_interests.Count < 10 && _interests.All(x => x.Id != i.Id)) _interests.Add(i);
+        _interestResults.Remove(i);
+    }
+
+    private async Task CreateAsync()
+    {
+        _busy = true;
+        var (ok, message, _) = await Ads.CreateAsync(CurrentForm());
+        _busy = false;
+        _rows = await Ads.ListAsync();
+        await Flash.InvokeAsync((ok, message));
+    }
+
+    private async Task ActivateAsync(int id)
+    {
+        _busy = true;
+        var r = await Ads.ActivateAsync(id);
+        _busy = false;
+        _confirm = null;
+        _rows = await Ads.ListAsync();
+        await Flash.InvokeAsync(r);
+    }
+
+    private async Task PauseAsync(int id)
+    {
+        _busy = true;
+        var r = await Ads.PauseAsync(id);
+        _busy = false;
+        _rows = await Ads.ListAsync();
+        await Flash.InvokeAsync(r);
+    }
+
+    private async Task RefreshAsync(int id)
+    {
+        await Ads.RefreshAsync(id);
+        _rows = await Ads.ListAsync();
+    }
+}

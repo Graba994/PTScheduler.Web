@@ -1,0 +1,165 @@
+@page "/Account/Invite"
+@layout PTScheduler.Web.Components.Layout.AuthLayout
+
+@using System.ComponentModel.DataAnnotations
+@using System.Text
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.WebUtilities
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Web.Components.Account
+
+@inject UserManager<ApplicationUser> UserManager
+@inject SignInManager<ApplicationUser> SignInManager
+@inject IdentityRedirectManager RedirectManager
+@inject ILogger<Invite> Logger
+@inject PTScheduler.Infrastructure.Data.ApplicationDbContext DbContext
+@inject IAppClock Clock
+
+<PageTitle>Ustaw hasło</PageTitle>
+
+<div class="card" style="border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,0.10)">
+    <div class="card-body p-4">
+        @if (!_valid)
+        {
+            <div class="text-center">
+                <div class="mb-2" style="font-size:2rem;color:var(--c-warning,#D97706)"><i class="bi bi-hourglass-bottom"></i></div>
+                <h5 class="fw-bold mb-2">Link wygasł lub został już użyty</h5>
+                <p class="text-muted small mb-4">
+                    Zaproszenie jest ważne @ClientInvite.ValidDays dni i działa jednorazowo.
+                    Poproś trenera o nowe zaproszenie albo — jeśli hasło jest już ustawione — po prostu się zaloguj.
+                </p>
+                <div class="d-flex flex-column gap-2">
+                    <a href="Account/Login" class="btn btn-primary">Przejdź do logowania</a>
+                    <a href="Account/ForgotPassword" class="btn btn-link text-muted btn-sm">Nie pamiętam hasła</a>
+                </div>
+            </div>
+        }
+        else
+        {
+            <h5 class="fw-bold mb-1 text-center">@(string.IsNullOrWhiteSpace(_firstName) ? "Witaj!" : $"Cześć, {_firstName}!")</h5>
+            <p class="text-muted small text-center mb-4">Ustaw hasło do swojego konta — potem zalogujesz się nim na każdym urządzeniu.</p>
+
+            <StatusMessage Message="@_error" />
+
+            <EditForm Model="Input" method="post" OnValidSubmit="SetPasswordAsync" FormName="invite" data-busy-on-submit>
+                <DataAnnotationsValidator />
+                <input type="hidden" name="uid" value="@Uid" />
+                <input type="hidden" name="code" value="@Code" />
+
+                <div class="mb-3">
+                    <label class="form-label" for="invite-email">Email (login)</label>
+                    <input id="invite-email" class="form-control" value="@_email" readonly autocomplete="username" />
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label" for="Input.Password">Nowe hasło</label>
+                    <div class="input-group">
+                        <InputText type="password" @bind-Value="Input.Password" id="Input.Password" class="form-control"
+                                   autocomplete="new-password" placeholder="min. 8 znaków, w tym cyfra" autofocus />
+                        <button type="button" class="btn btn-outline-secondary" data-toggle-password="Input.Password"
+                                aria-label="Pokaż hasło" title="Pokaż hasło">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                    </div>
+                    <ValidationMessage For="() => Input.Password" class="text-danger small" />
+                </div>
+
+                <div class="mb-4">
+                    <label class="form-label" for="Input.ConfirmPassword">Powtórz hasło</label>
+                    <InputText type="password" @bind-Value="Input.ConfirmPassword" id="Input.ConfirmPassword" class="form-control"
+                               autocomplete="new-password" />
+                    <ValidationMessage For="() => Input.ConfirmPassword" class="text-danger small" />
+                </div>
+
+                <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold" data-busy-text="Zapisywanie…">
+                    <i class="bi bi-check2-circle me-1"></i>Ustaw hasło i zaloguj
+                </button>
+            </EditForm>
+        }
+    </div>
+</div>
+
+@code {
+    private bool _valid;
+    private string? _error;
+    private string _email = "";
+    private string? _firstName;
+    private ApplicationUser? _user;
+    private string _token = "";
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromQuery(Name = "uid")]
+    private string? Uid { get; set; }
+
+    [SupplyParameterFromQuery(Name = "code")]
+    private string? Code { get; set; }
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new();
+
+        // Przy POST parametry przychodzą z ukrytych pól formularza.
+        if (HttpMethods.IsPost(HttpContext.Request.Method) && HttpContext.Request.HasFormContentType)
+        {
+            Uid ??= HttpContext.Request.Form["uid"];
+            Code ??= HttpContext.Request.Form["code"];
+        }
+
+        if (string.IsNullOrEmpty(Uid) || string.IsNullOrEmpty(Code)) return;
+        _user = await UserManager.FindByIdAsync(Uid);
+        if (_user is null) return;
+
+        try { _token = Encoding.UTF8.GetString(WebEncoders.Base64UrlDecode(Code)); }
+        catch (FormatException) { return; }
+
+        _valid = await UserManager.VerifyUserTokenAsync(_user, ClientInvite.TokenProvider, ClientInvite.Purpose, _token);
+        _email = _user.Email ?? "";
+        _firstName = _user.FirstName;
+    }
+
+    private async Task SetPasswordAsync()
+    {
+        if (!_valid || _user is null) return;
+
+        // Token zaproszenia już zweryfikowany — hasło ustawiamy przez reset, który działa
+        // niezależnie od tego, czy konto miało wcześniej hasło, i zmienia znacznik
+        // bezpieczeństwa (link staje się jednorazowy).
+        var resetToken = await UserManager.GeneratePasswordResetTokenAsync(_user);
+        var result = await UserManager.ResetPasswordAsync(_user, resetToken, Input.Password);
+        if (!result.Succeeded)
+        {
+            _error = "Błąd: " + string.Join(" ", result.Errors.Select(e => e.Description));
+            return;
+        }
+
+        if (!_user.EmailConfirmed)
+        {
+            _user.EmailConfirmed = true;
+            await UserManager.UpdateAsync(_user);
+        }
+        await UserManager.ResetAccessFailedCountAsync(_user);
+        await UserManager.SetLockoutEndDateAsync(_user, null);
+
+        await SignInManager.SignInAsync(_user, isPersistent: true, authenticationMethod: "invite");
+        await LoginSupport.RecordAsync(DbContext, Clock, Logger, HttpContext, _user.Id, true);
+        Logger.LogInformation("User {UserId} set password from invitation.", _user.Id);
+        RedirectManager.RedirectTo(LoginSupport.DefaultLanding);
+    }
+
+    private sealed class InputModel
+    {
+        [Required(ErrorMessage = "Podaj hasło.")]
+        [StringLength(100, ErrorMessage = "Hasło musi mieć od {2} do {1} znaków.", MinimumLength = 8)]
+        [DataType(DataType.Password)]
+        public string Password { get; set; } = "";
+
+        [DataType(DataType.Password)]
+        [Compare(nameof(Password), ErrorMessage = "Hasła nie są takie same.")]
+        public string ConfirmPassword { get; set; } = "";
+    }
+}
