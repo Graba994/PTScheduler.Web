@@ -125,6 +125,8 @@ builder.Services.AddScoped<PTScheduler.Portal.Services.Social.FilmPublisher>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Social.LibraryService>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Social.AdsClient>();
 builder.Services.AddScoped<PTScheduler.Portal.Services.Social.AdsService>();
+builder.Services.AddScoped<PTScheduler.Portal.Services.Social.WatchClient>();
+builder.Services.AddScoped<PTScheduler.Portal.Services.Social.WatchService>();
 builder.Services.AddScoped<InstagramAi>();
 builder.Services.AddScoped<InstagramService>();
 builder.Services.AddHostedService<InstagramBackgroundService>();

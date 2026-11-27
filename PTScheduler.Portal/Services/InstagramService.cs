@@ -1293,5 +1293,6 @@ public class InstagramBackgroundService(IServiceScopeFactory scopes, ILogger<Ins
         await sp.GetRequiredService<PTScheduler.Portal.Services.Social.SocialService>().RefreshTokensAsync(ct);
         await ig.RunAutopilotAsync(ct: ct);
         await sp.GetRequiredService<PTScheduler.Portal.Services.Social.DmService>().CleanupAsync(ct);
+        await sp.GetRequiredService<PTScheduler.Portal.Services.Social.WatchService>().SyncAllAsync(ct);
     }
 }

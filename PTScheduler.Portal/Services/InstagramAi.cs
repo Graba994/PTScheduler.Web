@@ -209,6 +209,21 @@ public class InstagramAi(AiService ai, SiteSettingsService settings, IDbContextF
         return (r.Text?.Trim().Trim('"'), r.Error);
     }
 
+    /// <summary>Wnioski z obserwowanego konta albo hasztagu: co działa i pomysły dla Hantly (bez kopiowania cudzych treści).</summary>
+    public async Task<(string? Text, string? Error)> WatchAsync(string facts, CancellationToken ct = default)
+    {
+        var user = $"""
+            Oto ostatnie posty obserwowanego konta albo hasztagu na Instagramie (rodzaj, polubienia, komentarze, czas, fragment opisu).
+            Napisz po polsku do 5 krótkich punktów (od myślnika): jakie formaty i tematy działają najlepiej, kiedy publikują,
+            i 3 pomysły na posty dla Hantly (aplikacja dla trenerów personalnych) inspirowane tym, co działa — bez kopiowania cudzych treści.
+            Opieraj się tylko na danych poniżej.
+
+            {facts}
+            """;
+        var r = await ai.CompleteAsync(Feature, null, await SystemAsync(), user, maxTokens: 600, ct: ct);
+        return (r.Text?.Trim(), r.Error);
+    }
+
     /// <summary>3 wnioski do cotygodniowego raportu (same liczby na wejściu — bez danych osób).</summary>
     public async Task<(string? Text, string? Error)> WeeklyAsync(string facts, CancellationToken ct = default)
     {

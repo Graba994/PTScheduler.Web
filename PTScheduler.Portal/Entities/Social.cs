@@ -226,3 +226,33 @@ public class AdPromotion
     public string? Error { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
+
+/// <summary>Obserwowane konto (konkurencja, inspiracja) albo hasztag na Instagramie.</summary>
+public class WatchItem
+{
+    public int Id { get; set; }
+    /// <summary>account | hashtag.</summary>
+    public string Kind { get; set; } = "account";
+    /// <summary>Nazwa konta (bez @) albo hasztag (bez #), małymi literami.</summary>
+    public string Value { get; set; } = "";
+    public string? HashtagId { get; set; }
+    public string? Name { get; set; }
+    public string? Bio { get; set; }
+    public string? PictureUrl { get; set; }
+    public int? Followers { get; set; }
+    public int? MediaCount { get; set; }
+    /// <summary>Ostatnie posty (JSON listy <c>WatchClient.Media</c>).</summary>
+    public string MediaJson { get; set; } = "[]";
+    public string? Insights { get; set; }
+    public DateTime? SyncedAt { get; set; }
+    public string? LastError { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>Obserwujący obserwowanego konta w danym dniu (wzrost w czasie).</summary>
+public class WatchDay
+{
+    public int WatchId { get; set; }
+    public DateOnly Day { get; set; }
+    public int Followers { get; set; }
+}

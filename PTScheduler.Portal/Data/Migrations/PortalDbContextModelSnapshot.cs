@@ -4934,6 +4934,88 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.ToTable("UptimeMonitors");
                 });
 
+            modelBuilder.Entity("PTScheduler.Portal.Entities.WatchDay", b =>
+                {
+                    b.Property<int>("WatchId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateOnly>("Day")
+                        .HasColumnType("date");
+
+                    b.Property<int>("Followers")
+                        .HasColumnType("integer");
+
+                    b.HasKey("WatchId", "Day");
+
+                    b.ToTable("WatchDays");
+                });
+
+            modelBuilder.Entity("PTScheduler.Portal.Entities.WatchItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Bio")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("Followers")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("HashtagId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Insights")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int?>("MediaCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("MediaJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("PictureUrl")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime?>("SyncedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Kind", "Value")
+                        .IsUnique();
+
+                    b.ToTable("WatchItems");
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<string>", b =>
                 {
                     b.HasOne("Microsoft.AspNetCore.Identity.IdentityRole", null)
@@ -5402,6 +5484,15 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.HasOne("PTScheduler.Portal.Entities.TrackedLink", null)
                         .WithMany()
                         .HasForeignKey("LinkId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("PTScheduler.Portal.Entities.WatchDay", b =>
+                {
+                    b.HasOne("PTScheduler.Portal.Entities.WatchItem", null)
+                        .WithMany()
+                        .HasForeignKey("WatchId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

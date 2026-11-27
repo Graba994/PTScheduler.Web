@@ -52,6 +52,8 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<ContentSeries> ContentSeries => Set<ContentSeries>();
     public DbSet<LibraryItem> LibraryItems => Set<LibraryItem>();
     public DbSet<AdPromotion> AdPromotions => Set<AdPromotion>();
+    public DbSet<WatchItem> WatchItems => Set<WatchItem>();
+    public DbSet<WatchDay> WatchDays => Set<WatchDay>();
     public DbSet<StudioPromotion> StudioPromotions => Set<StudioPromotion>();
     public DbSet<StudioVideo> StudioVideos => Set<StudioVideo>();
     public DbSet<StudioScene> StudioScenes => Set<StudioScene>();
@@ -630,6 +632,23 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.Property(x => x.Format).HasMaxLength(16);
             e.Property(x => x.Brief).HasMaxLength(500);
             e.Property(x => x.Hashtag).HasMaxLength(60);
+        });
+        b.Entity<WatchItem>(e =>
+        {
+            e.HasIndex(x => new { x.Kind, x.Value }).IsUnique();
+            e.Property(x => x.Kind).HasMaxLength(16);
+            e.Property(x => x.Value).HasMaxLength(100);
+            e.Property(x => x.HashtagId).HasMaxLength(64);
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.Bio).HasMaxLength(500);
+            e.Property(x => x.PictureUrl).HasMaxLength(2000);
+            e.Property(x => x.Insights).HasMaxLength(4000);
+            e.Property(x => x.LastError).HasMaxLength(500);
+        });
+        b.Entity<WatchDay>(e =>
+        {
+            e.HasKey(x => new { x.WatchId, x.Day });
+            e.HasOne<WatchItem>().WithMany().HasForeignKey(x => x.WatchId).OnDelete(DeleteBehavior.Cascade);
         });
         b.Entity<AdPromotion>(e =>
         {
