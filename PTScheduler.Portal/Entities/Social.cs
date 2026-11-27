@@ -101,3 +101,49 @@ public class BioItem
     /// <summary>Link śledzący (dla ścieżek na stronie Hantly).</summary>
     public int? LinkId { get; set; }
 }
+
+/// <summary>Rozmowa w wiadomościach prywatnych (Instagram albo Messenger strony).</summary>
+public class SocialThread
+{
+    public int Id { get; set; }
+    /// <summary>instagram | facebook.</summary>
+    public string Platform { get; set; } = "instagram";
+    public string ExternalId { get; set; } = "";
+    /// <summary>Id osoby w danej platformie (IGSID / PSID) — do wysyłki odpowiedzi.</summary>
+    public string ParticipantId { get; set; } = "";
+    public string ParticipantName { get; set; } = "";
+    public string? Snippet { get; set; }
+    public DateTime LastMessageAt { get; set; }
+    /// <summary>Ostatnia wiadomość od osoby — odpowiadać można 24 h od niej (zasada Meta).</summary>
+    public DateTime? LastInboundAt { get; set; }
+    public bool Unread { get; set; }
+    /// <summary>Obsłużona (odpowiedziana albo niewymagająca odpowiedzi).</summary>
+    public bool Done { get; set; }
+    public string? Suggestion { get; set; }
+}
+
+public class SocialMessage
+{
+    public string Id { get; set; } = "";
+    public int ThreadId { get; set; }
+    public bool Inbound { get; set; }
+    public string Text { get; set; } = "";
+    public bool HasAttachment { get; set; }
+    public DateTime At { get; set; }
+}
+
+/// <summary>Reguła „komentarz → wiadomość”: słowo w komentarzu (np. PLAN) wysyła autorowi prywatną wiadomość z linkiem.</summary>
+public class CommentRule
+{
+    public int Id { get; set; }
+    public string Keyword { get; set; } = "";
+    /// <summary>Treść wiadomości prywatnej; „{link}” → link śledzący reguły.</summary>
+    public string Message { get; set; } = "";
+    /// <summary>Opcjonalna publiczna odpowiedź pod komentarzem (np. „Wysłane w wiadomości 📩”).</summary>
+    public string? PublicReply { get; set; }
+    public string Target { get; set; } = "/register";
+    public int? LinkId { get; set; }
+    public bool Enabled { get; set; } = true;
+    public int Uses { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}

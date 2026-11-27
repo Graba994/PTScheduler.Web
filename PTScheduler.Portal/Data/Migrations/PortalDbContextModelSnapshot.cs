@@ -527,6 +527,52 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.ToTable("BugReports");
                 });
 
+            modelBuilder.Entity("PTScheduler.Portal.Entities.CommentRule", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Keyword")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<int?>("LinkId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("PublicReply")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("Target")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<int>("Uses")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LinkId");
+
+                    b.ToTable("CommentRules");
+                });
+
             modelBuilder.Entity("PTScheduler.Portal.Entities.CommunityExercise", b =>
                 {
                     b.Property<int>("Id")
@@ -1096,6 +1142,10 @@ namespace PTScheduler.Portal.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<string>("PageId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<string>("PictureUrl")
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
@@ -1212,6 +1262,12 @@ namespace PTScheduler.Portal.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime?>("PrivateReplyAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("RuleId")
+                        .HasColumnType("integer");
 
                     b.Property<DateTime>("SeenAt")
                         .HasColumnType("timestamp with time zone");
@@ -2898,6 +2954,36 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.ToTable("SocialChannels");
                 });
 
+            modelBuilder.Entity("PTScheduler.Portal.Entities.SocialMessage", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("At")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("HasAttachment")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("Inbound")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<int>("ThreadId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ThreadId", "At");
+
+                    b.ToTable("SocialMessages");
+                });
+
             modelBuilder.Entity("PTScheduler.Portal.Entities.SocialPostTarget", b =>
                 {
                     b.Property<int>("Id")
@@ -2957,6 +3043,64 @@ namespace PTScheduler.Portal.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("SocialPostTargets");
+                });
+
+            modelBuilder.Entity("PTScheduler.Portal.Entities.SocialThread", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("Done")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("ExternalId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime?>("LastInboundAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("LastMessageAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ParticipantId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ParticipantName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("Platform")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Snippet")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Suggestion")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<bool>("Unread")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LastMessageAt");
+
+                    b.HasIndex("Platform", "ExternalId")
+                        .IsUnique();
+
+                    b.ToTable("SocialThreads");
                 });
 
             modelBuilder.Entity("PTScheduler.Portal.Entities.StudioJob", b =>
@@ -4645,6 +4789,14 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("PTScheduler.Portal.Entities.CommentRule", b =>
+                {
+                    b.HasOne("PTScheduler.Portal.Entities.TrackedLink", null)
+                        .WithMany()
+                        .HasForeignKey("LinkId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
             modelBuilder.Entity("PTScheduler.Portal.Entities.CommunityExercise", b =>
                 {
                     b.HasOne("PTScheduler.Portal.Entities.Tenant", "Tenant")
@@ -4772,6 +4924,15 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Navigation("ServiceItem");
 
                     b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("PTScheduler.Portal.Entities.SocialMessage", b =>
+                {
+                    b.HasOne("PTScheduler.Portal.Entities.SocialThread", null)
+                        .WithMany()
+                        .HasForeignKey("ThreadId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("PTScheduler.Portal.Entities.SocialPostTarget", b =>

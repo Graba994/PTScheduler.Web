@@ -16,7 +16,8 @@ public class FacebookClient(IHttpClientFactory httpFactory, IConfiguration? conf
     public static readonly string[] Scopes =
     [
         "pages_show_list", "pages_read_engagement", "pages_manage_posts", "pages_manage_engagement", "pages_read_user_content", "read_insights",
-        "business_management", "instagram_basic", "instagram_content_publish", "instagram_manage_comments", "instagram_manage_insights"
+        "business_management", "instagram_basic", "instagram_content_publish", "instagram_manage_comments", "instagram_manage_insights",
+        "pages_messaging", "instagram_manage_messages"
     ];
 
     private string Graph => (config?["Social:FacebookGraphUrl"] is { Length: > 0 } g ? g : "https://graph.facebook.com").TrimEnd('/');

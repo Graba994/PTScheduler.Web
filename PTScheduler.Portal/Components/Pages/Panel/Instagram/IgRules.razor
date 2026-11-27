@@ -1,0 +1,88 @@
+@using PTScheduler.Portal.Services.Social
+@inject DmService Dm
+
+@* Reguły „komentarz → wiadomość”: słowo w komentarzu (np. PLAN) wysyła autorowi prywatną wiadomość z linkiem śledzącym.
+   Tekst ustawia administrator — wysyłka automatyczna, bez AI. Działa dla nowych komentarzy (Instagram i Facebook). *@
+
+<PanelCard Title="Komentarz → wiadomość" Icon="bi-magic" Subtitle="Ktoś pisze słowo-klucz pod postem — automatycznie dostaje wiadomość prywatną z linkiem">
+    @if (_rules.Count > 0)
+    {
+        <div class="bio-edit mb-3">
+            @foreach (var r in _rules)
+            {
+                var rule = r;
+                <div class="bio-edit-row @(rule.Enabled ? "" : "is-off")" @key="rule.Id">
+                    <span class="pp-chip pp-tone-info">@rule.Keyword</span>
+                    <div class="flex-grow-1 min-w-0">
+                        <div class="small text-truncate">@rule.Message</div>
+                        <div class="small text-muted">@rule.Uses @(rule.Uses == 1 ? "wiadomość" : "wiadomości") · @(rule.PublicReply is null ? "bez odpowiedzi pod komentarzem" : $"pod komentarzem: „{rule.PublicReply}”")</div>
+                    </div>
+                    <button class="btn btn-link btn-sm p-0" title="Edytuj" aria-label="Edytuj" @onclick="() => Edit(rule)"><i class="bi bi-pencil"></i></button>
+                    <button class="btn btn-link btn-sm p-0 text-danger" title="Usuń" aria-label="Usuń" @onclick="() => DeleteAsync(rule.Id)"><i class="bi bi-trash3"></i></button>
+                </div>
+            }
+        </div>
+    }
+
+    <div class="row g-2">
+        <div class="col-sm-3">
+            <label class="form-label small fw-semibold" for="rl-key">Słowo-klucz</label>
+            <input id="rl-key" class="form-control form-control-sm text-uppercase" @bind="_keyword" @bind:event="oninput" maxlength="40" placeholder="PLAN" />
+        </div>
+        <div class="col-sm-9">
+            <label class="form-label small fw-semibold" for="rl-msg">Wiadomość prywatna</label>
+            <textarea id="rl-msg" class="form-control form-control-sm" rows="2" @bind="_message" @bind:event="oninput" maxlength="1000"
+                      placeholder="Hej! Tu link do Hantly — aplikację zbudujesz w kilka minut: {link}"></textarea>
+        </div>
+        <div class="col-sm-6">
+            <label class="form-label small fw-semibold" for="rl-pub">Odpowiedź pod komentarzem (opcjonalnie)</label>
+            <input id="rl-pub" class="form-control form-control-sm" @bind="_public" maxlength="300" placeholder="Wysłane w wiadomości 📩" />
+        </div>
+        <div class="col-sm-4">
+            <label class="form-label small fw-semibold" for="rl-target">{link} prowadzi do</label>
+            <select id="rl-target" class="form-select form-select-sm" @bind="_target">
+                @foreach (var (path, label) in LinkService.Targets) { <option value="@path">@label</option> }
+            </select>
+        </div>
+        <div class="col-sm-2 d-flex align-items-end">
+            <label class="form-check small mb-1"><input class="form-check-input" type="checkbox" @bind="_enabled" /> <span class="form-check-label">Włączona</span></label>
+        </div>
+    </div>
+    <div class="d-flex gap-2 mt-2">
+        <button class="btn btn-primary btn-sm" disabled="@(string.IsNullOrWhiteSpace(_keyword) || string.IsNullOrWhiteSpace(_message))" @onclick="SaveAsync">
+            <i class="bi bi-check-lg me-1"></i>@(_editing is null ? "Dodaj regułę" : "Zapisz regułę")
+        </button>
+        @if (_editing is not null) { <button class="btn btn-link btn-sm" @onclick="Reset">Anuluj</button> }
+    </div>
+    <div class="small text-muted mt-2">Wiadomość idzie raz na komentarz, tylko do komentarzy dodanych po utworzeniu reguły i nie starszych niż @DmService.PrivateReplyDays dni (zasada Meta).
+        W poście napisz np. „Napisz PLAN w komentarzu, a wyślę Ci link”. Kliknięcia i rejestracje z tej wiadomości zobaczysz w „Linki i wyniki”.</div>
+</PanelCard>
+
+@code {
+    [Parameter] public EventCallback<(bool, string)> Flash { get; set; }
+
+    private List<CommentRule> _rules = [];
+    private int? _editing;
+    private string _keyword = "", _message = "", _public = "", _target = "/register";
+    private bool _enabled = true;
+
+    protected override async Task OnInitializedAsync() => _rules = await Dm.RulesAsync();
+
+    private void Edit(CommentRule r) =>
+        (_editing, _keyword, _message, _public, _target, _enabled) = (r.Id, r.Keyword, r.Message, r.PublicReply ?? "", r.Target, r.Enabled);
+
+    private void Reset() => (_editing, _keyword, _message, _public, _target, _enabled) = (null, "", "", "", "/register", true);
+
+    private async Task SaveAsync()
+    {
+        var r = await Dm.SaveRuleAsync(_editing, _keyword, _message, _public, _target, _enabled);
+        if (r.Ok) { Reset(); _rules = await Dm.RulesAsync(); }
+        await Flash.InvokeAsync(r);
+    }
+
+    private async Task DeleteAsync(int id)
+    {
+        await Dm.DeleteRuleAsync(id);
+        _rules = await Dm.RulesAsync();
+    }
+}

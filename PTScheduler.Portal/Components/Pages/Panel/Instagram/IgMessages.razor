@@ -1,0 +1,176 @@
+@using PTScheduler.Portal.Services.Social
+@inject DmService Dm
+@inject InstagramAi Ai
+
+@* Wiadomości prywatne z Instagrama i Messengera w jednym miejscu. Odpowiada człowiek — AI tylko podpowiada.
+   Meta pozwala odpowiedzieć 24 h od ostatniej wiadomości osoby; potem odpowiedź tylko w aplikacji. *@
+
+<div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+    <div class="pp-seg" role="group" aria-label="Które rozmowy">
+        <button type="button" class="@(_open ? "active" : "")" @onclick="() => SetAsync(true)">Do odpowiedzi</button>
+        <button type="button" class="@(_open ? "" : "active")" @onclick="() => SetAsync(false)">Wszystkie</button>
+    </div>
+    <button class="btn btn-outline-secondary btn-sm ms-auto" @onclick="SyncAsync" disabled="@_busy">
+        @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-arrow-repeat me-1"></i> }Pobierz nowe
+    </button>
+</div>
+
+@if (_error is not null)
+{
+    <div class="pp-callout pp-tone-warn small mb-3">
+        <i class="bi bi-exclamation-triangle"></i>
+        <div>
+            <div>@_error</div>
+            <div class="mt-1 text-muted">Wiadomości wymagają uprawnień <code>pages_messaging</code> i <code>instagram_manage_messages</code> (przy logowaniu Instagramem: <code>instagram_business_manage_messages</code>) — wygeneruj token ponownie w zakładce Kanały.
+                Na Instagramie włącz też: Ustawienia → Wiadomości i odpowiedzi do relacji → Narzędzia do wiadomości → „Zezwalaj na dostęp do wiadomości”.</div>
+        </div>
+    </div>
+}
+
+<div class="dm-wrap">
+    <div class="dm-list" role="list">
+        @if (_threads.Count == 0)
+        {
+            <div class="pp-empty py-4">
+                <i class="bi bi-envelope-open-heart"></i>
+                <div class="pp-empty-title">@(_open ? "Wszystko obsłużone" : "Brak rozmów")</div>
+                <p class="small">Rozmowy pobieram co 5 minut.</p>
+            </div>
+        }
+        @foreach (var t in _threads)
+        {
+            var thread = t;
+            <button type="button" role="listitem" class="dm-item @(_current?.Id == thread.Id ? "active" : "") @(thread.Unread ? "is-unread" : "")" @key="thread.Id" @onclick="() => OpenAsync(thread)">
+                <i class="bi @(thread.Platform == "facebook" ? "bi-messenger" : "bi-instagram") dm-plat"></i>
+                <span class="dm-item-main">
+                    <span class="dm-item-head"><b>@thread.ParticipantName</b><small>@IgUi.When(thread.LastMessageAt)</small></span>
+                    <span class="dm-snippet">@thread.Snippet</span>
+                </span>
+                @if (thread.Unread) { <span class="dm-dot" aria-label="nieprzeczytana"></span> }
+            </button>
+        }
+    </div>
+
+    <section class="dm-pane" aria-label="Rozmowa">
+        @if (_current is null)
+        {
+            <div class="pp-empty py-5"><i class="bi bi-chat-left-text"></i><div class="pp-empty-title">Wybierz rozmowę</div></div>
+        }
+        else
+        {
+            var canReply = DmService.CanReply(_current);
+            <div class="dm-pane-head">
+                <i class="bi @(_current.Platform == "facebook" ? "bi-messenger" : "bi-instagram")"></i>
+                <b>@_current.ParticipantName</b>
+                @if (_current.Done) { <span class="pp-chip pp-tone-ok">obsłużona</span> }
+                <button class="btn btn-link btn-sm ms-auto" @onclick="() => DoneAsync(!_current.Done)">@(_current.Done ? "Przywróć do odpowiedzi" : "Bez odpowiedzi — obsłużona")</button>
+            </div>
+            <div class="dm-messages">
+                @foreach (var m in _messages)
+                {
+                    <div class="dm-msg @(m.Inbound ? "in" : "out")" @key="m.Id">
+                        <div class="dm-bubble">@m.Text</div>
+                        <small>@IgUi.When(m.At)</small>
+                    </div>
+                }
+            </div>
+            @if (!canReply)
+            {
+                <div class="pp-callout pp-tone-muted small mt-2"><i class="bi bi-clock-history"></i><div>Minęło @DmService.ReplyWindowHours h od ostatniej wiadomości tej osoby — Meta pozwala odpowiedzieć już tylko w aplikacji @(_current.Platform == "facebook" ? "Messenger" : "Instagram").</div></div>
+            }
+            else
+            {
+                <textarea class="form-control form-control-sm mt-2" rows="3" placeholder="Twoja odpowiedź… ({link} → link do rejestracji)" @bind="_reply" @bind:event="oninput" maxlength="1000" aria-label="Odpowiedź"></textarea>
+                <div class="d-flex gap-2 flex-wrap mt-2">
+                    <button class="btn btn-primary btn-sm" disabled="@(_busy || string.IsNullOrWhiteSpace(_reply))" @onclick="ReplyAsync"><i class="bi bi-send me-1"></i>Wyślij</button>
+                    <button class="btn btn-outline-secondary btn-sm" disabled="@(_busy || _aiOff is not null)" title="@(_aiOff ?? "")" @onclick="SuggestAsync">
+                        @if (_suggesting) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-stars me-1"></i> }Podpowiedz
+                    </button>
+                    <span class="small text-muted align-self-center">AI widzi tylko treść rozmowy — bez nazwy, e-maili i telefonów.</span>
+                </div>
+            }
+        }
+    </section>
+</div>
+
+<IgRules Flash="Flash" />
+
+@code {
+    [Parameter] public EventCallback<(bool, string)> Flash { get; set; }
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private List<SocialThread> _threads = [];
+    private List<SocialMessage> _messages = [];
+    private SocialThread? _current;
+    private bool _open = true, _busy, _suggesting;
+    private string _reply = "";
+    private string? _error, _aiOff;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _aiOff = await Ai.UnavailableAsync();
+        _error = await Dm.LastErrorAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync() => _threads = await Dm.ThreadsAsync(_open);
+
+    private async Task SetAsync(bool open) { _open = open; await LoadAsync(); }
+
+    private async Task SyncAsync()
+    {
+        _busy = true;
+        var (added, error) = await Dm.SyncAsync();
+        _error = error;
+        await LoadAsync();
+        if (_current is not null) _messages = await Dm.MessagesAsync(_current.Id);
+        _busy = false;
+        await Changed.InvokeAsync();
+        await Flash.InvokeAsync(error is null ? (true, added == 0 ? "Brak nowych wiadomości." : $"Nowe wiadomości: {added}.") : (false, error));
+    }
+
+    private async Task OpenAsync(SocialThread t)
+    {
+        _current = t;
+        _reply = t.Suggestion ?? "";
+        _messages = await Dm.MessagesAsync(t.Id);
+        t.Unread = false;
+        await Changed.InvokeAsync();
+    }
+
+    private async Task ReplyAsync()
+    {
+        if (_current is null) return;
+        _busy = true;
+        var r = await Dm.ReplyAsync(_current.Id, _reply);
+        _busy = false;
+        if (r.Ok)
+        {
+            _reply = "";
+            _current.Done = true;
+            _messages = await Dm.MessagesAsync(_current.Id);
+            await LoadAsync();
+            await Changed.InvokeAsync();
+        }
+        await Flash.InvokeAsync(r);
+    }
+
+    private async Task SuggestAsync()
+    {
+        if (_current is null) return;
+        _suggesting = true;
+        var (text, error) = await Dm.SuggestAsync(_current.Id);
+        _suggesting = false;
+        if (text is null) { await Flash.InvokeAsync((false, error ?? "AI nie odpowiedziało.")); return; }
+        _reply = text;
+    }
+
+    private async Task DoneAsync(bool done)
+    {
+        if (_current is null) return;
+        await Dm.SetDoneAsync(_current.Id, done);
+        _current.Done = done;
+        await LoadAsync();
+        await Changed.InvokeAsync();
+    }
+}

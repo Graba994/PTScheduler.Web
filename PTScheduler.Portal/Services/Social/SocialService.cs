@@ -141,6 +141,7 @@ public class SocialService(
                 await db.InstagramDaily.ExecuteDeleteAsync();
             }
             a.Provider = "facebook";
+            a.PageId = page.Id;
             a.IgUserId = igId;
             a.Username = page.IgUsername ?? a.Username;
             a.PictureUrl = page.IgPicture ?? a.PictureUrl;

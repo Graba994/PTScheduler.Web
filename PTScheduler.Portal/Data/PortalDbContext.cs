@@ -46,6 +46,9 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<TrackedLink> TrackedLinks => Set<TrackedLink>();
     public DbSet<TrackedLinkDay> TrackedLinkDays => Set<TrackedLinkDay>();
     public DbSet<BioItem> BioItems => Set<BioItem>();
+    public DbSet<SocialThread> SocialThreads => Set<SocialThread>();
+    public DbSet<SocialMessage> SocialMessages => Set<SocialMessage>();
+    public DbSet<CommentRule> CommentRules => Set<CommentRule>();
     public DbSet<StudioPromotion> StudioPromotions => Set<StudioPromotion>();
     public DbSet<StudioVideo> StudioVideos => Set<StudioVideo>();
     public DbSet<StudioScene> StudioScenes => Set<StudioScene>();
@@ -525,6 +528,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
 
         b.Entity<InstagramAccount>(e =>
         {
+            e.Property(x => x.PageId).HasMaxLength(64);
             e.Property(x => x.IgUserId).HasMaxLength(64);
             e.Property(x => x.Username).HasMaxLength(64);
             e.Property(x => x.Name).HasMaxLength(200);
@@ -595,6 +599,33 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.Property(x => x.Label).HasMaxLength(120);
             e.Property(x => x.Target).HasMaxLength(300);
             e.HasOne<InstagramPost>().WithMany().HasForeignKey(x => x.PostId).OnDelete(DeleteBehavior.SetNull);
+        });
+        b.Entity<SocialThread>(e =>
+        {
+            e.HasIndex(x => new { x.Platform, x.ExternalId }).IsUnique();
+            e.HasIndex(x => x.LastMessageAt);
+            e.Property(x => x.Platform).HasMaxLength(16);
+            e.Property(x => x.ExternalId).HasMaxLength(128);
+            e.Property(x => x.ParticipantId).HasMaxLength(64);
+            e.Property(x => x.ParticipantName).HasMaxLength(120);
+            e.Property(x => x.Snippet).HasMaxLength(200);
+            e.Property(x => x.Suggestion).HasMaxLength(1000);
+        });
+        b.Entity<SocialMessage>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasMaxLength(200);
+            e.Property(x => x.Text).HasMaxLength(4000);
+            e.HasIndex(x => new { x.ThreadId, x.At });
+            e.HasOne<SocialThread>().WithMany().HasForeignKey(x => x.ThreadId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<CommentRule>(e =>
+        {
+            e.Property(x => x.Keyword).HasMaxLength(40);
+            e.Property(x => x.Message).HasMaxLength(1000);
+            e.Property(x => x.PublicReply).HasMaxLength(300);
+            e.Property(x => x.Target).HasMaxLength(300);
+            e.HasOne<TrackedLink>().WithMany().HasForeignKey(x => x.LinkId).OnDelete(DeleteBehavior.SetNull);
         });
         b.Entity<BioItem>(e =>
         {

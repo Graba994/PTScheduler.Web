@@ -192,6 +192,23 @@ public class InstagramAi(AiService ai, SiteSettingsService settings, IDbContextF
         return (r.Text?.Trim(), r.Error);
     }
 
+    /// <summary>Podpowiedź odpowiedzi na wiadomość prywatną (treść bez nazw, e-maili i telefonów).</summary>
+    public async Task<(string? Text, string? Error)> DmReplyAsync(string platform, string conversation, CancellationToken ct = default)
+    {
+        var user = $"""
+            Zaproponuj odpowiedź marki Hantly na wiadomość prywatną ({platform}). Rozmowa (od najstarszej):
+
+            {conversation}
+
+            Zasady: po polsku, ciepło i konkretnie, 1–4 zdania, najwyżej jedna emotka. Odpowiadaj tylko zgodnie z faktami o Hantly.
+            Gdy pytają o założenie konta albo cenę — zaproś do linku: wstaw dokładnie {Social.LinkService.Placeholder}.
+            Nie proś o dane wrażliwe. Gdy nie znasz odpowiedzi, napisz, że sprawdzisz i wrócisz z odpowiedzią.
+            Odpowiedz samym tekstem wiadomości.
+            """;
+        var r = await ai.CompleteAsync(Feature, null, await SystemAsync(), user, maxTokens: 400, ct: ct);
+        return (r.Text?.Trim().Trim('"'), r.Error);
+    }
+
     /// <summary>3 wnioski do cotygodniowego raportu (same liczby na wejściu — bez danych osób).</summary>
     public async Task<(string? Text, string? Error)> WeeklyAsync(string facts, CancellationToken ct = default)
     {

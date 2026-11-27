@@ -36,7 +36,8 @@ public class InstagramClient(IHttpClientFactory httpFactory, IConfiguration? con
 
     /// <summary>Uprawnienia: profil, publikacja, komentarze, statystyki.</summary>
     public static readonly string[] Scopes =
-        ["instagram_business_basic", "instagram_business_content_publish", "instagram_business_manage_comments", "instagram_business_manage_insights"];
+        ["instagram_business_basic", "instagram_business_content_publish", "instagram_business_manage_comments", "instagram_business_manage_insights",
+         "instagram_business_manage_messages"];
 
     public sealed record Profile(string UserId, string Username, string? Name, string? Picture, int Followers, int Follows, int MediaCount);
     public sealed record Media(string Id, string MediaType, string? ProductType, string? Caption, string? Permalink, string? MediaUrl, string? ThumbnailUrl,

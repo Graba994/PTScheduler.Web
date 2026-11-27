@@ -4,6 +4,7 @@
 @attribute [Authorize(Roles = "Admin")]
 @inject InstagramService Ig
 @inject NavigationManager Nav
+@inject PTScheduler.Portal.Services.Social.DmService Dm
 @rendermode InteractiveServer
 
 @* Instagram marki: prosty Przegląd na co dzień i zakładki zaawansowane (plan, pomysły AI, komentarze, statystyki,
@@ -38,6 +39,7 @@
                 <i class="bi @icon me-1"></i>@label
                 @if (key == "plan" && _toApprove > 0) { <span class="ig-count">@_toApprove</span> }
                 @if (key == "komentarze" && _openComments > 0) { <span class="ig-count">@_openComments</span> }
+                @if (key == "wiadomosci" && _openDms > 0) { <span class="ig-count">@_openDms</span> }
             </button>
         </li>
     }
@@ -58,6 +60,10 @@ else if (_tab == "pomysly")
 else if (_tab == "komentarze")
 {
     <IgComments Flash="FlashAsync" Changed="RefreshCountsAsync" />
+}
+else if (_tab == "wiadomosci")
+{
+    <IgMessages Flash="FlashAsync" Changed="RefreshCountsAsync" />
 }
 else if (_tab == "statystyki")
 {
@@ -92,6 +98,7 @@ else
         ("plan", "Plan i posty", "bi-calendar-week"),
         ("pomysly", "Pomysły", "bi-lightbulb"),
         ("komentarze", "Komentarze", "bi-chat-dots"),
+        ("wiadomosci", "Wiadomości", "bi-envelope"),
         ("statystyki", "Statystyki", "bi-graph-up"),
         ("autopilot", "Autopilot", "bi-robot"),
         ("linki", "Linki i wyniki", "bi-link-45deg"),
@@ -101,7 +108,7 @@ else
     private string _tab = "przeglad";
     private int? _postId;
     private InstagramAccount? _account;
-    private int _toApprove, _openComments;
+    private int _toApprove, _openComments, _openDms;
     private string? _flash;
     private bool _flashOk;
 
@@ -120,6 +127,7 @@ else
         var o = await Ig.OverviewAsync();
         _toApprove = o.ToApprove;
         _openComments = o.OpenComments;
+        _openDms = await Dm.OpenCountAsync();
     }
 
     private async Task GoAsync((string Tab, int? Post) to)

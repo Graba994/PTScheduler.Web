@@ -8,6 +8,8 @@ public class InstagramAccount
     public string IgUserId { get; set; } = "";
     /// <summary>instagram (logowanie przez Instagram, graph.instagram.com) | facebook (przez stronę na Facebooku, graph.facebook.com, token strony).</summary>
     public string Provider { get; set; } = "instagram";
+    /// <summary>Id strony na Facebooku (gdy Instagram połączony przez stronę) — wiadomości i prywatne odpowiedzi idą przez stronę.</summary>
+    public string? PageId { get; set; }
     public string Username { get; set; } = "";
     public string? Name { get; set; }
     public string? PictureUrl { get; set; }
@@ -130,4 +132,7 @@ public class InstagramComment
     public bool Done { get; set; }
     public string? Suggestion { get; set; }
     public DateTime SeenAt { get; set; } = DateTime.UtcNow;
+    /// <summary>Reguła „komentarz → wiadomość”, która obsłużyła komentarz, i kiedy wysłano prywatną odpowiedź.</summary>
+    public int? RuleId { get; set; }
+    public DateTime? PrivateReplyAt { get; set; }
 }

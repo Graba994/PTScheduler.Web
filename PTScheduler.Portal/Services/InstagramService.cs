@@ -1119,7 +1119,7 @@ public class InstagramService(
 /// </summary>
 public class InstagramBackgroundService(IServiceScopeFactory scopes, ILogger<InstagramBackgroundService> logger) : BackgroundService
 {
-    private DateTime _comments = DateTime.MinValue, _sync = DateTime.MinValue;
+    private DateTime _comments = DateTime.MinValue, _sync = DateTime.MinValue, _dm = DateTime.MinValue;
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -1138,7 +1138,9 @@ public class InstagramBackgroundService(IServiceScopeFactory scopes, ILogger<Ins
                     await ig.PublishDueAsync(ct);
                     var now = DateTime.UtcNow;
                     if (hasIg && now - _sync > TimeSpan.FromHours(3)) { _sync = now; await ig.SyncAsync(ct); }
-                    if (now - _comments > TimeSpan.FromMinutes(15)) { _comments = now; await ig.SyncCommentsAsync(ct); }
+                    var dm = scope.ServiceProvider.GetRequiredService<PTScheduler.Portal.Services.Social.DmService>();
+                    if (now - _comments > TimeSpan.FromMinutes(15)) { _comments = now; await ig.SyncCommentsAsync(ct); await dm.ApplyRulesAsync(ct); }
+                    if (now - _dm > TimeSpan.FromMinutes(5)) { _dm = now; await dm.SyncAsync(ct); }
                     await DailyAsync(scope.ServiceProvider, ig, ct);
                     await scope.ServiceProvider.GetRequiredService<PTScheduler.Portal.Services.Social.SocialReportService>().SendIfDueAsync(ct);
                 }
@@ -1159,5 +1161,6 @@ public class InstagramBackgroundService(IServiceScopeFactory scopes, ILogger<Ins
         await ig.RefreshTokenIfNeededAsync(ct);
         await sp.GetRequiredService<PTScheduler.Portal.Services.Social.SocialService>().RefreshTokensAsync(ct);
         await ig.RunAutopilotAsync(ct: ct);
+        await sp.GetRequiredService<PTScheduler.Portal.Services.Social.DmService>().CleanupAsync(ct);
     }
 }

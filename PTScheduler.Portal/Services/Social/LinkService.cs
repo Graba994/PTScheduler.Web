@@ -22,7 +22,7 @@ public partial class LinkService(IDbContextFactory<PortalDbContext> dbFactory, I
         ("instagram", "Instagram", "bi-instagram"), ("facebook", "Facebook", "bi-facebook"), ("threads", "Threads", "bi-threads"),
         ("tiktok", "TikTok", "bi-tiktok"), ("youtube", "YouTube", "bi-youtube"), ("linkedin", "LinkedIn", "bi-linkedin"),
         ("x", "X", "bi-twitter-x"), ("pinterest", "Pinterest", "bi-pinterest"), ("bio", "Link w bio", "bi-link-45deg"),
-        ("reklama", "Reklama", "bi-megaphone"), ("inne", "Inne", "bi-signpost")
+        ("dm", "Wiadomości prywatne", "bi-chat-heart"), ("reklama", "Reklama", "bi-megaphone"), ("inne", "Inne", "bi-signpost")
     ];
 
     public static readonly (string Path, string Label)[] Targets =
